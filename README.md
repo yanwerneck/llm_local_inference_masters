@@ -67,7 +67,7 @@ hf download arthuravianna/Qwen2.5-14B-Instruct-Q8_0.gguf \
   --revision main \
   --local-dir /workspace/models
 hf download Qwen/Qwen2.5-14B-Instruct \
-  --include 'config.json' 'tokenizer*' 'special_tokens_map.json' 'chat_template.jinja' \
+  config.json tokenizer.json tokenizer_config.json merges.txt vocab.json \
   --revision main \
   --local-dir /workspace/models/Qwen2.5-14B-tokenizer
 ls -lh /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf
@@ -75,7 +75,7 @@ sha256sum /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf
 python -c 'import json; print("tokenizer model_type:", json.load(open("/workspace/models/Qwen2.5-14B-tokenizer/config.json"))["model_type"])'
 ```
 
-`huggingface_hub` instala o comando `hf`; o primeiro `hf download` baixa somente o arquivo GGUF para o volume persistente, e o segundo baixa os arquivos de tokenizer **e o `config.json` mínimo exigido pelo vLLM**, incluindo `model_type: qwen2`. Nenhum servidor deve ser iniciado durante essa etapa. `ls` confirma o tamanho no SSD, `sha256sum` produz a impressão digital que deve ser registrada em `configs/*.json` e o último comando confirma que o vLLM conseguirá reconhecer a arquitetura do tokenizer.
+`huggingface_hub` instala o comando `hf`; o primeiro `hf download` baixa somente o arquivo GGUF para o volume persistente, e o segundo lista explicitamente os arquivos do tokenizer e o `config.json` exigido pelo vLLM, incluindo `model_type: qwen2`. Não use `--include` neste comando: a versão da CLI instalada no Pod pode tratá-lo como seleção de nomes e ignorar o filtro. Nenhum servidor deve ser iniciado durante essa etapa. `ls` confirma o tamanho no SSD, `sha256sum` produz a impressão digital que deve ser registrada em `configs/*.json` e o último comando confirma que o vLLM conseguirá reconhecer a arquitetura do tokenizer.
 
 Não é necessário executar `prepare-tokenizer` nem preencher nenhum `SHA_REGISTRADO_NO_SOURCE_JSON`: o comando `hf download` acima já colocou o tokenizer no caminho usado pelos três runtimes. O hash que precisamos controlar nesta rodada é o SHA-256 do GGUF. Compartilhe **a mesma pasta** de tokenizer entre os integrantes. O servidor também aplica seu chat template; compare os templates e as contagens reais retornadas, não só os nomes dos modelos.
 
