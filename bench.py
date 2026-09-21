@@ -16,11 +16,12 @@ import re
 import subprocess
 import sys
 import threading
+import time
 from datetime import datetime, timezone
 from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parent
-VERSION = "0.3.0"
+VERSION = "0.4.0"
 GUIDELLM_VERSION = "0.7.4"
 WORKLOADS = {"short": 256, "medium": 2048, "long": 8192}
 OUTPUT_TOKENS = 128
@@ -157,7 +158,7 @@ def scenario_config(cfg, name, count, seed, secret, timeout):
 
 
 class Monitor:
-    """Amostragem best effort; CSV local, não um profiler de largura de banda."""
+    """Amostragem contínua e marcação de fases; não é um profiler PCIe."""
     def __init__(self, output, cfg=None, secret="", collect_kv=False):
         self.output = Path(output)
         self.stop_event = threading.Event()
@@ -165,8 +166,20 @@ class Monitor:
         self.phase = "setup"
         self.cfg, self.secret, self.collect_kv = cfg, secret, collect_kv
         self.kv_thread = None
+        self.started_monotonic = None
+
+    def set_phase(self, phase, event=None):
+        self.phase = phase
+        if hasattr(self, "events_handle"):
+            writer = csv.writer(self.events_handle)
+            writer.writerow([datetime.now(timezone.utc).isoformat(), time.monotonic(), phase, event or "phase_change"])
+            self.events_handle.flush()
 
     def start(self):
+        self.started_monotonic = time.monotonic()
+        self.events_handle = (self.output / "events.csv").open("w", newline="", encoding="utf-8")
+        csv.writer(self.events_handle).writerow(["utc", "monotonic_s", "phase", "event"])
+        self.set_phase(self.phase, "monitor_started")
         self.thread = threading.Thread(target=self.loop, daemon=True)
         self.thread.start()
         if self.collect_kv:
@@ -199,19 +212,39 @@ class Monitor:
                 self.stop_event.wait(1)
 
     def loop(self):
-        with (self.output / "gpu.csv").open("w", newline="", encoding="utf-8") as handle:
+        try:
+            import psutil
+        except ImportError:
+            psutil = None
+        with (self.output / "gpu.csv").open("w", newline="", encoding="utf-8") as handle, \
+             (self.output / "system.csv").open("w", newline="", encoding="utf-8") as system_handle:
             writer = csv.writer(handle)
             writer.writerow(["utc", "phase", "index", "name", "used_mib", "total_mib", "gpu_util_pct", "temperature_c", "power_w"])
+            system_writer = csv.writer(system_handle)
+            system_writer.writerow(["utc", "phase", "cpu_util_pct", "ram_used_mib", "ram_available_mib", "ram_total_mib",
+                                    "load1", "root_disk_used_mib", "root_disk_free_mib", "disk_read_bytes", "disk_write_bytes"])
+            if psutil:
+                psutil.cpu_percent(interval=None)
             while not self.stop_event.is_set():
                 phase = self.phase
+                utc = datetime.now(timezone.utc).isoformat()
                 result = capture(["nvidia-smi", "--query-gpu=index,name,memory.used,memory.total,utilization.gpu,temperature.gpu,power.draw",
                                   "--format=csv,noheader,nounits"])
                 if result.get("returncode") != 0:
                     write_json(self.output / "gpu-unavailable.json", result)
-                    return
-                for row in csv.reader(result["stdout"].splitlines(), skipinitialspace=True):
-                    writer.writerow([datetime.now(timezone.utc).isoformat(), phase, *row])
+                else:
+                    for row in csv.reader(result["stdout"].splitlines(), skipinitialspace=True):
+                        writer.writerow([utc, phase, *row])
                 handle.flush()
+                if psutil:
+                    vm = psutil.virtual_memory()
+                    du = psutil.disk_usage(str(self.output.anchor or "/"))
+                    io = psutil.disk_io_counters()
+                    system_writer.writerow([utc, phase, psutil.cpu_percent(interval=None), vm.used / 1048576,
+                                             vm.available / 1048576, vm.total / 1048576, os.getloadavg()[0],
+                                             du.used / 1048576, du.free / 1048576,
+                                             getattr(io, "read_bytes", None), getattr(io, "write_bytes", None)])
+                    system_handle.flush()
                 self.stop_event.wait(1)
 
     def stop(self):
@@ -220,6 +253,52 @@ class Monitor:
             self.thread.join(timeout=17)
         if self.kv_thread:
             self.kv_thread.join(timeout=3)
+        self.set_phase("stopped", "monitor_stopped")
+        if hasattr(self, "events_handle"):
+            self.events_handle.close()
+        self.write_telemetry_summary()
+
+    def write_telemetry_summary(self):
+        """Agrega telemetria por fase para relacionar picos com eventos do benchmark."""
+        def read_rows(name):
+            path = self.output / name
+            if not path.exists():
+                return []
+            with path.open() as handle:
+                return list(csv.DictReader(handle))
+        sources = {"gpu": read_rows("gpu.csv"), "system": read_rows("system.csv"), "kv": read_rows("kv-cache.csv")}
+        phases = sorted({r.get("phase") for rows in sources.values() for r in rows if r.get("phase")})
+        output = {"definition": "Amostras observadas por fase; não são bytes nem tempos de transferência PCIe.", "phases": {}}
+        for phase in phases:
+            entry = {"gpu_samples": 0, "system_samples": 0, "kv_samples": 0}
+            grows = [r for r in sources["gpu"] if r.get("phase") == phase]
+            for key in ("used_mib", "gpu_util_pct", "temperature_c", "power_w"):
+                vals = []
+                for r in grows:
+                    try: vals.append(float(r[key]))
+                    except (ValueError, TypeError, KeyError): pass
+                entry[f"gpu_{key}_mean"] = sum(vals) / len(vals) if vals else None
+                entry[f"gpu_{key}_max"] = max(vals) if vals else None
+            entry["gpu_samples"] = len(grows)
+            srows = [r for r in sources["system"] if r.get("phase") == phase]
+            for key in ("cpu_util_pct", "ram_used_mib", "ram_available_mib", "root_disk_used_mib", "root_disk_free_mib"):
+                vals = []
+                for r in srows:
+                    try: vals.append(float(r[key]))
+                    except (ValueError, TypeError, KeyError): pass
+                entry[f"{key}_mean"] = sum(vals) / len(vals) if vals else None
+                entry[f"{key}_max"] = max(vals) if vals else None
+            entry["system_samples"] = len(srows)
+            krows = [r for r in sources["kv"] if r.get("phase") == phase]
+            vals = []
+            for r in krows:
+                try: vals.append(float(r["fraction"]) * 100)
+                except (ValueError, TypeError, KeyError): pass
+            entry["kv_occupancy_pct_mean"] = sum(vals) / len(vals) if vals else None
+            entry["kv_occupancy_pct_max"] = max(vals) if vals else None
+            entry["kv_samples"] = len(vals)
+            output["phases"][phase] = entry
+        write_json(self.output / "telemetry-summary.json", output)
 
 
 def percentile(values, q):
@@ -261,6 +340,19 @@ def summarize(report):
         result[label + "_p50"] = percentile(vals, .5)
         result[label + "_p95"] = percentile(vals, .95)
         result[label + "_p99"] = percentile(vals, .99)
+    # Nomes canônicos para a comparação entre runtimes. Os campos históricos
+    # acima permanecem para compatibilidade com relatórios já gerados.
+    ttft = [r.get("time_to_first_token_ms") for r in good]
+    tokens_s = [r.get("decode_tokens_s") for r in good]
+    result["time_to_first_token_milliseconds_sample_count"] = sum(v is not None for v in ttft)
+    result["tokens_per_second_sample_count"] = sum(v is not None for v in tokens_s)
+    for suffix, q in (("p50", .50), ("p95", .95), ("p99", .99)):
+        result[f"time_to_first_token_milliseconds_{suffix}"] = percentile(ttft, q)
+        result[f"tokens_per_second_{suffix}"] = percentile(tokens_s, q)
+    result["metric_definitions"] = {
+        "Time To First Token": "milissegundos entre o envio da requisição e o primeiro token/conteúdo observado; há um valor por requisição.",
+        "Tokens/s": "tokens de saída por segundo durante o decode, calculado por requisição a partir do intervalo entre tokens; não inclui TTFT.",
+    }
     # O hash exclui aliases do modelo e chaves: apenas carga de entrada e limite de saída.
     bodies = []
     for row in good:
@@ -334,8 +426,9 @@ def run(args):
                     "scenarios": args.scenarios, "seed": args.seed, "profile": "synchronous",
                     "model_availability": availability,
                     "guidellm_compat": "0.7.4 bounded drain of real late completion updates (5s); no request retry",
-                    "telemetry": {"gpu_source": "local nvidia-smi", "kv_metrics_requested": args.collect_kv_metrics,
-                                  "sampling": "approximately 1 Hz; not per-token"},
+                    "telemetry": {"gpu_source": "local nvidia-smi", "system_source": "psutil host CPU/RAM/disk counters",
+                                  "event_source": "events.csv phase markers", "kv_metrics_requested": args.collect_kv_metrics,
+                                  "sampling": "approximately 1 Hz; not per-token; PCIe copy time is not directly measured"},
                     "python": sys.version, "platform": platform.platform(),
                     "git": capture(["git", "rev-parse", "HEAD"]), "status": "running"}
         write_json(output / "manifest.json", redact(manifest, secret))
@@ -352,13 +445,13 @@ def run(args):
             if args.launch:
                 launch = Launch(cfg, args.launch, output)
                 lifecycle["argv"] = redact(launch.argv, secret)
-                monitor.phase = "process_startup"
+                monitor.set_phase("process_startup")
                 origin = launch.start()
                 lifecycle["pid"] = launch.process.pid
             lifecycle_report(output, redact(lifecycle, secret))
             lifecycle["readiness"] = wait_models(cfg, secret, args.startup_timeout, launch)
             lifecycle_report(output, redact(lifecycle, secret))
-            monitor.phase = "first_request"
+            monitor.set_phase("first_request")
             print("Primeiro POST: medição da primeira resposta (nenhuma geração prévia enviada pelo cliente).", flush=True)
             lifecycle["first_request"] = timed_request(cfg, secret, args.timeout, prompt,
                                                        output / "first-request.json", origin)
@@ -376,7 +469,7 @@ def run(args):
                         if phase == "warmup":
                             seed += 1_000_000
                         prefix = f"r{rep+1}-{name}-{phase}"
-                        monitor.phase = prefix
+                        monitor.set_phase(prefix)
                         config = scenario_config(cfg, name, n, seed, secret, args.timeout)
                         write_json(output / f"{prefix}-config.json", redact(config, secret))
                         print(f"{prefix}: {n} requisições, uma por vez", flush=True)
@@ -394,7 +487,7 @@ def run(args):
                         write_summary(output, rows)
                         if summary["successful_request_count"] != n or summary["errored_request_count"] or summary["incomplete_request_count"]:
                             raise RuntimeError(f"{prefix}: requisições falharam ou execução incompleta. Veja o JSON; não compare como sucesso.")
-            monitor.phase = "warm_reference"
+            monitor.set_phase("warm_reference")
             lifecycle["warm_reference"] = timed_request(cfg, secret, args.timeout, prompt,
                                                          output / "warm-reference.json")
             manifest["status"] = lifecycle["status"] = "complete"
@@ -409,7 +502,7 @@ def run(args):
                 if (output / filename).exists():
                     lifecycle[key] = json.loads((output / filename).read_text(encoding="utf-8"))
             if launch is not None:
-                monitor.phase = "server_shutdown"
+                monitor.set_phase("server_shutdown")
                 try:
                     launch.close()
                     lifecycle["server_cleanup"] = "stopped owned process group only"
@@ -469,8 +562,8 @@ def main():
     cmd.add_argument("--collect-kv-metrics", action="store_true", help="Amostra /metrics do vLLM (~1 Hz); ocupação do pool KV, não bytes.")
     cmd.add_argument("--kv-bytes-per-token", type=positive, help="Opcional: bytes de KV lógico por token, calculados para arquitetura/dtype reais. Estimativa, não VRAM medida.")
     cmd.add_argument("--input-tokens", nargs="+", type=positive, help="Substitui --scenarios por uma grade de comprimentos sintéticos, ex.: 256 512 1024 2048 3072.")
-    cmd.add_argument("--scenarios", nargs="+", choices=list(WORKLOADS), default=["short", "medium"])
-    cmd.add_argument("--requests", type=positive, default=30)
+    cmd.add_argument("--scenarios", nargs="+", choices=list(WORKLOADS), default=["short", "medium", "long"])
+    cmd.add_argument("--requests", type=positive, default=50, help="Requisições de medição por cenário e repetição; 50×3 dá 150 sucessos para percentis.")
     cmd.add_argument("--repetitions", type=positive, default=3)
     cmd.add_argument("--warmup", type=positive, default=3)
     cmd.add_argument("--seed", type=positive, default=42)

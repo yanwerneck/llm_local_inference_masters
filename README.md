@@ -14,9 +14,9 @@ Repositório `yanwerneck/llm_local_inference_masters`: código do benchmark e ma
 
 Os guias anteriores estão em `materiais/`, com seus fontes e scripts de geração. Suas instruções de instalação referem-se aos ambientes do servidor e do chat; **não misture essas dependências com o venv do benchmark**. Os HTMLs são arquivos estáticos: baixe/clonar e abra localmente; visualizar um arquivo no GitHub não ativa GitHub Pages.
 
-Benchmark de latência HTTP com streaming para **vLLM, Ollama e llama-server**, usando **GuideLLM 0.7.4** nos blocos sequenciais e um observador HTTP simples para a inicialização e a primeira resposta. A versão 0.3 cobre início, aquecimento, TTFT, tokens/s, faixas de contexto/KV e GPU no relatório.
+Benchmark de latência HTTP com streaming para **vLLM, Ollama e llama-server**, usando **GuideLLM 0.7.4** nos blocos sequenciais e um observador HTTP simples para a inicialização e a primeira resposta. A versão 0.4 cobre início, aquecimento, **Time To First Token**, **Tokens/s**, short/medium/long, varredura de KV em passos de 1024, telemetria contínua de GPU/CPU/RAM/SSD e correlação por fase.
 
-**Na versão 0.3, pesos já disponíveis no SSD são pré-requisito; download não faz parte do benchmark.** Não instala o runtime. Com `--launch`, inicia o comando fornecido em modo Hugging Face offline e encerra somente esse processo ao final. Não faz teste de concorrência, qualidade ou perplexidade. Veja a [explicação detalhada do código](docs/codigo-explicado.md).
+**Na versão 0.4, pesos já disponíveis no SSD são pré-requisito; download não faz parte do benchmark.** Não instala o runtime. Com `--launch`, inicia o comando fornecido em modo Hugging Face offline e encerra somente esse processo ao final. Não faz teste de concorrência, qualidade ou perplexidade. Veja a [explicação detalhada do código](docs/codigo-explicado.md).
 
 Todo `run` exige `--local-model-path`: pasta com pesos HF, arquivo GGUF ou blob local de pesos do Ollama. Verificamos presença/tamanho e shards declarados antes do relógio, sem ler integralmente os pesos. Isso não prova o SSD físico, integridade ou vínculo com um servidor preexistente. Configure o runtime para o mesmo artefato local. Não use wrappers que baixem arquivos: variáveis offline de HF não são um firewall universal. Execução com download é inválida; não subtraímos tempos de internet.
 
@@ -655,6 +655,9 @@ Cada execução cria `results/DATA_UTC/`, sem sobrescrever execuções anteriore
 | `context-summary.json` | Velocidades por faixa real de entrada; MiB lógicos estimados quando configurados. |
 | `gpu-summary.json` | Memória, utilização, temperatura e potência por GPU/fase. |
 | `kv-cache.csv` | Ocupação do pool KV via `/metrics`, se solicitada. |
+| `system.csv` | CPU, RAM, espaço e contadores host-wide de I/O amostrados durante a execução. |
+| `events.csv` | Mudanças de fase com timestamp para correlacionar telemetria e ocorrências. |
+| `telemetry-summary.json` | Médias/máximos de GPU, CPU, RAM e KV por fase. |
 | `summary.csv` / `summary.json` | Uma linha por fase, cenário e repetição; filtre `phase` na análise. |
 | `r1-short-measure.json` | Relatório bruto GuideLLM, requisições, tempos, textos e contagens. |
 | `*-requests.csv` | Uma linha por requisição, incluindo status, para análise no R/Python. |
@@ -682,6 +685,25 @@ O primeiro testa validação, estatísticas, lançamento seguro e cronometria in
 
 - [GuideLLM: código e releases](https://github.com/vllm-project/guidellm) — ferramenta aberta do ecossistema vLLM, não uma certificação ou padrão universal de benchmark.
 - [Perfil synchronous e execução](https://vllm-project.github.io/guidellm/0.7.0/getting-started/benchmark/) — explicitamos o perfil; o default sweep não é adequado a este trabalho.
+
+## 8. Protocolo atual: métricas canônicas, telemetria e KV sweep
+
+O alvo formal é `make bench-vllm` (ou o mesmo comando trocando os três perfis de runtime). Ele executa automaticamente **short, medium e long**, com 50 requisições de medição por cenário, 3 repetições e 3 aquecimentos por cenário. Isso produz até 150 sucessos por combinação, quantidade suficiente para que p99 deixe de ser apenas uma fotografia de três observações. Uma requisição por vez continua sendo intencional: este trabalho não mede concorrência.
+
+As duas métricas que devem aparecer na comparação são:
+
+- **Time To First Token (ms)**: um valor por requisição, do envio do POST até o primeiro conteúdo/token observado. O `p50/p95/p99` é a distribuição desses valores entre requisições repetidas; não significa que uma única requisição tenha três TTFTs.
+- **Tokens/s**: velocidade durante o decode, calculada por requisição a partir dos tokens de saída e dos intervalos entre o primeiro e o último token. Não inclui TTFT. `effective_tokens_s` continua disponível como métrica complementar que inclui toda a duração.
+
+Os aliases estáveis no `summary.json` são `time_to_first_token_milliseconds_p50/p95/p99` e `tokens_per_second_p50/p95/p99`; os nomes históricos longos permanecem para compatibilidade. O HTML mostra os nomes legíveis.
+
+Durante toda a execução, `gpu.csv` e `system.csv` são amostrados aproximadamente uma vez por segundo. O primeiro contém memória usada/total, utilização, temperatura e potência de cada GPU visível. O segundo contém CPU, RAM, espaço usado/livre no filesystem do resultado e contadores host-wide de leitura/escrita de disco. `events.csv` marca `process_startup`, `first_request`, cada warmup/measure, `warm_reference` e `server_shutdown`; `telemetry-summary.json` agrega médias e máximos por fase para relacionar picos a ocorrências. A coleta é observacional e não atribui memória a um processo específico.
+
+Não há como inferir o **tempo exato de uma transferência CPU↔GPU ou RAM↔VRAM** apenas com `nvidia-smi` e contadores do sistema. O benchmark registra os intervalos de fases, os contadores de I/O e os sinais de PCIe disponíveis no host; para bytes e tempos por cópia seria necessária instrumentação CUDA/Nsight. Portanto não chamamos RAM usada ou VRAM usada de “tempo de transferência”.
+
+Para testar o crescimento de KV, use `make kv-sweep`. O script reinicia o runtime em 1024, 2048, 3072, … tokens, ajusta `--max-model-len` para cada ponto e para na primeira falha de inicialização/ memória, preservando o log e o diretório daquele ponto. Cada ponto recebe as mesmas 50×3 requisições, coleta `/metrics` do vLLM e salva `sweep-manifest.json`. Isso mede a capacidade operacional da configuração; não transforma o percentual do pool KV em bytes físicos.
+
+Arquivos novos por execução: `events.csv`, `system.csv` e `telemetry-summary.json`. Para instalar o coletor no venv do benchmark, rode `pip install -r requirements.txt` (ele adiciona `psutil`); não instale esse arquivo no venv do vLLM.
 - [Backends HTTP](https://vllm-project.github.io/guidellm/0.7.0/guides/backends/) e [datasets](https://vllm-project.github.io/guidellm/0.7.0/guides/datasets/).
 - [Compatibilidade OpenAI do Ollama](https://docs.ollama.com/api/openai-compatibility).
 - [Código das métricas, versão 0.7.4](https://github.com/vllm-project/guidellm/blob/v0.7.4/src/guidellm/schemas/request_stats.py).

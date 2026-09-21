@@ -56,13 +56,14 @@
 </li>
 <li><a href="#9-como-executar-e-interpretar-com-seguranca">9. Como executar e interpretar com segurança</a></li>
 <li><a href="#10-testes-rastreabilidade-e-limites">10. Testes, rastreabilidade e limites</a></li>
-<li><a href="#11-referencias-e-fontes-numerados">11. Referências e fontes numerados</a></li>
+<li><a href="#11-mudancas-da-versao-04">11. Mudanças da versão 0.4</a></li>
+<li><a href="#12-referencias-e-fontes-numerados">12. Referências e fontes numerados</a></li>
 </ul>
 </li>
 </ul>
 </div>
 <h1 id="o-benchmark-por-dentro-guia-detalhado-do-codigo">O benchmark por dentro: guia detalhado do código</h1>
-<p>Este documento explica a versão 0.3 para quem conhece estatística, mas não necessariamente programação de servidores ou GPUs. Leia junto com <a href="codigo-fontes.md">os fontes numerados linha a linha</a>. As explicações abaixo seguem funções e blocos lógicos; o apêndice contém <strong>cada linha dos módulos centrais</strong>, sem ocultar implementações. Não é uma promessa de explicar uma operação de GPU que o cliente não observa.</p>
+<p>Este documento explica a versão 0.4 para quem conhece estatística, mas não necessariamente programação de servidores ou GPUs. Leia junto com <a href="codigo-fontes.md">os fontes numerados linha a linha</a>. As explicações abaixo seguem funções e blocos lógicos; o apêndice contém <strong>cada linha dos módulos centrais</strong>, sem ocultar implementações. Não é uma promessa de explicar uma operação de GPU que o cliente não observa.</p>
 <h2 id="1-primeiro-o-que-este-programa-e-e-o-que-nao-e">1. Primeiro: o que este programa é — e o que não é</h2>
 <p>É um <strong>cliente de medição</strong>: envia mensagens para um servidor de inferência, observa respostas e salva dados. Não implementa a rede neural, não quantiza pesos e não executa as multiplicações do Transformer. Essas tarefas pertencem ao runtime, por exemplo vLLM.</p>
 <p>O GuideLLM controla as requisições sintéticas sequenciais. Nosso código controla a partida opcional do servidor, primeira resposta, referência final, telemetria e apresentação. Há duas implementações de medição HTTP: a própria nas requisições inicial/final e a do GuideLLM nos blocos. Não trate seus números como cronômetros internos idênticos; a comparação inicial versus final usa o mesmo cliente próprio.</p>
@@ -324,7 +325,11 @@ tokens/s efetivos = N / duração_total_em_segundos
 <p><code>tests/test_bench.py</code> verifica validações, percentis, taxas, limites de faixas, estimativas, telemetria e escape HTML. <code>tests/test_lifecycle.py</code> verifica porta ocupada, saída do subprocesso, readiness e primeiro conteúdo, sem GPU. <code>tests/integration_mock.py</code> usa GuideLLM real com servidor SSE simulado para testar caminho completo, ausência de concorrência, falhas e encerramento.</p>
 <p>Testes simulados não demonstram suporte do modelo na RTX3090. O teste local Metal real é outra evidência, com outro backend e quantização. Não confunda ambos. Resultados brutos devem permanecer fora do Git até revisão de privacidade.</p>
 <p>O código não mede qualidade semântica, energia total, FLOPs, banda física, tráfego PCIe ou uso de memória por processo. Não atribui causalidade de gargalo automaticamente. Esses limites são parte da validade do instrumento, não informações a preencher por estimativa sem evidência.</p>
-<h2 id="11-referencias-e-fontes-numerados">11. Referências e fontes numerados</h2>
+<h2 id="11-mudancas-da-versao-04">11. Mudanças da versão 0.4</h2>
+<p><code>Monitor</code> agora mantém <code>events.csv</code>, amostra <code>gpu.csv</code> e <code>system.csv</code> em paralelo e escreve <code>telemetry-summary.json</code> agrupado por fase. CPU, RAM e I/O de disco são sinais do host; VRAM e utilização são leituras do <code>nvidia-smi</code>. Essa combinação permite observar que um pico ocorreu durante startup, primeiro POST ou medida, mas não é um cronômetro de cópia PCIe. Tempo por transferência exige Nsight/CUDA.</p>
+<p><code>summarize</code> mantém os campos históricos e acrescenta os aliases canônicos <code>time_to_first_token_milliseconds_*</code> e <code>tokens_per_second_*</code>. TTFT tem um valor por requisição; os percentis resumem a distribuição de requisições. Tokens/s é decode e não inclui TTFT. O CLI passa a usar short/medium/long por padrão e 50 requisições × 3 repetições fora do smoke.</p>
+<p><code>scripts/run_kv_sweep.py</code> reinicia o servidor a cada ponto de 1024 tokens, altera o limite de contexto e guarda cada execução até a primeira falha. <code>make bench-vllm</code> executa a bateria formal; <code>make kv-sweep</code> executa a capacidade crescente de contexto/KV.</p>
+<h2 id="12-referencias-e-fontes-numerados">12. Referências e fontes numerados</h2>
 <ul>
 <li><a href="https://github.com/vllm-project/guidellm/blob/v0.7.4/src/guidellm/schemas/request_stats.py">GuideLLM 0.7.4: métricas por requisição</a>.</li>
 <li><a href="https://docs.vllm.ai/en/v0.12.0/design/metrics/">vLLM: métricas de KV e serving</a>.</li>

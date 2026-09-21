@@ -232,6 +232,14 @@ Uma falha de inicialização, readiness, stream ou contagem é resultado experim
 
 Esse benchmark mede desempenho, **não qualidade**. Uma pequena bateria fixa de perguntas reais pode funcionar como checagem de regressão em outro relatório, sem misturar sua nota com as métricas de latência.
 
+## Atualização 0.4: métricas e telemetria operacional
+
+O protocolo formal usa `short`, `medium` e `long` automaticamente, com 50 requisições, 3 repetições e 3 aquecimentos por cenário. As métricas principais têm nomes canônicos: **Time To First Token (ms)**, um valor por requisição do POST ao primeiro token, e **Tokens/s**, a taxa de decode sem o TTFT. Percentis são calculados sobre requisições bem-sucedidas; p99 é uma cauda de uma distribuição de requisições, não três TTFTs da mesma chamada.
+
+O monitor escreve `gpu.csv`, `system.csv` e `events.csv` durante toda a vida do processo e gera `telemetry-summary.json` agrupado pelas fases. CPU/RAM/SSD são observações do host; VRAM/utilização/temperatura/potência vêm do `nvidia-smi`. Esses sinais relacionam mudanças a startup, primeiro POST, aquecimento, medida e encerramento, mas não medem o tempo de cada cópia PCIe: para isso, use Nsight/CUDA instrumentation.
+
+`make kv-sweep` reinicia o runtime para 1024, 2048, 3072, … tokens, ajusta o limite de contexto e executa a mesma bateria em cada ponto até a primeira falha. O percentual do pool KV exposto pelo vLLM e a VRAM usada são mantidos como séries distintas; nenhum deles é apresentado como “bytes de KV” sem coeficiente arquitetural verificado.
+
 ## Próximo passo
 
 Volte ao [README](../README.md) para instalar e rodar. Faça primeiro o smoke em cada servidor. Os testes automatizados locais usam um servidor simulado: validam o instrumento, não antecipam o resultado na RTX 3090.

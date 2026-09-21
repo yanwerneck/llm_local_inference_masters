@@ -141,10 +141,10 @@ def render(output, rows):
         ("expected", "Requisições previstas"), ("successful_request_count", "Requisições bem-sucedidas"),
         ("errored_request_count", "Requisições com erro"), ("incomplete_request_count", "Requisições incompletas"),
         ("missing_request_count", "Requisições ausentes do relatório bruto"),
-        ("request_first_token_latency_milliseconds_p50", "Latência da requisição até primeiro token p50 (ms)"),
-        ("request_first_token_latency_milliseconds_p95", "Latência da requisição até primeiro token p95 (ms)"),
-        ("request_first_token_latency_milliseconds_p99", "Latência da requisição até primeiro token p99 (ms)"),
-        ("decode_generation_tokens_per_second_p50", "Velocidade de geração p50 (tokens/s)"),
+        ("time_to_first_token_milliseconds_p50", "Time To First Token p50 (ms)"),
+        ("time_to_first_token_milliseconds_p95", "Time To First Token p95 (ms)"),
+        ("time_to_first_token_milliseconds_p99", "Time To First Token p99 (ms)"),
+        ("tokens_per_second_p50", "Tokens/s p50"),
         ("effective_output_tokens_per_second_p50", "Velocidade efetiva de saída p50 (tokens/s)"),
         ("request_latency_seconds_p50", "Latência total p50 (s)"),
         ("input_prompt_token_count_p50", "Tokens de entrada p50"),
@@ -182,7 +182,7 @@ def render(output, rows):
 <h2>2. Aquecimento e operação posterior</h2><p>Percentis entre requisições bem-sucedidas. Warmup e measure separados; p95 com menos de 100 sucessos é exploratório. Geração indisponível com menos de dois tokens ou intervalo não positivo.</p>{metrics}
 <h2>3. Tokens/s por faixa de contexto — proxy da carga de KV</h2><p>Faixa definida pela entrada real, incluindo template, antes do decode. O contexto cresce durante a saída; mostramos também seu comprimento lógico final. Esta é uma comparação de velocidades médias de respostas iniciadas em cada faixa, não uma medição token a token dentro de faixas de ocupação física do cache.</p>{by_context}
 <p>Para atenção completa, mantendo modelo, dtype de KV e uma sequência: KV lógico ≈ 2 × camadas × cabeças KV × dimensão da cabeça × bytes por elemento × tokens. Pesos 4/8 bits não determinam o dtype do KV. Blocos, reserva, prefix caching e sliding window impedem tratar essa fórmula como medição de VRAM. MiB estimados só aparecem com --kv-bytes-per-token informado e verificado pelo operador; caso contrário, ficam indisponíveis.</p>
-<h2>4. GPU por fase</h2><p>Host do cliente; execute no mesmo pod do servidor. Aproximadamente 1 amostra/s, todas as GPUs visíveis, sem atribuição por processo. Máximos amostrados podem perder picos. N/A é ausência de dado, não zero.</p>{hardware}
+<h2>4. GPU, CPU, RAM e SSD por fase</h2><p>O monitor amostra aproximadamente 1 vez/s e relaciona cada amostra a eventos/fases. GPU vem do nvidia-smi; CPU, RAM e I/O de disco vêm do host. Máximos amostrados podem perder picos e não há atribuição por processo. N/A é ausência de dado, não zero. <a href="telemetry-summary.json">Resumo de telemetria</a> · <a href="events.csv">Eventos</a> · <a href="system.csv">CPU/RAM/SSD</a></p>{hardware}
 <h2>5. Ocupação real do pool KV — vLLM</h2><p>Coleta opcional de /metrics via --collect-kv-metrics. Percentual de blocos ocupados do pool, não percentual de VRAM nem bytes. Séries/engines separados. Amostragem e atualização do servidor podem perder transientes; não sincronizada por token.</p>{kv}
 <p><a href="summary.json">Resumo JSON</a> · <a href="context-summary.json">Faixas JSON</a> · <a href="gpu-summary.json">GPU JSON</a> · <a href="manifest.json">Manifesto</a></p></main></html>'''
     (output / "summary.html").write_text(page, encoding="utf-8")

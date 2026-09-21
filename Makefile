@@ -17,8 +17,13 @@ HF_UPLOAD_FILENAME ?= Qwen2.5-7B-Instruct-Q8_0.gguf
 GGUF_OUTPUT_DIR ?= /workspace/models/Qwen2.5-7B-Instruct-GGUF-Q8_0
 QUANTIZE_THREADS ?= $(shell nproc 2>/dev/null || echo 1)
 VLLM_MODEL_DIR ?= /workspace/models/Qwen2.5-7B-Instruct-GGUF-Q8_0
-VLLM_CONFIG ?= configs/vllm.json
-VLLM_LAUNCH ?= configs/launch-vllm.example.json
+VLLM_CONFIG ?= configs/vllm-7b-gguf.json
+VLLM_LAUNCH ?= configs/launch-vllm-7b-gguf.example.json
+BENCH_SCENARIOS ?= short medium long
+BENCH_REQUESTS ?= 50
+BENCH_REPETITIONS ?= 3
+BENCH_WARMUP ?= 3
+BENCH_STARTUP_TIMEOUT ?= 1800
 
 QUANTIZE_BIN := $(LLAMA_CPP_BUILD_DIR)/bin/llama-quantize
 QUANTIZE_SCRIPT := scripts/quantize_hf_to_gguf_q8_0.sh
@@ -26,7 +31,7 @@ GGUF_FILE := $(GGUF_OUTPUT_DIR)/Qwen2.5-7B-Instruct-original-Q8_0.gguf
 
 .PHONY: help check-tools clone-llama build-llama install-llama-python \
         download-source inspect-source quantize-q8 verify-gguf upload-hf \
-        smoke-vllm docs clean-info
+        smoke-vllm bench-vllm kv-sweep docs clean-info
 
 help:
 	@printf '%s\n' \
@@ -41,11 +46,14 @@ help:
 		'  make verify-gguf          confirma assinatura, tamanho e SHA-256' \
 		'  make upload-hf            publica somente o GGUF no Hugging Face' \
 		'  make smoke-vllm           executa smoke do benchmark com GGUF local' \
+		'  make bench-vllm            bateria formal: short/medium/long, 50x3, com telemetria' \
+		'  make kv-sweep              contexto/KV 1024 em 1024 até a primeira falha de memória' \
 		'  make docs                 regenera os HTMLs dos documentos' \
 		'' \
 		'Variáveis úteis:' \
 		'  LLAMA_CPP_DIR, HF_MODEL_DIR, GGUF_OUTPUT_DIR, QUANTIZE_THREADS' \
 		'  VLLM_MODEL_DIR, VLLM_CONFIG, VLLM_LAUNCH'
+
 
 check-tools:
 	@command -v $(PYTHON) >/dev/null || { echo 'Python ausente'; exit 1; }
@@ -104,6 +112,27 @@ smoke-vllm: verify-gguf
 		--local-model-path "$(VLLM_MODEL_DIR)" \
 		--launch "$(VLLM_LAUNCH)" \
 		--smoke --scenarios short --startup-timeout 1800
+
+bench-vllm: verify-gguf
+	HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_HUB_ENABLE_HF_TRANSFER=0 \
+		$(PYTHON) bench.py run \
+		--config "$(VLLM_CONFIG)" \
+		--local-model-path "$(VLLM_MODEL_DIR)" \
+		--launch "$(VLLM_LAUNCH)" \
+		--scenarios $(BENCH_SCENARIOS) \
+		--requests "$(BENCH_REQUESTS)" \
+		--repetitions "$(BENCH_REPETITIONS)" \
+		--warmup "$(BENCH_WARMUP)" \
+		--collect-kv-metrics \
+		--startup-timeout "$(BENCH_STARTUP_TIMEOUT)"
+
+kv-sweep: verify-gguf
+	HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_HUB_ENABLE_HF_TRANSFER=0 \
+		$(PYTHON) scripts/run_kv_sweep.py \
+		--config "$(VLLM_CONFIG)" --launch "$(VLLM_LAUNCH)" \
+		--local-model-path "$(VLLM_MODEL_DIR)" --python "$(PYTHON)" \
+		--requests "$(BENCH_REQUESTS)" --repetitions "$(BENCH_REPETITIONS)" \
+		--warmup "$(BENCH_WARMUP)" --startup-timeout "$(BENCH_STARTUP_TIMEOUT)"
 
 docs:
 	$(PYTHON) scripts/build_docs.py

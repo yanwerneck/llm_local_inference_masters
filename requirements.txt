@@ -5,3 +5,4 @@ transformers==5.17.0
 faker==40.39.0
 datasets==5.0.1
 markdown==3.8.2
+psutil==7.0.0

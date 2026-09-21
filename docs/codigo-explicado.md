@@ -1,6 +1,6 @@
 # O benchmark por dentro: guia detalhado do código
 
-Este documento explica a versão 0.3 para quem conhece estatística, mas não necessariamente programação de servidores ou GPUs. Leia junto com [os fontes numerados linha a linha](codigo-fontes.md). As explicações abaixo seguem funções e blocos lógicos; o apêndice contém **cada linha dos módulos centrais**, sem ocultar implementações. Não é uma promessa de explicar uma operação de GPU que o cliente não observa.
+Este documento explica a versão 0.4 para quem conhece estatística, mas não necessariamente programação de servidores ou GPUs. Leia junto com [os fontes numerados linha a linha](codigo-fontes.md). As explicações abaixo seguem funções e blocos lógicos; o apêndice contém **cada linha dos módulos centrais**, sem ocultar implementações. Não é uma promessa de explicar uma operação de GPU que o cliente não observa.
 
 ## 1. Primeiro: o que este programa é — e o que não é
 
@@ -308,7 +308,15 @@ Testes simulados não demonstram suporte do modelo na RTX3090. O teste local Met
 
 O código não mede qualidade semântica, energia total, FLOPs, banda física, tráfego PCIe ou uso de memória por processo. Não atribui causalidade de gargalo automaticamente. Esses limites são parte da validade do instrumento, não informações a preencher por estimativa sem evidência.
 
-## 11. Referências e fontes numerados
+## 11. Mudanças da versão 0.4
+
+`Monitor` agora mantém `events.csv`, amostra `gpu.csv` e `system.csv` em paralelo e escreve `telemetry-summary.json` agrupado por fase. CPU, RAM e I/O de disco são sinais do host; VRAM e utilização são leituras do `nvidia-smi`. Essa combinação permite observar que um pico ocorreu durante startup, primeiro POST ou medida, mas não é um cronômetro de cópia PCIe. Tempo por transferência exige Nsight/CUDA.
+
+`summarize` mantém os campos históricos e acrescenta os aliases canônicos `time_to_first_token_milliseconds_*` e `tokens_per_second_*`. TTFT tem um valor por requisição; os percentis resumem a distribuição de requisições. Tokens/s é decode e não inclui TTFT. O CLI passa a usar short/medium/long por padrão e 50 requisições × 3 repetições fora do smoke.
+
+`scripts/run_kv_sweep.py` reinicia o servidor a cada ponto de 1024 tokens, altera o limite de contexto e guarda cada execução até a primeira falha. `make bench-vllm` executa a bateria formal; `make kv-sweep` executa a capacidade crescente de contexto/KV.
+
+## 12. Referências e fontes numerados
 
 - [GuideLLM 0.7.4: métricas por requisição](https://github.com/vllm-project/guidellm/blob/v0.7.4/src/guidellm/schemas/request_stats.py).
 - [vLLM: métricas de KV e serving](https://docs.vllm.ai/en/v0.12.0/design/metrics/).
