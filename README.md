@@ -207,6 +207,16 @@ make quantize-q8
 make verify-gguf
 ```
 
+Com `HF_TOKEN` já exportado, publique apenas o GGUF final:
+
+```bash
+make upload-hf \
+  HF_REPO_ID=yanwerneck/Qwen2.5-7B-Instruct-GGUF-Q8_0 \
+  HF_UPLOAD_FILENAME=Qwen2.5-7B-Instruct-Q8_0.gguf
+```
+
+O alvo cria o repositório se necessário, valida a assinatura e o SHA-256 e envia somente o arquivo GGUF. Não publica ambientes, logs, resultados ou o GGUF F16 intermediário.
+
 Depois de validar o arquivo, aponte o perfil de benchmark para o diretório que contém o GGUF e rode:
 
 ```bash

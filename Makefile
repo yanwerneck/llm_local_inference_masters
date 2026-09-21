@@ -12,6 +12,8 @@ HF_MODEL_ID ?= Qwen/Qwen2.5-7B-Instruct
 HF_REVISION ?= main
 HF_MODEL_DIR ?= /workspace/models/Qwen2.5-7B-Instruct-original
 HF_HUB_ENABLE_HF_TRANSFER ?= 0
+HF_REPO_ID ?= yanwerneck/Qwen2.5-7B-Instruct-GGUF-Q8_0
+HF_UPLOAD_FILENAME ?= Qwen2.5-7B-Instruct-Q8_0.gguf
 GGUF_OUTPUT_DIR ?= /workspace/models/Qwen2.5-7B-Instruct-GGUF-Q8_0
 QUANTIZE_THREADS ?= $(shell nproc 2>/dev/null || echo 1)
 VLLM_MODEL_DIR ?= /workspace/models/Qwen2.5-7B-Instruct-GGUF-Q8_0
@@ -23,7 +25,7 @@ QUANTIZE_SCRIPT := scripts/quantize_hf_to_gguf_q8_0.sh
 GGUF_FILE := $(GGUF_OUTPUT_DIR)/Qwen2.5-7B-Instruct-original-Q8_0.gguf
 
 .PHONY: help check-tools clone-llama build-llama install-llama-python \
-        download-source inspect-source quantize-q8 verify-gguf \
+        download-source inspect-source quantize-q8 verify-gguf upload-hf \
         smoke-vllm docs clean-info
 
 help:
@@ -37,6 +39,7 @@ help:
 		'  make inspect-source       mostra formato/metadados da fonte' \
 		'  make quantize-q8          gera GGUF F16 e depois GGUF Q8_0' \
 		'  make verify-gguf          confirma assinatura, tamanho e SHA-256' \
+		'  make upload-hf            publica somente o GGUF no Hugging Face' \
 		'  make smoke-vllm           executa smoke do benchmark com GGUF local' \
 		'  make docs                 regenera os HTMLs dos documentos' \
 		'' \
@@ -85,6 +88,14 @@ verify-gguf:
 	head -c 4 "$(GGUF_FILE)" | od -An -tc
 	$(PYTHON) -c 'import sys; from pathlib import Path; p=Path(sys.argv[1]); data=p.read_bytes(); sys.exit("assinatura GGUF inválida") if data[:4] != b"GGUF" else print("assinatura GGUF válida")' "$(GGUF_FILE)"
 	sha256sum "$(GGUF_FILE)"
+
+upload-hf: verify-gguf
+	@test -n "$${HF_TOKEN:-}" || { echo 'HF_TOKEN não está definido; exporte-o sem colar o valor no repositório.' >&2; exit 1; }
+	HF_HUB_OFFLINE=0 TRANSFORMERS_OFFLINE=0 HF_HUB_ENABLE_HF_TRANSFER="$(HF_HUB_ENABLE_HF_TRANSFER)" \
+		$(HF) repo create "$(HF_REPO_ID)" --repo-type model --exist-ok
+	HF_HUB_OFFLINE=0 TRANSFORMERS_OFFLINE=0 HF_HUB_ENABLE_HF_TRANSFER="$(HF_HUB_ENABLE_HF_TRANSFER)" \
+		$(HF) upload "$(HF_REPO_ID)" "$(GGUF_FILE)" "$(HF_UPLOAD_FILENAME)" \
+			--repo-type model --commit-message "Add llama.cpp Q8_0 GGUF"
 
 smoke-vllm: verify-gguf
 	HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_HUB_ENABLE_HF_TRANSFER=0 \
