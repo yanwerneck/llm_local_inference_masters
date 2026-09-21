@@ -144,11 +144,14 @@ Em todos os casos, use dois terminais: o primeiro mantém o servidor em foregrou
 **Preparação (uma vez no pod):** o vLLM deve estar instalado no ambiente próprio do runtime. O cliente do benchmark fica em outro `.venv`.
 
 ```bash
-source /workspace/yan-vllm/.venv/bin/activate
+mkdir -p /workspace/vllm-runtime
+# Se o ambiente ainda não existir:
+python3 -m venv /workspace/vllm-runtime/.venv
+source /workspace/vllm-runtime/.venv/bin/activate
 python -m pip install -U vllm vllm-gguf-plugin
 python -c 'import vllm; print(vllm.__version__)'
 nvidia-smi
-vllm serve --help > /workspace/yan-vllm/vllm-serve-help.txt
+vllm serve --help > /workspace/vllm-runtime/vllm-serve-help.txt
 ```
 
 O `vllm-gguf-plugin` é necessário para o caminho GGUF em versões que o exigem. O último comando salva a interface efetivamente instalada; se a importação falhar por incompatibilidade CUDA, não mascare o erro instalando outro modelo.
@@ -156,7 +159,7 @@ O `vllm-gguf-plugin` é necessário para o caminho GGUF em versões que o exigem
 **Servidor exato (Terminal 1):**
 
 ```bash
-source /workspace/yan-vllm/.venv/bin/activate
+source /workspace/vllm-runtime/.venv/bin/activate
 vllm serve /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf \
   --tokenizer /workspace/models/Qwen2.5-14B-tokenizer \
   --served-model-name qwen14b-q8-gguf \

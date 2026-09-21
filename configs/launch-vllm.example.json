@@ -1,5 +1,5 @@
 [
-  "/workspace/yan-vllm/.venv/bin/vllm",
+  "/workspace/vllm-runtime/.venv/bin/vllm",
   "serve",
   "/workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf",
   "--tokenizer",
