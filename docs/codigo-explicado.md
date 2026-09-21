@@ -21,7 +21,7 @@ Uma unidade amostral é uma **requisição**, não cada amostra de GPU e não ca
 
 ## 2. Requisitos de entrada e preparação
 
-Antes do benchmark: runtime instalado, pesos completos no SSD e tokenizer preparado. O modelo principal desta rodada é `arthuravianna/Qwen2.5-14B-Instruct-Q8_0.gguf`; em vLLM exige `vllm-gguf-plugin` e é experimental. Se falhar, use `arthuravianna/Qwen2.5-14B-Instruct-GPTQ-8bit` como fallback e registre o artefato. Download não é etapa medida e não deve ocorrer durante uma execução válida. Instalação também fica fora. Carregamento do SSD, alocação de memória e inicialização de kernels **continuam sendo parte do problema**.
+Antes do benchmark: runtime instalado, pesos completos no SSD e tokenizer preparado. O artefato desta rodada é `arthuravianna/Qwen2.5-14B-Instruct-Q8_0.gguf`; em vLLM exige `vllm-gguf-plugin` e é experimental. Se falhar, preserve o log e marque a execução como falha; não substitua o artefato. Download não é etapa medida e não deve ocorrer durante uma execução válida. Instalação também fica fora. Carregamento do SSD, alocação de memória e inicialização de kernels **continuam sendo parte do problema**.
 
 O arquivo de configuração descreve servidor, modelo, contexto, cache, artefato e versões. O código exige exatamente os campos esperados, evitando erro silencioso de digitação. Ele não configura o contexto ou o cache do runtime: esses campos são metadados do experimento.
 
@@ -290,7 +290,7 @@ O HTML não depende de internet, JavaScript externo ou servidor web. Relatórios
 
 ```bash
 python bench.py run --config configs/vllm.json \
-  --local-model-path /workspace/models/Qwen2.5-14B-Instruct-GPTQ-8bit \
+  --local-model-path /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf \
   --launch configs/launch-vllm.example.json \
   --input-tokens 256 512 1024 2048 3072 \
   --collect-kv-metrics --smoke --warmup 1

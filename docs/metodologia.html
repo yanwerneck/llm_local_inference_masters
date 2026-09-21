@@ -22,14 +22,20 @@
 </ul>
 </li>
 <li><a href="#10-como-explorar-os-parametros-do-vllm">10. Como explorar os parâmetros do vLLM</a></li>
-<li><a href="#11-checklist-antes-de-chamar-um-resultado-de-melhor">11. Checklist antes de chamar um resultado de melhor</a></li>
+<li><a href="#11-capitulos-por-runtime">11. Capítulos por runtime</a><ul>
+<li><a href="#vllm">vLLM</a></li>
+<li><a href="#llamacpp">llama.cpp</a></li>
+<li><a href="#ollama">Ollama</a></li>
+</ul>
+</li>
+<li><a href="#12-checklist-antes-de-chamar-um-resultado-de-melhor">12. Checklist antes de chamar um resultado de melhor</a></li>
 <li><a href="#proximo-passo">Próximo passo</a></li>
 </ul>
 </li>
 </ul>
 </div>
 <h1 id="um-usuario-tres-runtimes-um-instrumento">Um usuário. Três runtimes. Um instrumento.</h1>
-<p>O artefato principal desta rodada é <code>arthuravianna/Qwen2.5-14B-Instruct-Q8_0.gguf</code>. No vLLM, GGUF exige <code>vllm-gguf-plugin</code> e é experimental/subotimizado. Se o carregamento falhar na RTX3090, use <code>arthuravianna/Qwen2.5-14B-Instruct-GPTQ-8bit</code> como fallback e registre a troca; GGUF Q8_0 e GPTQ-8bit não são o mesmo artefato.</p>
+<p>O artefato desta rodada é <code>arthuravianna/Qwen2.5-14B-Instruct-Q8_0.gguf</code>, mantido idêntico entre os runtimes quando o backend o aceitar. No vLLM, GGUF exige <code>vllm-gguf-plugin</code> e deve ser tratado como experimental/subotimizado. Se o carregamento falhar, a execução falha e preserva logs; não troque silenciosamente o modelo para preencher uma tabela.</p>
 <p>Este estudo pergunta: <strong>como o runtime e seus parâmetros mudam o tempo de resposta de um chatbot para uma pessoa?</strong> A carga de múltiplos usuários fica para o próximo trabalho.</p>
 <h2 id="1-quem-faz-o-que">1. Quem faz o quê?</h2>
 <pre><code class="language-text">Este projeto → GuideLLM → API HTTP do runtime → modelo na GPU
@@ -224,7 +230,7 @@ AQUECIMENTO MEDIDO → BLOCOS POSTERIORES → REFERÊNCIA FINAL
 <li>Versão do cliente e forma de acessar o servidor.</li>
 </ul>
 <p><code>requests_sha256</code> compara mensagens e limites de saída realmente enviados, desconsiderando o alias do modelo. Hashes diferentes significam que o teste não usou a mesma carga. Hashes iguais não provam que os runtimes aplicaram o mesmo template internamente.</p>
-<p><strong>GPTQ e GGUF:</strong> “8 bits” não identifica sozinho os mesmos pesos. Se vLLM usa GPTQ e os outros usam uma quantização GGUF distinta, o tratamento experimental inclui as duas diferenças. Não atribua tudo ao runtime. Registre o artefato no relatório e delimite a conclusão.</p>
+<p><strong>Artefato comum:</strong> o nome <code>Q8_0</code> não basta para provar equivalência. Registre caminho local, hash do arquivo, tokenizer/template e versão do backend. Se um servidor não aceitar o GGUF, marque a condição como não suportada e não misture números de outro artefato.</p>
 <h2 id="8-cache-a-principal-armadilha-silenciosa">8. Cache: a principal armadilha silenciosa</h2>
 <p>O modelo estar carregado na GPU é desejável neste protocolo. Já reaproveitar resultados de um prefixo anterior pode mudar radicalmente o prefill. São coisas diferentes. Também não estamos propondo desativar o KV cache normal usado para gerar os tokens de uma resposta.</p>
 <p>Para uma comparação de requisições independentes, tentem desativar reutilização entre requisições, quando o runtime permitir, e registrem como fizeram. Se não for possível, mantenham essa limitação explícita. O cliente não possui um botão universal de limpeza de cache para todos os servidores.</p>
@@ -242,7 +248,19 @@ AQUECIMENTO MEDIDO → BLOCOS POSTERIORES → REFERÊNCIA FINAL
 <p>Primeiro execute a configuração que já funciona, sem tunar. Escolha um sintoma: TTFT alto com entrada longa, geração lenta ou falta de memória. Depois altere <strong>uma decisão por vez</strong>, mantendo o protocolo idêntico, e registre o comando exato do servidor.</p>
 <p>Neste trabalho, priorize contexto máximo, política de cache e opções de execução que façam sentido para uma sequência. Reservar mais memória não aumenta fisicamente a banda da GPU. Não faça uma busca enorme em parâmetros de concorrência: eles são assunto do próximo trabalho.</p>
 <p>Não incluímos flags de tuning automaticamente porque variam conforme versão e podem mudar o experimento. Consulte o <code>vllm serve --help</code> da instalação e a <a href="https://docs.vllm.ai/en/latest/cli/serve/">referência oficial</a>. Compare o baseline com uma mudança; se o efeito se mantiver, investigue por quê.</p>
-<h2 id="11-checklist-antes-de-chamar-um-resultado-de-melhor">11. Checklist antes de chamar um resultado de melhor</h2>
+<h2 id="11-capitulos-por-runtime">11. Capítulos por runtime</h2>
+<p>O protocolo comum fixa artefato, tokenizer, endpoint OpenAI compatível, <code>stream=true</code>, usage, uma requisição por vez, <code>--launch</code> em foreground e logs completos. O que muda é o comando de servidor e as métricas nativas.</p>
+<h3 id="vllm">vLLM</h3>
+<p>Instale o vLLM em ambiente separado e valide <code>vllm serve --help</code>, <code>nvidia-smi</code> e <code>python -c 'import vllm'</code>. Sirva o GGUF local com o plugin/backend suportado pela versão instalada, tokenizer local correspondente e sem download implícito. Use <code>--launch</code> com argv direto, <code>--host 127.0.0.1</code>, <code>--port 8000</code>, alias fixo em <code>--served-model-name</code> e contexto documentado. Confirme <code>/v1/models</code>, <code>/v1/chat/completions</code> e <code>/metrics</code>.</p>
+<p>Registre backend de atenção, dtype de KV, prefix caching, preempções e OOM. Falha de importação, CUDA ou carregamento é diagnóstico: preserve <code>server.log</code>, <code>serve --help</code>, versões e <code>nvidia-smi</code>, e não substitua o artefato.</p>
+<h3 id="llamacpp">llama.cpp</h3>
+<p>Use <code>llama-server</code> compilado com CUDA compatível e valide <code>llama-server --help</code>. O servidor deve receber o GGUF local e seu SHA-256 documentado, por exemplo <code>llama-server -m /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf --host 127.0.0.1 --port 8000</code>. Execute em foreground pelo <code>--launch</code>, sem daemonização, shell ou wrapper que se desprenda. Confirme <code>/v1/models</code> e <code>/v1/chat/completions</code> com streaming e usage.</p>
+<p>Registre camadas na GPU, contexto, quantização do GGUF, slots e logs de carregamento. Se a API não fornecer usage/stream compatível, marque falha de protocolo e preserve a evidência; não estime tokens nem troque de modelo.</p>
+<h3 id="ollama">Ollama</h3>
+<p>Prepare o blob local e registre digest, identificador e Modelfile. Execute <code>ollama serve</code> em foreground e carregue o artefato antes da medição; <code>ollama pull</code> durante o <code>run</code> invalida a comparação. Confirme <code>/v1/models</code> e <code>/v1/chat/completions</code>, streaming, usage e política de permanência do modelo.</p>
+<p>Ollama pode responder à listagem antes de carregar pesos: compare processo → primeiro conteúdo e, quando disponível, <code>load_duration</code>. Se o blob não carregar, descarregar por memória ou divergir no usage, preserve o diagnóstico e marque falha; não declare sucesso parcial.</p>
+<p>Uma falha de inicialização, readiness, stream ou contagem é resultado experimental válido como diagnóstico, mas não como desempenho comparável. Repare a causa e repita com o mesmo protocolo.</p>
+<h2 id="12-checklist-antes-de-chamar-um-resultado-de-melhor">12. Checklist antes de chamar um resultado de melhor</h2>
 <ol>
 <li>Todas as fases terminaram sem erro? O manifest mostra <code>complete</code>?</li>
 <li>Os comprimentos reais das respostas são comparáveis?</li>

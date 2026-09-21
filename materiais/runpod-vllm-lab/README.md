@@ -1,6 +1,6 @@
 # Seu primeiro Qwen no RunPod com vLLM
 
-**Atualização do artefato:** o modelo principal agora é [Qwen2.5-14B-Instruct-Q8_0.gguf](https://huggingface.co/arthuravianna/Qwen2.5-14B-Instruct-Q8_0.gguf). No vLLM CUDA, instale `vllm-gguf-plugin` e use o arquivo GGUF local com `--tokenizer` do Qwen2.5. A documentação do vLLM classifica GGUF como experimental; se o servidor não iniciar, use o [GPTQ-8bit](https://huggingface.co/arthuravianna/Qwen2.5-14B-Instruct-GPTQ-8bit) como fallback. Os comandos GPTQ abaixo permanecem como fallback funcional e devem ser identificados como tal no benchmark.
+**Artefato único deste roteiro:** [Qwen2.5-14B-Instruct-Q8_0.gguf](https://huggingface.co/arthuravianna/Qwen2.5-14B-Instruct-Q8_0.gguf). No vLLM CUDA, instale `vllm-gguf-plugin` e use o arquivo GGUF local com `--tokenizer` do Qwen2.5. A documentação do vLLM classifica GGUF como experimental; se o servidor não iniciar, preserve o erro, investigue o ambiente e marque a execução como falha. Não troque o artefato.
 
 **Como o benchmark mede o carregamento:** use `--launch` com o servidor parado. O intervalo processo → `/v1/models` mede prontidão HTTP; processo → primeiro conteúdo da primeira geração é o indicador de carregamento efetivo, incluindo pesos locais, alocação e kernels. Sem `--launch`, o carregamento não é conhecido. Para llama.cpp use `llama-server -m ...`; para Ollama use `ollama serve` com preload local mantido em foreground; para vLLM use `vllm serve ...`. O download precisa ocorrer antes do processo.
 
@@ -22,13 +22,13 @@ O prefixo `(.venv) root@...:/workspace/yan-vllm#` é o prompt do terminal: não 
 
 Seu navegador abre um terminal Linux no RunPod. Nesse Linux, o vLLM carrega o modelo na GPU e oferece uma API HTTP. Um segundo terminal no mesmo Pod envia as perguntas. Seu Mac apenas controla a máquina remota.
 
-Modelo deste roteiro: [arthuravianna/Qwen2.5-14B-Instruct-GPTQ-8bit](https://huggingface.co/arthuravianna/Qwen2.5-14B-Instruct-GPTQ-8bit), o checkpoint quantizado do Arthur. O [config.json](https://huggingface.co/arthuravianna/Qwen2.5-14B-Instruct-GPTQ-8bit/blob/main/config.json) declara GPTQ, 8 bits, grupos de 128, quantização simétrica e `desc_act: false`. O repositório inclui tokenizer e template de chat. Essa inspeção permite preparar o comando; o carregamento no Pod ainda precisa ser confirmado.
+Modelo deste roteiro: [Qwen2.5-14B-Instruct-Q8_0.gguf](https://huggingface.co/arthuravianna/Qwen2.5-14B-Instruct-Q8_0.gguf). Registre o SHA-256 do arquivo, tokenizer e template de chat. Essa inspeção prepara o comando; o carregamento no Pod ainda precisa ser confirmado.
 
-**Se você começou com o modelo oficial do guia anterior:** encerre o servidor com Ctrl+C antes de iniciar o checkpoint do Arthur. O identificador no servidor e o tokenizer do benchmark mudam; o alias `qwen14b-int8` continua igual, então as perguntas via curl permanecem iguais. O novo checkpoint terá seu próprio download/cache. A troca não resolve `libcudart.so.13`: se esse erro persistir, siga primeiro a seção 3.1.
+Este roteiro começa do zero com o artefato GGUF acima. Se já houver um servidor na porta 8000, encerre-o antes de iniciar o experimento. Um erro como `libcudart.so.13` deve ser registrado e investigado na seção 3.1; ele não deve ser mascarado por outra instalação ou modelo.
 
 “8 bits” descreve os pesos quantizados. Ativações, alguns tensores e KV cache ainda ocupam memória em outra precisão. O parâmetro `--dtype half` que usaremos não transforma esses pesos em um modelo FP16 completo.
 
-O 14B em FP16 precisa de aproximadamente 29,4 GB decimais só para 14,7 bilhões de parâmetros a 2 bytes. Portanto, não cabe integralmente na 3090 de 24 GB. A versão GPTQ Int8 é um ponto de partida plausível para contexto curto nessa GPU, mas a folga real depende do runtime e deve ser confirmada no primeiro carregamento.
+O 14B em FP16 precisa de aproximadamente 29,4 GB decimais só para 14,7 bilhões de parâmetros a 2 bytes. Portanto, não cabe integralmente na 3090 de 24 GB. O GGUF Q8_0 pode exigir mais memória que a disponível conforme contexto e buffers; se não carregar, registre OOM e não reduza a comparabilidade trocando de artefato.
 
 ## 2. Criar o Pod
 
@@ -166,7 +166,7 @@ cd /workspace/yan-vllm
 source .venv/bin/activate
 export HF_HOME=/workspace/yan-vllm/hf-cache
 set -o pipefail
-vllm serve arthuravianna/Qwen2.5-14B-Instruct-GPTQ-8bit \
+vllm serve /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf \
   --served-model-name qwen14b-int8 \
   --host 127.0.0.1 \
   --port 8000 \
@@ -180,10 +180,10 @@ vllm serve arthuravianna/Qwen2.5-14B-Instruct-GPTQ-8bit \
 | --- | --- |
 | `cd`, `source`, `export HF_HOME` | Retomam a pasta, o ambiente Python e o cache; são os mesmos preparativos explicados na seção 3. |
 | `set -o pipefail` | Faz a sequência com pipe sinalizar falha se o servidor falhar, mesmo que `tee` consiga gravar o log. Não reinicia o servidor automaticamente. |
-| `vllm serve arthuravianna/...` | Inicia o servidor e carrega o checkpoint do Arthur no Hugging Face. |
+| `vllm serve /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf` | Inicia o servidor usando o arquivo GGUF local. |
 | `--served-model-name qwen14b-int8` | Define o nome curto que o cliente deve enviar na API. Não altera o modelo. |
 | `--host 127.0.0.1 --port 8000` | Escuta na porta 8000 apenas na interface local do Pod. |
-| `--dtype half` | Seleciona FP16 para os cálculos/tensores aplicáveis; preserva os pesos GPTQ quantizados. |
+| `--dtype half` | Seleciona a precisão de cálculo aplicável ao backend; confirme o valor aceito para GGUF na versão instalada. |
 | `--max-model-len 2048` | Limita o contexto total por sequência, somando entrada e saída. |
 | `--max-num-seqs 1` | Permite uma sequência em execução por vez no agendador. |
 | `2>&1` | Encaminha a saída de erros para a mesma saída dos logs normais. |
@@ -192,7 +192,7 @@ vllm serve arthuravianna/Qwen2.5-14B-Instruct-GPTQ-8bit \
 
 O primeiro início baixa muitos gigabytes, carrega pesos e prepara kernels. Isso pode levar vários minutos. O repositório é público; normalmente não precisa de token do Hugging Face. Download e inicialização não são o TTFT de uma requisição com o servidor aquecido.
 
-O vLLM lê a quantização no checkpoint; não force `--quantization awq` nem instale AutoGPTQ só para servir esse modelo. Observe no log o backend de quantização realmente escolhido.
+O vLLM lê os metadados do GGUF conforme o plugin/backend instalado; não force um quantizador diferente. Observe no log o backend realmente escolhido.
 
 Os dois limites explícitos são uma escolha didática: contexto total de **2048 tokens**, contando entrada e saída, e **uma sequência em execução**. As demais decisões de execução ficam nos padrões da versão. Esses padrões já incluem mecanismos de desempenho do próprio vLLM; este é um ponto de partida, não um motor sem otimizações internas.
 
@@ -351,7 +351,7 @@ vllm bench serve \
   --base-url http://127.0.0.1:8000 \
   --endpoint /v1/completions \
   --model qwen14b-int8 \
-  --tokenizer arthuravianna/Qwen2.5-14B-Instruct-GPTQ-8bit \
+  --tokenizer /workspace/models/Qwen2.5-14B-tokenizer \
   --dataset-name random \
   --random-input-len 256 \
   --random-output-len 128 \
@@ -369,7 +369,7 @@ vllm bench serve \
 | `--backend vllm` | Seleciona o adaptador de requisições do benchmark. |
 | `--base-url ... --endpoint /v1/completions` | Define endereço e rota da API testada, dentro do Pod. |
 | `--model qwen14b-int8` | Usa o alias anunciado pelo servidor. |
-| `--tokenizer arthuravianna/...` | Usa o tokenizer do checkpoint do Arthur para preparar/contar os tokens, pois o alias não é um repositório no Hugging Face. |
+| `--tokenizer /workspace/models/Qwen2.5-14B-tokenizer` | Usa a pasta local do tokenizer Qwen2.5, preparada antes da medição. |
 | `--dataset-name random` | Gera entradas sintéticas para medir desempenho. |
 | `--random-input-len 256` | Configura o comprimento de entrada sintética em tokens. |
 | `--random-output-len 128` | Configura o comprimento de saída solicitado; confira o comprimento efetivo no resultado. |
@@ -396,9 +396,9 @@ Confira as opções da versão instalada em [bench serve](https://docs.vllm.ai/e
 | OOM ao preparar graphs | Após salvar o log, tente acrescentar somente `--enforce-eager` |
 | Não sobra memória para KV cache | Confirme GPU livre; tente contexto 1024 como diagnóstico e uma pergunta curta |
 | Processo termina apenas com `Killed` | Confira RAM e `memory.events`; pode ser OOM de RAM, não de VRAM |
-| Erro GPTQ/Marlin/kernel | Guarde versão e traceback; não troque quantizador às cegas |
+| Erro de backend/kernel | Guarde versão e traceback; investigue sem trocar o artefato |
 
-Se o 14B impedir o aprendizado por falta de memória, existe a opção de começar com [Qwen2.5-7B-Instruct-GPTQ-Int8](https://huggingface.co/Qwen/Qwen2.5-7B-Instruct-GPTQ-Int8). Isso seria um exercício separado: troque o identificador do modelo e o tokenizer do benchmark e registre a mudança. Não misture seus números com os do 14B.
+Se o 14B impedir o aprendizado por falta de memória, registre a condição como não suportada neste roteiro. Reduzir o modelo seria outro experimento, com novo artefato, tokenizer e protocolo; não misture seus números.
 
 Quando me chamar, mande: etapa em que está, comando executado, `nvidia-smi`, versões e as últimas linhas do log, incluindo a causa inicial do erro. Não precisa mandar tokens de acesso ou chaves privadas.
 
@@ -416,11 +416,10 @@ Ao retomar um Pod parado, pode não haver a mesma GPU disponível. Confirme `nvi
 
 ## 11. Ajustes pequenos no plano do grupo
 
-Sua divisão faz sentido para explorar ferramentas. Este roteiro já usa o checkpoint GPTQ de 8 bits do Arthur. Identifique esse checkpoint nos resultados para não misturar as medições com as de outros modelos ou quantizações.
+Sua divisão faz sentido para explorar ferramentas. Este roteiro usa o mesmo arquivo GGUF nos runtimes; identifique o caminho e SHA-256 nos resultados para não misturar medições.
 
 - **Não esperem escolher a melhor quantização para começar a medir.** Guardem uma referência funcionando agora; “melhor” envolve qualidade, memória e latência no runtime escolhido.
-- **Não planejem todos os métodos em todos os runtimes.** GPTQ 4/8 bits é uma rota para vLLM; AWQ nessa integração é tipicamente 4 bits. EXL3 pertence ao ecossistema ExLlamaV3 e não deve ser presumido compatível com os três runtimes. RTN também precisa de um formato de exportação definido. Fontes: [GPTQ](https://docs.vllm.ai/en/latest/features/quantization/gptqmodel/), [AWQ](https://docs.vllm.ai/en/latest/features/quantization/auto_awq/) e [ExLlamaV3](https://github.com/turboderp-org/exllamav3).
-- **Arthur e Thiago podem compartilhar o mesmo GGUF** para comparar llama.cpp e Ollama. Isso dá mais controle sobre os pesos. Compare com o GPTQ do vLLM como combinação de runtime + formato; não atribua toda diferença ao runtime. Consulte [importação no Ollama](https://docs.ollama.com/import).
+- **Use o mesmo GGUF** para comparar vLLM, llama.cpp e Ollama. Se um backend não aceitar o arquivo, preserve logs e marque falha; não atribua uma tabela incompleta a uma diferença de runtime. Consulte [importação no Ollama](https://docs.ollama.com/import).
 - **O FP16 do 14B precisa de outra estratégia de memória.** Uma GPU maior pode servir à avaliação de qualidade de referência. Seus tempos nela não são uma referência equivalente aos da 3090. Offload na 3090 também muda o experimento ao introduzir transferências CPU–GPU. Quantizar pode exigir mais recursos do que servir o resultado; Arthur deve dimensionar essa etapa separadamente e partir do checkpoint original em alta precisão para cada quantização.
 - **O enunciado parte de 12 GB.** A 3090 tem 24 GB. Registrem essa adaptação e alinhem com o professor se 12 GB for requisito, não apenas cenário ilustrativo. Limitar artificialmente o vLLM não torna a 3090 equivalente a uma GPU de 12 GB.
 
@@ -444,6 +443,6 @@ O que ainda não sei:
 Próxima pergunta:
 ```
 
-Para registrar a revisão efetivamente baixada, procure o hash no caminho `hf-cache/hub/models--arthuravianna--Qwen2.5-14B-Instruct-GPTQ-8bit/snapshots/`. Em experimentos futuros, fixe esse hash com `--revision` no servidor. Salve também o tokenizer correspondente e as versões dos pacotes.
+Para registrar o artefato efetivamente usado, calcule o SHA-256 do GGUF local e salve o caminho, tokenizer correspondente e versões dos pacotes.
 
 **Próxima ação concreta:** criar o Pod, executar `nvidia-smi` e chegar à primeira resposta da seção 5. Todo o restante pode esperar sua curiosidade aparecer.

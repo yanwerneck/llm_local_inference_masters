@@ -55,7 +55,7 @@ As dependências diretas centrais estão fixadas. Isso não é um lockfile compl
 
 ## 2. Baixar somente o tokenizer
 
-Modelo desta rodada: `arthuravianna/Qwen2.5-14B-Instruct-Q8_0.gguf`. O GGUF contém apenas os pesos; use o tokenizer do modelo base Qwen2.5. O vLLM GGUF requer `vllm-gguf-plugin` e é experimental. Se não carregar no CUDA/RTX3090, use o fallback `arthuravianna/Qwen2.5-14B-Instruct-GPTQ-8bit` com os arquivos `configs/vllm-gptq-fallback.example.json` e `configs/launch-vllm-gptq-fallback.example.json`.
+Modelo desta rodada: `arthuravianna/Qwen2.5-14B-Instruct-Q8_0.gguf`. O GGUF contém apenas os pesos; use o tokenizer do modelo base Qwen2.5. O vLLM GGUF requer `vllm-gguf-plugin` e é experimental. Se não carregar, preserve o `server.log`, marque a execução como falha e investigue a incompatibilidade; não troque silenciosamente a representação.
 
 ```bash
 python bench.py prepare-tokenizer
@@ -116,13 +116,23 @@ Para os três runtimes, execute o processo real do servidor via um arquivo `--la
 
 | Runtime | Comando foreground a colocar no arquivo `--launch` | Marco de carregamento |
 |---|---|---|
-| vLLM | `vllm serve ...` com o caminho local do GGUF ou GPTQ | processo → primeiro conteúdo; `/v1/models` pode anteceder a carga completa |
+| vLLM | `vllm serve ...` com o caminho local do GGUF e tokenizer correspondente | processo → primeiro conteúdo; `/v1/models` pode anteceder a carga completa |
 | llama.cpp | `llama-server -m /workspace/models/model.gguf ...` | processo → primeiro conteúdo; o servidor normalmente carrega o GGUF no startup |
 | Ollama | `ollama serve` | processo → primeiro conteúdo, porque `ollama serve` pode ficar pronto antes de `ollama run` carregar o modelo |
 
 O arquivo deve conter apenas um array JSON de argumentos, sem `source`, `&`, `docker -d`, pipes ou redirecionamentos. Para Ollama, o benchmark precisa conseguir alcançar `/v1/models` e `/v1/chat/completions`; se `ollama serve` não resolver o modelo sozinho, use um wrapper foreground documentado que mantenha o processo e faça o preload local sem baixar arquivos. O wrapper deve receber as variáveis offline apropriadas e ser validado no `server.log`.
 
 O download do modelo continua fora do benchmark: prepare os arquivos/blob no SSD antes de iniciar. Se o runtime baixar depois da criação do processo, a execução não é comparável entre integrantes e deve ser marcada como inválida, não “corrigida” subtraindo uma estimativa de internet.
+
+### Protocolo por runtime
+
+O protocolo comum é o mesmo: um GGUF local, tokenizer/template documentados, API OpenAI compatível (`/v1/models` e `/v1/chat/completions`), streaming com usage, uma requisição por vez, `--launch` em foreground e logs preservados.
+
+- **vLLM:** instale `vllm-gguf-plugin` quando exigido pela versão, passe o GGUF e tokenizer local, confira `vllm serve --help` e colete `/metrics`. Falha de CUDA, plugin ou carregamento é diagnóstico; preserve versões, `serve --help`, `nvidia-smi` e `server.log`.
+- **llama.cpp:** use `llama-server -m /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf ...` em foreground. Registre SHA-256, camadas na GPU, contexto, slots e a saída de `llama-server --help`. Se faltar usage/streaming compatível, marque falha de protocolo.
+- **Ollama:** prepare o blob local e Modelfile/digest antes da medição; execute `ollama serve` em foreground e confirme que o modelo permanece carregado. Não use `ollama pull` durante o `run`. Registre `load_duration` quando disponível e trate descarregamento ou erro de API como falha.
+
+Nenhum capítulo oferece troca automática de artefato. Se um runtime não aceitar o GGUF, a execução deve falhar com logs e ser corrigida/repetida separadamente.
 
 ```bash
 python bench.py run --config configs/vllm.json --local-model-path /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf --launch configs/launch-vllm.example.json --smoke --scenarios short
@@ -225,7 +235,7 @@ Use os mesmos comandos com `--config configs/ollama.json` ou `--config configs/l
 - llama.cpp: execute `llama-server`, não o CLI interativo; confira o alias do modelo e o chat template.
 - vLLM: use o servidor que você já instalou. Não instale o runtime no venv do benchmark.
 
-GPTQ-8bit e GGUF Q8 não são automaticamente os mesmos pesos quantizados. Se os artefatos diferirem, descreva a comparação como **runtime + representação**, não como isolamento perfeito do efeito da runtime.
+Use o mesmo caminho/hash do GGUF nas três configurações. Se isso não for possível, não combine as tabelas nem atribua a diferença exclusivamente ao runtime.
 
 ## 8. Onde estão os resultados?
 

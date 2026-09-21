@@ -1,6 +1,6 @@
 # Um usuário. Três runtimes. Um instrumento.
 
-O artefato principal desta rodada é `arthuravianna/Qwen2.5-14B-Instruct-Q8_0.gguf`. No vLLM, GGUF exige `vllm-gguf-plugin` e é experimental/subotimizado. Se o carregamento falhar na RTX3090, use `arthuravianna/Qwen2.5-14B-Instruct-GPTQ-8bit` como fallback e registre a troca; GGUF Q8_0 e GPTQ-8bit não são o mesmo artefato.
+O artefato desta rodada é `arthuravianna/Qwen2.5-14B-Instruct-Q8_0.gguf`, mantido idêntico entre os runtimes quando o backend o aceitar. No vLLM, GGUF exige `vllm-gguf-plugin` e deve ser tratado como experimental/subotimizado. Se o carregamento falhar, a execução falha e preserva logs; não troque silenciosamente o modelo para preencher uma tabela.
 
 Este estudo pergunta: **como o runtime e seus parâmetros mudam o tempo de resposta de um chatbot para uma pessoa?** A carga de múltiplos usuários fica para o próximo trabalho.
 
@@ -155,7 +155,7 @@ Repetir requisições no mesmo pod não cria réplicas independentes de hardware
 
 `requests_sha256` compara mensagens e limites de saída realmente enviados, desconsiderando o alias do modelo. Hashes diferentes significam que o teste não usou a mesma carga. Hashes iguais não provam que os runtimes aplicaram o mesmo template internamente.
 
-**GPTQ e GGUF:** “8 bits” não identifica sozinho os mesmos pesos. Se vLLM usa GPTQ e os outros usam uma quantização GGUF distinta, o tratamento experimental inclui as duas diferenças. Não atribua tudo ao runtime. Registre o artefato no relatório e delimite a conclusão.
+**Artefato comum:** o nome `Q8_0` não basta para provar equivalência. Registre caminho local, hash do arquivo, tokenizer/template e versão do backend. Se um servidor não aceitar o GGUF, marque a condição como não suportada e não misture números de outro artefato.
 
 ## 8. Cache: a principal armadilha silenciosa
 
@@ -191,7 +191,31 @@ Neste trabalho, priorize contexto máximo, política de cache e opções de exec
 
 Não incluímos flags de tuning automaticamente porque variam conforme versão e podem mudar o experimento. Consulte o `vllm serve --help` da instalação e a [referência oficial](https://docs.vllm.ai/en/latest/cli/serve/). Compare o baseline com uma mudança; se o efeito se mantiver, investigue por quê.
 
-## 11. Checklist antes de chamar um resultado de melhor
+## 11. Capítulos por runtime
+
+O protocolo comum fixa artefato, tokenizer, endpoint OpenAI compatível, `stream=true`, usage, uma requisição por vez, `--launch` em foreground e logs completos. O que muda é o comando de servidor e as métricas nativas.
+
+### vLLM
+
+Instale o vLLM em ambiente separado e valide `vllm serve --help`, `nvidia-smi` e `python -c 'import vllm'`. Sirva o GGUF local com o plugin/backend suportado pela versão instalada, tokenizer local correspondente e sem download implícito. Use `--launch` com argv direto, `--host 127.0.0.1`, `--port 8000`, alias fixo em `--served-model-name` e contexto documentado. Confirme `/v1/models`, `/v1/chat/completions` e `/metrics`.
+
+Registre backend de atenção, dtype de KV, prefix caching, preempções e OOM. Falha de importação, CUDA ou carregamento é diagnóstico: preserve `server.log`, `serve --help`, versões e `nvidia-smi`, e não substitua o artefato.
+
+### llama.cpp
+
+Use `llama-server` compilado com CUDA compatível e valide `llama-server --help`. O servidor deve receber o GGUF local e seu SHA-256 documentado, por exemplo `llama-server -m /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf --host 127.0.0.1 --port 8000`. Execute em foreground pelo `--launch`, sem daemonização, shell ou wrapper que se desprenda. Confirme `/v1/models` e `/v1/chat/completions` com streaming e usage.
+
+Registre camadas na GPU, contexto, quantização do GGUF, slots e logs de carregamento. Se a API não fornecer usage/stream compatível, marque falha de protocolo e preserve a evidência; não estime tokens nem troque de modelo.
+
+### Ollama
+
+Prepare o blob local e registre digest, identificador e Modelfile. Execute `ollama serve` em foreground e carregue o artefato antes da medição; `ollama pull` durante o `run` invalida a comparação. Confirme `/v1/models` e `/v1/chat/completions`, streaming, usage e política de permanência do modelo.
+
+Ollama pode responder à listagem antes de carregar pesos: compare processo → primeiro conteúdo e, quando disponível, `load_duration`. Se o blob não carregar, descarregar por memória ou divergir no usage, preserve o diagnóstico e marque falha; não declare sucesso parcial.
+
+Uma falha de inicialização, readiness, stream ou contagem é resultado experimental válido como diagnóstico, mas não como desempenho comparável. Repare a causa e repita com o mesmo protocolo.
+
+## 12. Checklist antes de chamar um resultado de melhor
 
 1. Todas as fases terminaram sem erro? O manifest mostra `complete`?
 2. Os comprimentos reais das respostas são comparáveis?
