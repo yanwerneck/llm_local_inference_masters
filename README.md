@@ -124,15 +124,202 @@ O arquivo deve conter apenas um array JSON de argumentos, sem `source`, `&`, `do
 
 O download do modelo continua fora do benchmark: prepare os arquivos/blob no SSD antes de iniciar. Se o runtime baixar depois da criação do processo, a execução não é comparável entre integrantes e deve ser marcada como inválida, não “corrigida” subtraindo uma estimativa de internet.
 
-### Protocolo por runtime
+### Protocolo por runtime: comandos exatos
 
-O protocolo comum é o mesmo: um GGUF local, tokenizer/template documentados, API OpenAI compatível (`/v1/models` e `/v1/chat/completions`), streaming com usage, uma requisição por vez, `--launch` em foreground e logs preservados.
+Os três procedimentos abaixo usam o mesmo arquivo local:
 
-- **vLLM:** instale `vllm-gguf-plugin` quando exigido pela versão, passe o GGUF e tokenizer local, confira `vllm serve --help` e colete `/metrics`. Falha de CUDA, plugin ou carregamento é diagnóstico; preserve versões, `serve --help`, `nvidia-smi` e `server.log`.
-- **llama.cpp:** use `llama-server -m /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf ...` em foreground. Registre SHA-256, camadas na GPU, contexto, slots e a saída de `llama-server --help`. Se faltar usage/streaming compatível, marque falha de protocolo.
-- **Ollama:** prepare o blob local e Modelfile/digest antes da medição; execute `ollama serve` em foreground e confirme que o modelo permanece carregado. Não use `ollama pull` durante o `run`. Registre `load_duration` quando disponível e trate descarregamento ou erro de API como falha.
+```text
+/workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf
+```
 
-Nenhum capítulo oferece troca automática de artefato. Se um runtime não aceitar o GGUF, a execução deve falhar com logs e ser corrigida/repetida separadamente.
+O diretório `/workspace/models` precisa existir e o arquivo precisa estar lá **antes** da medição. Rode `sha256sum /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf` e registre o resultado em `model_artifact` nas configurações. Não há troca automática de formato: se um runtime falhar ao carregar esse GGUF, preserve o erro e trate a execução como falha diagnóstica.
+
+Em todos os casos, use dois terminais: o primeiro mantém o servidor em foreground; o segundo verifica a API e executa o benchmark. O benchmark deve ser executado com o servidor parado quando usar `--launch`.
+
+#### A. vLLM
+
+**Preparação (uma vez no pod):** o vLLM deve estar instalado no ambiente próprio do runtime. O cliente do benchmark fica em outro `.venv`.
+
+```bash
+source /workspace/yan-vllm/.venv/bin/activate
+python -m pip install -U vllm vllm-gguf-plugin
+python -c 'import vllm; print(vllm.__version__)'
+nvidia-smi
+vllm serve --help > /workspace/yan-vllm/vllm-serve-help.txt
+```
+
+O `vllm-gguf-plugin` é necessário para o caminho GGUF em versões que o exigem. O último comando salva a interface efetivamente instalada; se a importação falhar por incompatibilidade CUDA, não mascare o erro instalando outro modelo.
+
+**Servidor exato (Terminal 1):**
+
+```bash
+source /workspace/yan-vllm/.venv/bin/activate
+vllm serve /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf \
+  --tokenizer /workspace/models/Qwen2.5-14B-tokenizer \
+  --served-model-name qwen14b-q8-gguf \
+  --host 127.0.0.1 \
+  --port 8000 \
+  --max-model-len 4096
+```
+
+`serve` cria o processo; o caminho após `serve` é o GGUF; `--tokenizer` aponta para o tokenizer local; `--served-model-name` define o ID que aparecerá na API; `--host`/`--port` definem a API; `--max-model-len` fixa o contexto usado nesta rodada. O processo fica em foreground para que `server.log` preserve o carregamento, a alocação e qualquer erro.
+
+**Verificação e benchmark (Terminal 2):**
+
+```bash
+curl http://127.0.0.1:8000/v1/models
+curl http://127.0.0.1:8000/metrics | head
+source .venv/bin/activate
+python bench.py run \
+  --config configs/vllm.json \
+  --local-model-path /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf \
+  --smoke --scenarios short
+```
+
+O primeiro `curl` confirma o ID `qwen14b-q8-gguf`; o segundo confirma se há métricas Prometheus. Sem `--launch`, esse smoke mede um servidor já iniciado. Para medir também a partida, pare o servidor e use o arquivo `configs/launch-vllm.example.json`, que contém exatamente o mesmo comando acima:
+
+```bash
+source .venv/bin/activate
+python bench.py run \
+  --config configs/vllm.json \
+  --local-model-path /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf \
+  --launch configs/launch-vllm.example.json \
+  --smoke --scenarios short --startup-timeout 1800
+```
+
+Nesse modo, `process_to_api_observed_s` é o processo até a API responder, enquanto `process_to_first_content_s` inclui o custo observado até o primeiro token: leitura do GGUF, alocação, kernels e eventuais compilações tardias. A API pronta não prova, sozinha, que os pesos já estão residentes.
+
+#### B. llama.cpp (`llama-server`)
+
+**Compilar (uma vez no pod):**
+
+```bash
+cd /workspace
+git clone https://github.com/ggml-org/llama.cpp.git
+cmake -S /workspace/llama.cpp -B /workspace/llama.cpp/build \
+  -DGGML_CUDA=ON -DCMAKE_BUILD_TYPE=Release
+cmake --build /workspace/llama.cpp/build --config Release -j "$(nproc)"
+/workspace/llama.cpp/build/bin/llama-server --help > /workspace/llama-server-help.txt
+```
+
+`GGML_CUDA=ON` compila os kernels CUDA; `cmake --build` gera o executável; `llama-server --help` registra as opções da versão usada. Registre também o commit: `git -C /workspace/llama.cpp rev-parse HEAD`.
+
+**Servidor exato (Terminal 1):**
+
+```bash
+/workspace/llama.cpp/build/bin/llama-server \
+  -m /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf \
+  --alias qwen14b-q8-gguf \
+  --host 127.0.0.1 \
+  --port 8080 \
+  -c 4096 \
+  -ngl 99 \
+  --parallel 1 \
+  --metrics
+```
+
+`-m` seleciona o GGUF local; `--alias` define o ID da API; `-c` fixa o contexto; `-ngl 99` solicita que todas as camadas possíveis sejam descarregadas na GPU; `--parallel 1` mantém uma requisição simultânea; `--metrics` habilita métricas do servidor quando suportado. Se a versão compilada rejeitar uma flag, preserve a saída de erro e a versão em vez de trocar silenciosamente o comando.
+
+**Verificação e benchmark (Terminal 2):**
+
+```bash
+curl http://127.0.0.1:8080/v1/models
+source .venv/bin/activate
+python bench.py run \
+  --config configs/llamacpp.json \
+  --local-model-path /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf \
+  --smoke --scenarios short
+```
+
+O `curl` confirma que o alias servido corresponde ao campo `model` de `configs/llamacpp.json`. Para medir a partida, pare o `llama-server` e crie `configs/launch-llamacpp.json` com este array JSON (cada item é um argumento separado):
+
+```json
+[
+  "/workspace/llama.cpp/build/bin/llama-server",
+  "-m", "/workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf",
+  "--alias", "qwen14b-q8-gguf",
+  "--host", "127.0.0.1",
+  "--port", "8080",
+  "-c", "4096",
+  "-ngl", "99",
+  "--parallel", "1",
+  "--metrics"
+]
+```
+
+Execute o ciclo de vida com:
+
+```bash
+source .venv/bin/activate
+python bench.py run \
+  --config configs/llamacpp.json \
+  --local-model-path /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf \
+  --launch configs/launch-llamacpp.json \
+  --smoke --scenarios short --startup-timeout 1800
+```
+
+Aqui o tempo processo → primeiro conteúdo inclui o carregamento do GGUF e a preparação da GPU feita no início pelo `llama-server`. O arquivo `server.log` é a evidência para saber se todas as camadas foram para a GPU, se houve offload parcial ou se o processo falhou.
+
+#### C. Ollama
+
+**Importar o mesmo GGUF local (uma vez no pod):** crie um `Modelfile` sem URL e sem `ollama pull`:
+
+```bash
+cat > /workspace/Modelfile-qwen14b <<'EOF'
+FROM /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf
+PARAMETER num_ctx 4096
+EOF
+ollama create qwen14b-q8-gguf -f /workspace/Modelfile-qwen14b
+ollama show qwen14b-q8-gguf
+ollama list
+```
+
+`FROM` importa o arquivo que já está no SSD; `num_ctx` fixa o contexto do modelo; `ollama create` prepara o blob local antes do relógio. `ollama show` e `ollama list` confirmam o nome e a origem. Se o Ollama não aceitar o GGUF, preserve a saída e marque a execução como falha.
+
+**Servidor exato (Terminal 1):**
+
+```bash
+OLLAMA_HOST=127.0.0.1:11434 ollama serve
+```
+
+`ollama serve` fica em foreground e expõe a API em `127.0.0.1:11434`. Ele pode responder à saúde antes de carregar o modelo; por isso o benchmark mede também o primeiro conteúdo, quando o custo de carregamento tardio aparece. Não execute `ollama pull` durante o benchmark.
+
+**Verificação e benchmark (Terminal 2):**
+
+```bash
+curl http://127.0.0.1:11434/api/tags
+curl http://127.0.0.1:11434/v1/models
+source .venv/bin/activate
+python bench.py run \
+  --config configs/ollama.json \
+  --local-model-path /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf \
+  --smoke --scenarios short
+```
+
+O primeiro `curl` verifica o catálogo nativo; o segundo verifica a compatibilidade OpenAI usada pelo cliente. Preencha `configs/ollama.json` com `model: qwen14b-q8-gguf` e `base_url: http://127.0.0.1:11434`. Para medir a partida, pare o serviço e crie `configs/launch-ollama.json`:
+
+```json
+["ollama", "serve"]
+```
+
+O array não contém `export`, `&` ou redirecionamentos: o benchmark inicia somente esse processo em foreground. Como `OLLAMA_HOST` já foi exportada no Terminal 1, o processo lançado herda a porta 11434. Se quiser que o próprio benchmark seja o primeiro processo Ollama, exporte `OLLAMA_HOST=127.0.0.1:11434` no Terminal 2 antes do `bench.py` e mantenha a porta livre.
+
+Rode:
+
+```bash
+source .venv/bin/activate
+python bench.py run \
+  --config configs/ollama.json \
+  --local-model-path /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf \
+  --launch configs/launch-ollama.json \
+  --smoke --scenarios short --startup-timeout 1800
+```
+
+O `ollama create` fica fora da medição; o `--launch` mede apenas o processo `ollama serve` e o carregamento tardio provocado pela primeira requisição. Registre `load_duration` retornado pelo Ollama quando disponível. Se o servidor ficar pronto, mas a primeira geração falhar ou o modelo for descarregado, a execução é falha, não um resultado válido.
+
+#### Comparação justa dos três comandos
+
+Para cada runtime, mantenha o mesmo GGUF, a mesma revisão do tokenizer quando aplicável, contexto 4096, uma requisição em andamento e prompts idênticos. Use os três comandos com `--launch` para comparar inicialização, e os três sem `--launch` somente para comparar operação contra servidores já aquecidos. Salve a versão (`vllm --version`, commit do llama.cpp, `ollama version`), o comando, o SHA-256 e os logs. Não combine resultados se um runtime tiver falhado, feito download durante a execução ou usado outro artefato.
 
 ```bash
 python bench.py run --config configs/vllm.json --local-model-path /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf --launch configs/launch-vllm.example.json --smoke --scenarios short
