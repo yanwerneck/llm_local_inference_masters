@@ -109,6 +109,53 @@ python bench.py run \
 
 O `--gpu-memory-utilization 0.90` deixa uma margem explícita para buffers e evita ocupar toda a placa; registre-o como parte da configuração. Para a bateria completa, substitua o final por `--scenarios short medium long --repetitions 3`. Se o processo falhar, examine `results/<timestamp>/server.log` e mantenha a falha: não troque automaticamente para o GGUF nem para o checkpoint BF16. Esse repositório pode ser incompatível com o loader GGUF do vLLM mesmo estando armazenado em safetensors; essa incompatibilidade é precisamente o resultado a diagnosticar.
 
+Os erros observados estão consolidados em [docs/relatorio-falhas.md](docs/relatorio-falhas.md). O safetensors de 14B falhou por incompatibilidade entre `lm_head.weight` fornecido pelo checkpoint e `lm_head.qweight` esperado pelo loader. O GGUF verdadeiro de 14B falhou por OOM durante a materialização dos pesos, antes de uma reserva observável de KV cache. Em ambos os casos, a execução é uma falha de inicialização e não produz métricas de geração.
+
+### Próximo artefato: Qwen2.5-7B-Instruct-GGUF-8bit
+
+A próxima tentativa usa um artefato diferente e deve começar por uma inspeção, sem pressupor que o nome do repositório indique o formato físico:
+
+```bash
+mkdir -p /workspace/models/Qwen2.5-7B-Instruct-GGUF-8bit
+hf download arthuravianna/Qwen2.5-7B-Instruct-GGUF-8bit \
+  --revision main \
+  --local-dir /workspace/models/Qwen2.5-7B-Instruct-GGUF-8bit
+du -sh /workspace/models/Qwen2.5-7B-Instruct-GGUF-8bit
+find /workspace/models/Qwen2.5-7B-Instruct-GGUF-8bit -maxdepth 1 -type f -printf '%f\n' | sort
+```
+
+Antes de iniciar o vLLM, registre o formato e os metadados:
+
+```bash
+python - <<'PY'
+import json
+from pathlib import Path
+
+p = Path('/workspace/models/Qwen2.5-7B-Instruct-GGUF-8bit')
+config = json.loads((p / 'config.json').read_text())
+print('arquitetura:', config.get('architectures'))
+print('model_type:', config.get('model_type'))
+print('quantization_config:', config.get('quantization_config'))
+print('safetensors:', sorted(x.name for x in p.glob('*.safetensors')))
+print('gguf:', sorted(x.name for x in p.glob('*.gguf')))
+PY
+```
+
+Se o diretório contiver shards safetensors, use `configs/vllm-7b-8bit-safetensors.json` e `configs/launch-vllm-7b-8bit-safetensors.example.json`. Se contiver um arquivo `.gguf`, não reutilize esses arquivos: crie um perfil GGUF específico e registre o nome exato do arquivo. O primeiro teste deve ser:
+
+```bash
+unset HF_DEBUG VLLM_VENV
+export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
+nvidia-smi
+python bench.py run \
+  --config configs/vllm-7b-8bit-safetensors.json \
+  --local-model-path /workspace/models/Qwen2.5-7B-Instruct-GGUF-8bit \
+  --launch configs/launch-vllm-7b-8bit-safetensors.example.json \
+  --smoke --scenarios short --startup-timeout 1800
+```
+
+Os resultados do 7B ficam em uma execução própria. Só depois de o servidor iniciar e o smoke passar devemos executar `short medium long` com as repetições definidas; não misture esses números com o 14B, mesmo que a família Qwen seja a mesma.
+
 ## 3. Preparar a configuração do benchmark
 
 Neste ponto ainda não existe servidor. Não execute `curl` agora: primeiro escolha um runtime e siga a seção correspondente em **4. Smoke test**, que mostra o comando exato para iniciar o servidor. Depois que o processo estiver em foreground e o log indicar que a API está disponível, o `curl` de cada runtime confirma o ID servido.

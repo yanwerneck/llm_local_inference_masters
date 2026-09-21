@@ -50,6 +50,8 @@ O protocolo é comum aos três servidores, mas o comando muda: `vllm serve` para
 
 Há também um perfil experimental separado para `arthuravianna/Qwen2.5-14B-Instruct-GGUF-8bit`. Apesar do nome, esse repositório contém cinco shards safetensors quantizados em 8 bits, não um arquivo GGUF; seus metadados declaram `qweight`/`uint8` e `quant_method: gguf`. Ele usa `configs/vllm-8bit-safetensors.json` e `configs/launch-vllm-8bit-safetensors.example.json` e não deve ser misturado com os resultados do `Q8_0.gguf`. Falhas de loader, quantização ou memória devem ser preservadas como resultados diagnósticos, sem fallback automático.
 
+As falhas documentadas do 14B estão em [relatorio-falhas.md](relatorio-falhas.md). O próximo artefato será `arthuravianna/Qwen2.5-7B-Instruct-GGUF-8bit`, com configuração própria e resultados separados; o nome do repositório não basta para inferir se os arquivos são GGUF ou safetensors.
+
 1. Validamos configuração, versão do instrumento e arquivos do tokenizer, antes de iniciar o runtime.
 2. Com `--launch`, lançamos o processo e medimos até a API listar o modelo. Sem essa opção, a partida anterior é desconhecida e não recebe um tempo inventado.
 3. Enviamos **a primeira requisição já cronometrada**, que também valida streaming e usage. Não há teste de geração anterior.
