@@ -47,7 +47,8 @@ class Launch:
         self.started = time.perf_counter()
         try:
             self.process = subprocess.Popen(self.argv, stdout=self.log, stderr=subprocess.STDOUT,
-                                            start_new_session=True, shell=False)
+                                            start_new_session=True, shell=False,
+                                            env={**os.environ, "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1"})
         except BaseException:
             self.log.close()
             raise
@@ -164,6 +165,9 @@ def timed_request(cfg, secret, timeout, prompt, output, process_origin=None):
             offsets = result["content_event_offsets_s"]
             if usage["completion_tokens"] > 1:
                 result["mean_itl_ms"] = 1000 * (offsets[-1] - offsets[0]) / (usage["completion_tokens"] - 1)
+            from reporting import derived
+            result.update(derived({"output_tokens": usage["completion_tokens"], "prompt_tokens": usage["prompt_tokens"],
+                                   "inter_token_latency_ms": result["mean_itl_ms"], "request_latency": result["e2e_s"]}))
             result["status"] = "complete"
     except BaseException as exc:
         result["status"] = "interrupted" if isinstance(exc, KeyboardInterrupt) else "failed"
@@ -188,7 +192,7 @@ def lifecycle_report(output, lifecycle):
     rows.append(("Processo → API observada (s)", readiness.get("process_to_api_observed_s")))
     for phase in ("first_request", "warm_reference"):
         req = lifecycle.get(phase, {})
-        for metric in ("ttft_ms", "e2e_s", "mean_itl_ms", "process_to_first_content_s", "process_to_response_end_s"):
+        for metric in ("ttft_ms", "decode_tokens_s", "effective_tokens_s", "e2e_s", "mean_itl_ms", "process_to_first_content_s", "process_to_response_end_s"):
             if phase == "warm_reference" and metric.startswith("process_"):
                 continue
             rows.append((phase + " · " + metric, req.get(metric)))

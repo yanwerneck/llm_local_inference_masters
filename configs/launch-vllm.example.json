@@ -1,6 +1,8 @@
 [
   "/workspace/yan-vllm/.venv/bin/vllm",
   "serve",
+  "/workspace/models/Qwen2.5-14B-Instruct-GPTQ-8bit",
+  "--served-model-name",
   "arthuravianna/Qwen2.5-14B-Instruct-GPTQ-8bit",
   "--host",
   "127.0.0.1",

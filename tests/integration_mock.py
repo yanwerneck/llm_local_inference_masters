@@ -21,6 +21,14 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     def do_GET(self):
+        if self.path == "/metrics":
+            raw = b'vllm:kv_cache_usage_perc{engine="0"} 0.25\nvllm:gpu_cache_usage_perc{engine="0"} 0.25\n'
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain")
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+            return
         raw = json.dumps({"object": "list", "data": [{"id": "mock-model", "object": "model"}]}).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
@@ -75,6 +83,8 @@ def main():
     from transformers import PreTrainedTokenizerFast
     with tempfile.TemporaryDirectory(prefix="chatbench-test-") as tmp:
         folder = Path(tmp)
+        # Artefato de teste, nunca usado como modelo real.
+        (folder / "mock.gguf").write_bytes(b"mock-model-fixture")
         vocab = {"[UNK]": 0, "[EOS]": 1, "[PAD]": 2}
         vocab.update({f"word{i}": i+3 for i in range(100)})
         backend = Tokenizer(models.WordLevel(vocab, unk_token="[UNK]"))
@@ -88,6 +98,7 @@ def main():
         (folder / "config.json").write_text(json.dumps(cfg))
         try:
             proc = subprocess.run([sys.executable, str(ROOT / "bench.py"), "run", "--config", str(folder / "config.json"),
+                                   "--local-model-path", str(folder / "mock.gguf"), "--collect-kv-metrics",
                                    "--smoke", "--scenarios", "short", "--warmup", "1", "--results", str(folder / "results")],
                                   capture_output=True, text=True, timeout=180)
             if proc.returncode:
@@ -101,6 +112,13 @@ def main():
             assert summary["successful"] == 3, summary
             assert summary["output_tokens_p50"] == 4, summary
             assert summary["ttft_ms_p50"] > 0, summary
+            assert summary["decode_tokens_s_p50"] > 0, summary
+            assert summary["effective_tokens_s_p50"] > 0, summary
+            assert (result.parent / "context-summary.json").exists()
+            assert (result.parent / "gpu-summary.json").exists()
+            kv = (result.parent / "kv-cache.csv").read_text()
+            assert "vllm:kv_cache_usage_perc" in kv, kv
+            assert "vllm:gpu_cache_usage_perc" not in kv, kv
             assert state["maximum"] == 1, state
             assert len(state["bodies"]) == 6, len(state["bodies"])
             assert state["bodies"][0] == state["bodies"][-1]
@@ -115,6 +133,7 @@ def main():
             for mode in ("failure", "missing_usage"):
                 state.update(mode=mode, bodies=[])
                 proc = subprocess.run([sys.executable, str(ROOT / "bench.py"), "run", "--config", str(folder / "config.json"),
+                                       "--local-model-path", str(folder / "mock.gguf"),
                                        "--smoke", "--scenarios", "short", "--warmup", "1", "--results", str(folder / mode)],
                                       capture_output=True, text=True, timeout=180)
                 assert proc.returncode != 0, (mode, proc.stdout)
@@ -124,7 +143,7 @@ def main():
                     failed_summary = next(row for row in json.loads((manifest.parent / "summary.json").read_text()) if row["phase"] == "measure")
                     assert failed_summary["errored"] >= 1, failed_summary
                 else:
-                    assert not (manifest.parent / "summary.json").exists()
+                    assert json.loads((manifest.parent / "summary.json").read_text()) == []
                     partial = json.loads((manifest.parent / "first-request.json").read_text())
                     assert partial["status"] == "failed"
                     assert partial["ttft_ms"] > 0
@@ -136,7 +155,8 @@ def main():
             (folder / "config.json").write_text(json.dumps(cfg))
             (folder / "launch.json").write_text(json.dumps([sys.executable, str(ROOT / "tests/test_lifecycle.py"), "--serve", str(port)]))
             proc = subprocess.run([sys.executable, str(ROOT / "bench.py"), "run", "--config", str(folder / "config.json"),
-                                   "--launch", str(folder / "launch.json"), "--smoke", "--scenarios", "short", "--warmup", "1",
+                                   "--local-model-path", str(folder / "mock.gguf"),
+                                   "--launch", str(folder / "launch.json"), "--smoke", "--input-tokens", "256", "--warmup", "1",
                                    "--results", str(folder / "startup")], capture_output=True, text=True, timeout=180)
             assert proc.returncode == 0, proc.stdout + proc.stderr
             lifecycle_path = next((folder / "startup").glob("*/lifecycle.json"))

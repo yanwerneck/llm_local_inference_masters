@@ -14,9 +14,11 @@ Repositório `yanwerneck/llm_local_inference_masters`: código do benchmark e ma
 
 Os guias anteriores estão em `materiais/`, com seus fontes e scripts de geração. Suas instruções de instalação referem-se aos ambientes do servidor e do chat; **não misture essas dependências com o venv do benchmark**. Os HTMLs são arquivos estáticos: baixe/clonar e abra localmente; visualizar um arquivo no GitHub não ativa GitHub Pages.
 
-Benchmark de latência HTTP com streaming para **vLLM, Ollama e llama-server**, usando **GuideLLM 0.7.4** nos blocos sequenciais e um observador HTTP simples para a inicialização e a primeira resposta. A versão 0.2 cobre início, aquecimento e operação posterior, em resultados separados.
+Benchmark de latência HTTP com streaming para **vLLM, Ollama e llama-server**, usando **GuideLLM 0.7.4** nos blocos sequenciais e um observador HTTP simples para a inicialização e a primeira resposta. A versão 0.3 cobre início, aquecimento, TTFT, tokens/s, faixas de contexto/KV e GPU no relatório.
 
-**Não instala o runtime nem muda seus parâmetros automaticamente.** Por padrão conecta a um servidor existente; com `--launch`, inicia o comando que você fornecer e encerra somente esse processo ao final. O runtime pode baixar pesos se não estiverem locais. Não faz teste de concorrência, qualidade, perplexidade ou carga multiusuário.
+**Na versão 0.3, pesos já disponíveis no SSD são pré-requisito; download não faz parte do benchmark.** Não instala o runtime. Com `--launch`, inicia o comando fornecido em modo Hugging Face offline e encerra somente esse processo ao final. Não faz teste de concorrência, qualidade ou perplexidade. Veja a [explicação detalhada do código](docs/codigo-explicado.md).
+
+Todo `run` exige `--local-model-path`: pasta com pesos HF, arquivo GGUF ou blob local de pesos do Ollama. Verificamos presença/tamanho e shards declarados antes do relógio, sem ler integralmente os pesos. Isso não prova o SSD físico, integridade ou vínculo com um servidor preexistente. Configure o runtime para o mesmo artefato local. Não use wrappers que baixem arquivos: variáveis offline de HF não são um firewall universal. Execução com download é inválida; não subtraímos tempos de internet.
 
 Comece por [Como funciona o benchmark (HTML)](docs/metodologia.html). O tutorial de Git está separado: [HTML](docs/git-runpod.html) · [Markdown](docs/git-runpod.md).
 
@@ -101,12 +103,18 @@ A tecla Enter encerra a leitura. O Python obtém o valor do ambiente e o remove 
 ## 4. Smoke test: provar que o caminho funciona
 
 ```bash
-python bench.py run --config configs/vllm.json --smoke --scenarios short
+python bench.py run --config configs/vllm.json --local-model-path /workspace/models/Qwen2.5-14B-Instruct-GPTQ-8bit --smoke --scenarios short
 ```
 
 Faz GET de disponibilidade (sem gerar texto), **uma primeira requisição já cronometrada**, três requisições de aquecimento, três medições GuideLLM e uma referência final com o mesmo prompt inicial. Sempre uma de cada vez. A primeira requisição também verifica SSE/usage; não há um POST oculto de preflight antes dela. O aquecimento agora aparece no resumo, identificado por `phase=warmup`.
 
 O smoke aceita metadados ainda marcados como `PREENCHER`; **não é um resultado final**. Falhas de protocolo ou requisições incompletas geram saída diferente de zero e ficam registradas. Interromper com Ctrl+C preserva fases já concluídas.
+
+Uma execução só pode ser analisada como válida se cada bloco terminar com a quantidade esperada de sucessos. Se o GuideLLM registrar, por exemplo, 2 de 3 requisições, trate o bloco como falho/incompleto e não como “validação real aprovada”; consulte o JSON bruto e o erro antes de repetir. Os testes simulados e um smoke concluído verificam o caminho do instrumento, mas não comprovam que cada runtime/modelo real está validado no pod.
+
+Esse caso de amostra faltante continua sendo um diagnóstico do caminho GuideLLM/servidor, não uma correção já demonstrada para todos os runtimes. Até haver evidência reproduzível de execução completa, mantenha a bateria marcada como falha.
+
+O cliente inclui uma compatibilidade estreita para o GuideLLM 0.7.4: após o encerramento sinalizado, ela drena por até cinco segundos uma atualização terminal real que tenha chegado atrasada à fila. Não repete requisições nem cria métricas e não substitui a guarda de contagem; se a atualização não chegar, o bloco continua falhando.
 
 ### 4.1. Medir desde a partida do vLLM
 
@@ -115,7 +123,7 @@ Pare manualmente o servidor que você iniciou. O benchmark **não mata um servid
 O exemplo contém um caminho provável do seu pod e contexto 4096, mas não é uma instalação/tuning universal. O comando escrito em `server_command` continua sendo metadado: **só o arquivo passado com `--launch` é executado**. Não ponha segredos nesse arquivo; use variáveis de ambiente apropriadas ao runtime.
 
 ```bash
-python bench.py run --config configs/vllm.json --launch configs/launch-vllm.example.json --smoke --scenarios short --startup-timeout 1800 --initial-state 'Pesos já baixados; cache de disco e de compilação não limpos'
+python bench.py run --config configs/vllm.json --local-model-path /workspace/models/Qwen2.5-14B-Instruct-GPTQ-8bit --launch configs/launch-vllm.example.json --smoke --scenarios short --startup-timeout 1800 --initial-state 'Pesos no SSD; caches não limpos'
 ```
 
 Esse comando:
@@ -134,24 +142,30 @@ Só são aceitos destinos locais no modo `--launch`. Use executáveis diretos/fo
 
 ### 4.2. O que significa “frio”?
 
-Um processo novo não garante disco, cache do sistema operacional, compilação CUDA ou downloads frios. `--initial-state` registra as condições, **não apaga caches**. Se não houver `--launch`, o modo é `existing-server-state-unknown`: medimos a primeira requisição deste cliente, mas não sabemos se o servidor já foi aquecido por alguém.
+Um processo novo não garante cache de disco ou compilação CUDA frios. `--initial-state` registra as condições, **não apaga caches**. Sem `--launch`, medimos a primeira requisição deste cliente, mas não sabemos se o servidor já foi aquecido por alguém.
 
-Download de pesos realizado pelo runtime depois da partida entra no intervalo observado. Provisionamento do pod, instalação de pacotes e downloads feitos antes não entram. Tempos separados de leitura dos pesos, transferência PCIe ou compilação exigem logs/profiling específicos; este cliente não inventa essa decomposição.
+Downloads, provisionamento e instalação ficam na preparação, fora do experimento. Carregamento dos pesos locais, inicialização de kernels e compilação continuam dentro da medição. Separar SSD, PCIe e compilação exige logs/profiling; este cliente não inventa essa decomposição.
 
 O prompt inicial padrão é uma pergunta em português sobre RAM/VRAM com limite de 128 tokens de saída. Para usar seu próprio caso de chatbot:
 
 ```bash
-python bench.py run --config configs/vllm.json --launch configs/launch-vllm.example.json --first-prompt-file pergunta.txt --scenarios short --requests 30 --repetitions 1
+python bench.py run --config configs/vllm.json --local-model-path /workspace/models/Qwen2.5-14B-Instruct-GPTQ-8bit --launch configs/launch-vllm.example.json --first-prompt-file pergunta.txt --scenarios short --requests 30 --repetitions 1
 ```
 
 Crie `pergunta.txt` em UTF-8 com seu editor e use o mesmo conteúdo nos três runtimes. Esse arquivo não passa por truncamento automático; confirme que cabe no contexto. A referência final repete exatamente esse prompt e pode se beneficiar de cache de prefixo: documente a política ao comparar frio/quente.
+
+### 4.3. Como ler as velocidades
+
+`TTFT` é o tempo do envio até o primeiro conteúdo não vazio observado. `decode_tokens_s` é a velocidade média depois desse primeiro conteúdo (`1000 / mean_itl_ms`), usando o intervalo entre o primeiro e o último token; não inclui o tempo inicial. `effective_tokens_s` é a saída dividida pela duração total da requisição e inclui TTFT. Portanto uma resposta pode ter decode rápido e velocidade efetiva menor por causa do prefill/espera inicial. Nenhuma dessas colunas é throughput agregado de vários usuários.
+
+As faixas de contexto e `--kv-bytes-per-token` são um proxy lógico da carga: estimam bytes por token a partir da arquitetura e do dtype informados, não medem bytes físicos alocados. Já `--collect-kv-metrics` registra, quando o servidor expõe o gauge, a fração ocupada do pool KV; isso também não é percentual de VRAM. `nvidia-smi` mostra memória total usada na GPU, sem atribuí-la exclusivamente ao KV ou ao runtime.
 
 ## 5. Primeira bateria: curta e média
 
 Depois de preencher os metadados:
 
 ```bash
-python bench.py run --config configs/vllm.json --scenarios short medium --requests 30 --repetitions 3
+python bench.py run --config configs/vllm.json --local-model-path /workspace/models/Qwen2.5-14B-Instruct-GPTQ-8bit --scenarios short medium --requests 30 --repetitions 3
 ```
 
 Isso faz 30 medições por cenário por repetição: **180 requisições na fase measure**, mais aquecimento medido, primeira resposta e referência final. Há apenas **uma requisição em andamento**, não 30 usuários. As três repetições ajudam a observar variação entre blocos; não são três réplicas independentes de hardware nem três partidas.
@@ -161,7 +175,7 @@ As sementes variam por cenário/repetição e são iguais entre runtimes quando 
 ## 6. Cenário longo, só depois
 
 ```bash
-python bench.py run --config configs/vllm.json --scenarios short medium long --requests 100 --repetitions 3
+python bench.py run --config configs/vllm.json --local-model-path /workspace/models/Qwen2.5-14B-Instruct-GPTQ-8bit --scenarios short medium long --requests 100 --repetitions 3
 ```
 
 São **900 medições**; isso pode levar bastante tempo e consumir horas cobradas no RunPod. Primeiro valide os cenários menores. O longo usa aproximadamente 8192 tokens de conteúdo e teto de 128 tokens de saída. O guard exige `context_window >= 8576`, reservando 256 tokens para template; essa margem não comprova que o modelo cabe na VRAM. Configure e valide o servidor, por exemplo com contexto de 9216 ou maior se houver memória, antes de mudar o JSON.
@@ -169,6 +183,19 @@ São **900 medições**; isso pode levar bastante tempo e consumir horas cobrada
 Não suponha que a RTX 3090 comporte qualquer contexto com um modelo de 14B em 8 bits. Reduza o escopo se faltar memória e registre o cenário como não suportado; não o omita silenciosamente da comparação.
 
 ## 7. Ollama e llama.cpp
+
+### Grade de contexto/KV (inclusive no vLLM)
+
+```bash
+python bench.py run --config configs/vllm.json \
+  --local-model-path /workspace/models/Qwen2.5-14B-Instruct-GPTQ-8bit \
+  --input-tokens 256 512 1024 2048 3072 \
+  --collect-kv-metrics --requests 30 --repetitions 3
+```
+
+`--input-tokens` substitui os cenários fixos. O template soma tokens; as faixas no HTML usam a entrada real. `--collect-kv-metrics` coleta ocupação real do pool KV em `/metrics`, quando disponível no vLLM; não é percentual da VRAM. Mantenha a coleta igual entre execuções, pois tem custo.
+
+Para adicionar MiB de KV lógico **estimado**, use `--kv-bytes-per-token N`: `N = 2 × camadas × cabeças KV × dimensão da cabeça × bytes por elemento`, para uma sequência e atenção completa. Use arquitetura e dtype real do cache, não os bits dos pesos. Sem o coeficiente, não inventamos MiB; reserva, blocos e arquiteturas diferentes não são cobertos pela estimativa.
 
 Use os mesmos comandos com `--config configs/ollama.json` ou `--config configs/llamacpp.json`. Preencha o ID real do modelo, a versão e o artefato. O servidor deve expor `/v1/models` e `/v1/chat/completions` com streaming e usage.
 
@@ -187,7 +214,10 @@ Cada execução cria `results/DATA_UTC/`, sem sobrescrever execuções anteriore
 | `lifecycle.html` / `lifecycle.json` | Inicialização, primeira resposta, referência final e estado observado. |
 | `first-request.json` / `warm-reference.json` | Tempos, prompt, resposta e offsets de eventos SSE dessas requisições. Preserva tempos parciais se falharem. |
 | `server.log` | stdout/stderr do runtime, somente com `--launch`; examine antes de compartilhar. |
-| `summary.html` | Tabela de aquecimento e operação posterior, separadas por fase. |
+| `summary.html` | Relatório integrado: partida, TTFT, tokens/s, faixas de contexto/KV e GPU por fase. |
+| `context-summary.json` | Velocidades por faixa real de entrada; MiB lógicos estimados quando configurados. |
+| `gpu-summary.json` | Memória, utilização, temperatura e potência por GPU/fase. |
+| `kv-cache.csv` | Ocupação do pool KV via `/metrics`, se solicitada. |
 | `summary.csv` / `summary.json` | Uma linha por fase, cenário e repetição; filtre `phase` na análise. |
 | `r1-short-measure.json` | Relatório bruto GuideLLM, requisições, tempos, textos e contagens. |
 | `*-requests.csv` | Uma linha por requisição, incluindo status, para análise no R/Python. |
@@ -209,7 +239,7 @@ python -m unittest discover -s tests -v
 python tests/integration_mock.py
 ```
 
-O primeiro testa validação, estatísticas, lançamento seguro e cronometria inicial com servidor simulado. O segundo usa o **GuideLLM instalado**, um tokenizer local de teste e HTTP/SSE; verifica concorrência máxima 1, primeira resposta e aquecimento identificado no resumo. Não mede desempenho de GPU e não substitui o smoke no RunPod.
+O primeiro testa validação, estatísticas, lançamento seguro e cronometria inicial com servidor simulado. O segundo usa o **GuideLLM instalado**, um tokenizer local de teste e HTTP/SSE; verifica concorrência máxima 1, primeira resposta e aquecimento identificado no resumo. Não mede desempenho de GPU, não valida os três runtimes reais e não substitui o smoke no RunPod.
 
 ## Referências
 

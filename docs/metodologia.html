@@ -16,7 +16,10 @@
 <li><a href="#6-o-olhar-estatistico">6. O olhar estatístico</a></li>
 <li><a href="#7-o-que-precisa-ser-mantido-igual">7. O que precisa ser mantido igual?</a></li>
 <li><a href="#8-cache-a-principal-armadilha-silenciosa">8. Cache: a principal armadilha silenciosa</a></li>
-<li><a href="#9-memoria-e-saude-do-pod">9. Memória e saúde do pod</a></li>
+<li><a href="#9-memoria-e-saude-do-pod">9. Memória e saúde do pod</a><ul>
+<li><a href="#tokenss-por-faixa-de-kv-o-que-podemos-afirmar">Tokens/s por faixa de KV: o que podemos afirmar?</a></li>
+</ul>
+</li>
 <li><a href="#10-como-explorar-os-parametros-do-vllm">10. Como explorar os parâmetros do vLLM</a></li>
 <li><a href="#11-checklist-antes-de-chamar-um-resultado-de-melhor">11. Checklist antes de chamar um resultado de melhor</a></li>
 <li><a href="#proximo-passo">Próximo passo</a></li>
@@ -81,8 +84,11 @@
 <li>Repetimos o mesmo prompt inicial como referência final aquecida, salvamos os resultados e encerramos somente o processo iniciado por nós.</li>
 </ol>
 <p><strong>Nada disso é descartado:</strong> inicialização e primeira resposta ficam em <code>lifecycle.html</code>; aquecimento e blocos posteriores em <code>summary.html</code>, com a coluna <code>phase</code>. Separar fases não é excluí-las. Não as misturamos em uma única média porque respondem perguntas diferentes.</p>
+<p>O critério de validade do bloco é estrito: o relatório precisa conter o número solicitado de sucessos e nenhum erro/incompleta. Se uma execução real devolver apenas 2 de 3 amostras, ela deve ser investigada e repetida; não é evidência de que a validação do runtime passou.</p>
+<p>Uma amostra faltante permanece um diagnóstico do caminho GuideLLM/servidor; não deve ser descrita como uma correção universal já comprovada. Enquanto a causa não for reproduzida e verificada, mantenha esse bloco como falho.</p>
+<p>Para a versão fixada 0.7.4, o cliente possui um dreno limitado de compatibilidade: depois de o encerramento ser sinalizado, espera até cinco segundos por uma atualização terminal genuína que tenha chegado atrasada à fila local. Ele não repete chamadas nem fabrica contagens; sem atualização real, a guarda de completude permanece falhando. Isso reduz uma condição de corrida conhecida do adaptador, mas não equivale a validar um runtime real.</p>
 <pre><code class="language-text">PARTIDA DO PROCESSO  (--launch)
-        │ inicialização, possível carga/compilação/download
+        │ leitura dos pesos locais, inicialização e compilação
         ▼
 API LISTA O MODELO   (não necessariamente já residente na GPU)
         │ primeiro POST medido; possível carregamento tardio
@@ -130,9 +136,9 @@ AQUECIMENTO MEDIDO → BLOCOS POSTERIORES → REFERÊNCIA FINAL
 <p>O polling de disponibilidade usa intervalos de até 0,5 s, além do tempo de rede/timeout dos GETs. Portanto, medimos <strong>quando observamos a API disponível</strong>, não o instante interno exato da prontidão. Os intervalos processo → conteúdo/fim incluem essa detecção e pequenos custos do cliente entre etapas. Nenhuma diferença de poucos milissegundos nesse intervalo deve ser atribuída automaticamente ao runtime.</p>
 <p>O tempo até a API responder não é sozinho uma comparação justa de carregamento. Alguns servidores só carregam o modelo quando recebem a primeira geração. Compare também processo → primeiro conteúdo. O Ollama oferece métricas nativas como <code>load_duration</code>, mas elas não são um campo comum a todas as APIs; veja a <a href="https://docs.ollama.com/api/usage">documentação de métricas do Ollama</a>. Não fazemos uma segunda chamada nativa antes da primeira medição, pois ela alteraria o estado a observar.</p>
 <h3 id="processo-novo-nao-significa-todos-os-caches-frios">Processo novo não significa todos os caches frios</h3>
-<p>Há pelo menos quatro estados distintos: processo novo com pesos locais; processo novo precisando baixar pesos; servidor ativo com modelo não residente; servidor e modelo já aquecidos. Cache de disco do sistema operacional e cache de compilação podem sobreviver à reinicialização. Registre em <code>--initial-state</code> quais condições existem. O script <strong>não apaga caches, não descarrega modelos de servidores alheios e não reinicia o pod</strong>.</p>
+<p>Estudamos processo novo com pesos locais, servidor ativo com modelo não residente e servidor/modelo aquecidos. Processo precisando baixar pesos está fora do protocolo. Cache de disco e compilação podem sobreviver à reinicialização; registre as condições em <code>--initial-state</code>. O script não apaga caches, não descarrega modelos alheios e não reinicia o pod.</p>
 <p>Sem <code>--launch</code>, a primeira requisição é apenas a primeira que este cliente observou. Não a rotule como cold start comprovado. Com <code>--launch</code>, sabemos o início do processo, mas não o estado de todos os caches. Uma porta já ocupada bloqueia o lançamento sem matar o processo existente.</p>
-<p>Provisionamento do pod, instalação de dependências e downloads anteriores ao processo estão fora do relógio. Download feito pelo próprio runtime depois da partida entra no intervalo, mas não ganha uma decomposição automática. Separar carregamento de pesos, transferência PCIe, compilação e captura de grafos exige logs ou profiling específicos: não podemos deduzir esses tempos isolados apenas olhando a API.</p>
+<p>Provisionamento, dependências e todos os downloads ficam fora do experimento. <code>--local-model-path</code> verifica arquivos não vazios e shards declarados antes do relógio, sem ler os pesos integralmente. <code>--launch</code> passa <code>HF_HUB_OFFLINE=1</code> e <code>TRANSFORMERS_OFFLINE=1</code> ao filho; configure caminho local no runtime. Isso não bloqueia downloads arbitrários nem modifica servidor preexistente: o operador deve garantir o mesmo artefato local. Execução com download é inválida. Leitura de pesos locais, transferência PCIe, compilação e captura de grafos continuam incluídas, mas sua decomposição exige logs/profiling.</p>
 <h3 id="repeticao-de-cold-start-e-referencia-aquecida">Repetição de cold start e referência aquecida</h3>
 <p>Uma chamada do programa produz uma amostra de partida. <code>--repetitions</code> repete cenários sem reiniciar; não transforma três blocos em três cold starts. Para estudar a variabilidade inicial, repita a chamada completa com <code>--launch</code> em condições documentadas, uma por vez. O processo iniciado é encerrado ao final de cada chamada.</p>
 <p>A pergunta inicial é texto real em português, distinta da carga sintética dos cenários. Pode ser substituída por <code>--first-prompt-file</code>. Comparamos seu primeiro acesso com uma referência usando <strong>o mesmo texto</strong> no final; não comparamos diretamente essa pergunta curta com o cenário sintético longo. A referência final pode aproveitar cache de prefixo, portanto a diferença não isola automaticamente apenas inicialização de kernels. Ambos os resultados ficam disponíveis para interpretação.</p>
@@ -166,6 +172,16 @@ AQUECIMENTO MEDIDO → BLOCOS POSTERIORES → REFERÊNCIA FINAL
 <td><code>mean_itl_ms_p50/p95</code></td>
 <td>Distribuição da média de tempo entre tokens de cada requisição</td>
 <td>ms</td>
+</tr>
+<tr>
+<td><code>decode_tokens_s_p50/p95</code></td>
+<td>Geração após primeiro token: <code>1000 / mean_itl_ms</code></td>
+<td>tokens/s</td>
+</tr>
+<tr>
+<td><code>effective_tokens_s_p50/p95</code></td>
+<td>Saída / tempo total da requisição, incluindo TTFT</td>
+<td>tokens/s</td>
 </tr>
 <tr>
 <td><code>prompt_tokens_p50/p95</code></td>
@@ -209,6 +225,12 @@ AQUECIMENTO MEDIDO → BLOCOS POSTERIORES → REFERÊNCIA FINAL
 <p>Para uma comparação de requisições independentes, tentem desativar reutilização entre requisições, quando o runtime permitir, e registrem como fizeram. Se não for possível, mantenham essa limitação explícita. O cliente não possui um botão universal de limpeza de cache para todos os servidores.</p>
 <p>As sementes de aquecimento diferem das sementes de medição, e os prompts variam. Isso reduz repetição exata, mas <strong>não garante cache frio</strong>: templates e prefixos comuns ainda podem ser reaproveitados. <code>cache_policy</code> é uma declaração do operador, não uma medição automática.</p>
 <h2 id="9-memoria-e-saude-do-pod">9. Memória e saúde do pod</h2>
+<p>O HTML incorpora telemetria por fase/GPU: memória máxima amostrada, capacidade total, utilização média/máxima, temperatura máxima e potência média/máxima. Sem NVIDIA ou permissões, mostra ausência, nunca zero. Este coletor não mede GPU Apple. Em hosts diferentes, os dados do cliente não descrevem o servidor.</p>
+<h3 id="tokenss-por-faixa-de-kv-o-que-podemos-afirmar">Tokens/s por faixa de KV: o que podemos afirmar?</h3>
+<p>Agrupamos requisições pela entrada real, incluindo template: [0,512), [512,1024), [1024,2048), [2048,4096), [4096,8192), [8192,16384), [16384,+∞). Mostramos contexto inicial/final, TTFT e duas velocidades. Escolha a grade sintética com <code>--input-tokens 256 512 1024 2048 3072</code>. Uma resposta que cruza fronteira permanece no grupo inicial; a unidade é a requisição, não o token individual.</p>
+<p>Para atenção completa, uma sequência e cache K/V convencional: <code>bytes por token = 2 × camadas × cabeças KV × dimensão da cabeça × bytes por elemento do KV</code>. O 2 representa K e V. Multiplique por tokens e divida por 1.048.576 para MiB. Informe o coeficiente validado com <code>--kv-bytes-per-token</code> para exibir estimativas. Bits dos pesos não determinam dtype do KV. Sliding window, MLA, padding, prefixos compartilhados e sharding exigem outro tratamento; o comprimento final é lógico, não prova materialização do último token em KV.</p>
+<p><code>--collect-kv-metrics</code> consulta <code>/metrics</code> (~1 Hz): usa <code>vllm:kv_cache_usage_perc</code> ou o nome legado <code>vllm:gpu_cache_usage_perc</code>, sem somar ambos. É fração de blocos ocupados do pool, não bytes de VRAM. Veja a <a href="https://docs.vllm.ai/en/v0.12.0/design/metrics/">documentação oficial</a>. Engines/séries são separados. Ausência não vira zero; a atualização do servidor e a coleta podem perder transientes.</p>
+<p>Assim, o HTML separa <strong>velocidade por contexto</strong>, <strong>KV lógico estimado</strong> e <strong>ocupação observada do pool KV</strong>. Velocidade instantânea por faixa exata de bytes físicos exigiria instrumentação adicional do servidor; a API HTTP portátil não oferece isso. Não fazemos uma correlação token a token que a amostragem não sustenta. O proxy de contexto/KV ajuda a organizar a carga, mas não autoriza concluir ocupação real do pool ou da VRAM sem o gauge/telemetria correspondente.</p>
 <p><code>gpu.csv</code> amostra memória ocupada, GPU utilization, temperatura e potência. Serve para procurar crescimento inesperado, aquecimento e interferência. O monitor é local ao cliente e não mede banda da GDDR6X, tráfego PCIe, FLOPs ou memória por processo.</p>
 <p>O maior uso registrado é um <strong>máximo amostrado</strong>, que pode perder um pico entre leituras. A alocação reservada pelo runtime também não é igual ao volume de dados lidos. Não conclua “memory-bound” apenas porque a VRAM está quase cheia. Essa conclusão exige evidência adicional, por exemplo profiling e experimentos controlados.</p>
 <h2 id="10-como-explorar-os-parametros-do-vllm">10. Como explorar os parâmetros do vLLM</h2>

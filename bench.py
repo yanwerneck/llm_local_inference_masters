@@ -6,25 +6,47 @@ import argparse
 import asyncio
 import csv
 import hashlib
-import html
 import importlib.metadata
 import json
 import math
 import os
 from pathlib import Path
 import platform
+import re
 import subprocess
 import sys
 import threading
-import time
 from datetime import datetime, timezone
 from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parent
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 GUIDELLM_VERSION = "0.7.4"
 WORKLOADS = {"short": 256, "medium": 2048, "long": 8192}
 OUTPUT_TOKENS = 128
+
+
+def local_model_check(value):
+    """Checa presença, não lê pesos nem aquece o page cache deliberadamente."""
+    path = Path(value).expanduser().resolve()
+    if path.is_file():
+        if path.suffix not in {".safetensors", ".gguf", ".bin", ".pt", ".pth"} and not path.name.startswith("sha256-"):
+            raise ValueError("Informe um arquivo de pesos (não configuração/texto) ou blob sha256- do Ollama.")
+        files = [path]
+    elif path.is_dir():
+        files = [f for f in path.rglob("*") if f.is_file() and f.suffix in {".safetensors", ".gguf", ".bin", ".pt", ".pth"}]
+        for index in path.glob("*.index.json"):
+            data = json.loads(index.read_text())
+            missing = [name for name in set(data.get("weight_map", {}).values()) if not (path / name).is_file()]
+            if missing:
+                raise ValueError(f"Shards ausentes: {missing}")
+    else:
+        files = []
+    if not files or any(f.stat().st_size == 0 for f in files):
+        raise ValueError("Pesos locais ausentes/vazios. Prepare o modelo antes do benchmark; downloads não são permitidos na medição.")
+    return {"policy": "Pesos locais obrigatórios; download excluído do protocolo.", "path": str(path),
+            "files": len(files), "bytes": sum(f.stat().st_size for f in files),
+            "validation": "presença/tamanho e shards declarados; não verifica conteúdo, SSD físico ou vínculo com API"}
 
 
 def write_json(path, data):
@@ -136,28 +158,59 @@ def scenario_config(cfg, name, count, seed, secret, timeout):
 
 class Monitor:
     """Amostragem best effort; CSV local, não um profiler de largura de banda."""
-    def __init__(self, output):
+    def __init__(self, output, cfg=None, secret="", collect_kv=False):
         self.output = Path(output)
         self.stop_event = threading.Event()
         self.thread = None
         self.phase = "setup"
+        self.cfg, self.secret, self.collect_kv = cfg, secret, collect_kv
+        self.kv_thread = None
 
     def start(self):
         self.thread = threading.Thread(target=self.loop, daemon=True)
         self.thread.start()
+        if self.collect_kv:
+            self.kv_thread = threading.Thread(target=self.kv_loop, daemon=True)
+            self.kv_thread.start()
+
+    def kv_loop(self):
+        import httpx
+        headers = {"Authorization": f"Bearer {self.secret}"} if self.secret else {}
+        pattern = re.compile(r'^(vllm:(?:kv_cache_usage_perc|gpu_cache_usage_perc))(\{[^}]*\})?\s+([0-9.eE+\-]+)(?:\s|$)')
+        with (self.output / "kv-cache.csv").open("w", newline="") as handle, httpx.Client(timeout=1, headers=headers, follow_redirects=False) as client:
+            writer = csv.writer(handle)
+            writer.writerow(["utc", "phase", "series", "fraction"])
+            while not self.stop_event.is_set():
+                phase = self.phase
+                try:
+                    response = client.get(self.cfg["base_url"] + "/metrics")
+                    response.raise_for_status()
+                    matches = [m for line in response.text.splitlines() if (m := pattern.match(line))]
+                    modern = any(m[1] == "vllm:kv_cache_usage_perc" for m in matches)
+                    for m in matches:
+                        if modern and m[1] != "vllm:kv_cache_usage_perc":
+                            continue
+                        value = float(m[3])
+                        if math.isfinite(value) and 0 <= value <= 1:
+                            writer.writerow([datetime.now(timezone.utc).isoformat(), phase, redact(m[1] + (m[2] or ""), self.secret), value])
+                    handle.flush()
+                except (httpx.HTTPError, ValueError):
+                    pass  # Serveur inicializando/endpoint ausente: nunca inventar zeros.
+                self.stop_event.wait(1)
 
     def loop(self):
         with (self.output / "gpu.csv").open("w", newline="", encoding="utf-8") as handle:
             writer = csv.writer(handle)
             writer.writerow(["utc", "phase", "index", "name", "used_mib", "total_mib", "gpu_util_pct", "temperature_c", "power_w"])
             while not self.stop_event.is_set():
+                phase = self.phase
                 result = capture(["nvidia-smi", "--query-gpu=index,name,memory.used,memory.total,utilization.gpu,temperature.gpu,power.draw",
                                   "--format=csv,noheader,nounits"])
                 if result.get("returncode") != 0:
                     write_json(self.output / "gpu-unavailable.json", result)
                     return
                 for row in csv.reader(result["stdout"].splitlines(), skipinitialspace=True):
-                    writer.writerow([datetime.now(timezone.utc).isoformat(), self.phase, *row])
+                    writer.writerow([datetime.now(timezone.utc).isoformat(), phase, *row])
                 handle.flush()
                 self.stop_event.wait(1)
 
@@ -165,6 +218,8 @@ class Monitor:
         self.stop_event.set()
         if self.thread:
             self.thread.join(timeout=17)
+        if self.kv_thread:
+            self.kv_thread.join(timeout=3)
 
 
 def percentile(values, q):
@@ -182,10 +237,12 @@ def summarize(report):
     if len(benchmarks) != 1:
         raise ValueError("Esperado exatamente um benchmark sequencial.")
     requests = benchmarks[0]["requests"]
-    good = requests["successful"]
+    from reporting import derived
+    good = [{**r, **derived(r)} for r in requests["successful"]]
     result = {"successful": len(good), "errored": len(requests["errored"]), "incomplete": len(requests["incomplete"])}
     metrics = {"ttft_ms": "time_to_first_token_ms", "e2e_s": "request_latency",
-               "mean_itl_ms": "inter_token_latency_ms", "output_tokens": "output_tokens", "prompt_tokens": "prompt_tokens"}
+               "mean_itl_ms": "inter_token_latency_ms", "output_tokens": "output_tokens", "prompt_tokens": "prompt_tokens",
+               "decode_tokens_s": "decode_tokens_s", "effective_tokens_s": "effective_tokens_s"}
     for label, key in metrics.items():
         vals = [r.get(key) for r in good]
         result[label + "_n"] = sum(v is not None for v in vals)
@@ -204,28 +261,31 @@ def summarize(report):
 
 def write_requests_csv(path, report):
     """Amostras individuais para análise no R/Python, incluindo status de erro."""
+    from reporting import derived
     fields = ["status", "request_id", "request_start_time", "request_latency", "time_to_first_token_ms",
-              "inter_token_latency_ms", "prompt_tokens", "output_tokens"]
+              "inter_token_latency_ms", "prompt_tokens", "output_tokens", "decode_tokens_s", "effective_tokens_s",
+              "context_start_tokens", "context_end_tokens", "context_band"]
     with Path(path).open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=fields)
         writer.writeheader()
         for status in ("successful", "errored", "incomplete"):
             for row in report["benchmarks"][0]["requests"][status]:
+                if status == "successful":
+                    row = {**row, **derived(row)}
                 writer.writerow({"status": status, **{key: row.get(key) for key in fields[1:]}})
 
 
 def write_summary(output, rows):
+    from reporting import render
     write_json(output / "summary.json", rows)
     if not rows:
+        render(output, rows)
         return
     with (output / "summary.csv").open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
         writer.writeheader()
         writer.writerows(rows)
-    fields = ["phase", "scenario", "repetition", "successful", "errored", "ttft_ms_p50", "ttft_ms_p95", "mean_itl_ms_p50", "e2e_s_p50", "output_tokens_p50"]
-    head = "".join(f"<th>{html.escape(k)}</th>" for k in fields)
-    body = "".join("<tr>" + "".join(f"<td>{html.escape(str(r.get(k)))}</td>" for k in fields) + "</tr>" for r in rows)
-    (output / "summary.html").write_text(f'''<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Resultados — um usuário</title><style>body{{font:16px/1.7 system-ui;margin:32px;background:#f6f3ec;color:#193835}}table{{border-collapse:collapse}}td,th{{padding:12px;border:1px solid #ccd6cc;text-align:left}}.scroll{{overflow:auto}}</style><h1>Resultados · um usuário</h1><p><a href="lifecycle.html">Inicialização e primeira resposta →</a></p><p>Aquecimento (warmup) e operação posterior (measure) estão em linhas separadas; não agregue as fases sem identificar sua população. Erros não entram nos percentis. p95 com menos de 100 sucessos é exploratório. mean_itl é a média por requisição, não a distribuição de cada pausa do stream.</p><div class="scroll"><table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table></div><p>Confira manifest.json e os relatórios brutos antes de comparar. Nenhuma linha isolada determina um vencedor.</p></html>''', encoding="utf-8")
+    render(output, rows)
 
 
 def run(args):
@@ -235,6 +295,9 @@ def run(args):
         raise ValueError(f"Este projeto exige guidellm=={GUIDELLM_VERSION}; reinstale requirements.txt.")
     cfg = load_config(args.config)
     validate_run(cfg, args.scenarios, args.smoke)
+    availability = local_model_check(args.local_model_path)
+    availability["kv_bytes_per_token"] = args.kv_bytes_per_token
+    availability["launch_hf_offline"] = bool(args.launch)
     digest = tokenizer_digest(cfg["tokenizer"])
     count, repetitions = (3, 1) if args.smoke else (args.requests, args.repetitions)
     secret = os.environ.get("BENCH_API_KEY", "")
@@ -255,12 +318,16 @@ def run(args):
                     "config": cfg, "tokenizer": digest, "smoke": args.smoke, "requests": count,
                     "repetitions": repetitions, "warmup_requests_per_case": args.warmup,
                     "scenarios": args.scenarios, "seed": args.seed, "profile": "synchronous",
+                    "model_availability": availability,
+                    "guidellm_compat": "0.7.4 bounded drain of real late completion updates (5s); no request retry",
+                    "telemetry": {"gpu_source": "local nvidia-smi", "kv_metrics_requested": args.collect_kv_metrics,
+                                  "sampling": "approximately 1 Hz; not per-token"},
                     "python": sys.version, "platform": platform.platform(),
                     "git": capture(["git", "rev-parse", "HEAD"]), "status": "running"}
         write_json(output / "manifest.json", redact(manifest, secret))
         write_json(output / "client-packages.json", {d.metadata["Name"]: d.version for d in importlib.metadata.distributions()})
         write_json(output / "gpu-before.json", capture(["nvidia-smi"]))
-        monitor, rows = Monitor(output), []
+        monitor, rows = Monitor(output, cfg, secret, args.collect_kv_metrics), []
         launch, origin, cleanup_error = None, None, None
         lifecycle = {"mode": "new-process" if args.launch else "existing-server-state-unknown",
                      "status": "running", "initial_state_note": args.initial_state,
@@ -283,6 +350,7 @@ def run(args):
                                                        output / "first-request.json", origin)
             lifecycle_report(output, redact(lifecycle, secret))
             from guidellm.benchmark import BenchmarkScenario, benchmark_generative_text
+            from guidellm_compat import completion_drain
             for rep in range(repetitions):
                 # Rotação balanceia parcialmente a posição dos cenários entre repetições.
                 names = args.scenarios[rep % len(args.scenarios):] + args.scenarios[:rep % len(args.scenarios)]
@@ -298,11 +366,14 @@ def run(args):
                         config = scenario_config(cfg, name, n, seed, secret, args.timeout)
                         write_json(output / f"{prefix}-config.json", redact(config, secret))
                         print(f"{prefix}: {n} requisições, uma por vez", flush=True)
-                        report, _ = asyncio.run(benchmark_generative_text(BenchmarkScenario.model_validate(config)))
+                        with completion_drain():
+                            report, _ = asyncio.run(benchmark_generative_text(BenchmarkScenario.model_validate(config)))
                         raw = redact(report.model_dump(mode="json"), secret)
                         write_json(output / f"{prefix}.json", raw)
                         write_requests_csv(output / f"{prefix}-requests.csv", raw)
                         summary = summarize(raw)
+                        summary["expected"] = n
+                        summary["missing"] = max(0, n - sum(summary[k] for k in ("successful", "errored", "incomplete")))
                         rows.append({"runtime": cfg["runtime"], "model": cfg["model"],
                                      "cache_policy": cfg["cache_policy"], "tokenizer_sha256": digest["sha256"],
                                      "phase": phase, "scenario": name, "repetition": rep+1, **summary})
@@ -337,6 +408,7 @@ def run(args):
             manifest["ended_utc"] = datetime.now(timezone.utc).isoformat()
             write_json(output / "manifest.json", redact(manifest, secret))
             write_json(output / "gpu-after.json", capture(["nvidia-smi"]))
+            write_summary(output, rows)
         if cleanup_error:
             raise RuntimeError(f"Falha ao encerrar processo criado: {cleanup_error}. Confira o PID no lifecycle.json.")
         print(f"Concluído. Abra {output / 'lifecycle.html'} e {output / 'summary.html'}")
@@ -349,9 +421,29 @@ def positive(value):
     return number
 
 
+def rebuild_report(args):
+    """Atualiza apenas derivados, preservando relatórios brutos e manifesto original."""
+    output = Path(args.output)
+    rows = json.loads((output / "summary.json").read_text())
+    manifest = json.loads((output / "manifest.json").read_text())
+    for row in rows:
+        prefix = f"r{row['repetition']}-{row['scenario']}-{row['phase']}"
+        raw = json.loads((output / f"{prefix}.json").read_text())
+        row.update(summarize(raw))
+        expected = manifest.get("warmup_requests_per_case") if row["phase"] == "warmup" else manifest.get("requests")
+        row["expected"] = expected
+        row["missing"] = max(0, expected - sum(row[k] for k in ("successful", "errored", "incomplete"))) if expected is not None else None
+        write_requests_csv(output / f"{prefix}-requests.csv", raw)
+    write_summary(output, rows)
+    print(f"Relatório atualizado: {output / 'summary.html'}; dados brutos preservados.")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
+    report = commands.add_parser("report", help="Regenera derivados de uma execução existente, sem nova inferência.")
+    report.add_argument("--output", required=True)
+    report.set_defaults(func=rebuild_report)
     prep = commands.add_parser("prepare-tokenizer", help="Baixa apenas tokenizer; fixa revisão e guarda origem.")
     prep.add_argument("--model", default="Qwen/Qwen2.5-14B-Instruct")
     prep.add_argument("--revision", default="main")
@@ -359,6 +451,10 @@ def main():
     prep.set_defaults(func=prepare_tokenizer)
     cmd = commands.add_parser("run", help="Mede primeiro acesso, aquecimento e GuideLLM; lançamento do servidor é opcional.")
     cmd.add_argument("--config", required=True)
+    cmd.add_argument("--local-model-path", required=True, help="Pesos já no SSD: pasta HF, arquivo GGUF ou blob local do Ollama. Não baixa arquivos.")
+    cmd.add_argument("--collect-kv-metrics", action="store_true", help="Amostra /metrics do vLLM (~1 Hz); ocupação do pool KV, não bytes.")
+    cmd.add_argument("--kv-bytes-per-token", type=positive, help="Opcional: bytes de KV lógico por token, calculados para arquitetura/dtype reais. Estimativa, não VRAM medida.")
+    cmd.add_argument("--input-tokens", nargs="+", type=positive, help="Substitui --scenarios por uma grade de comprimentos sintéticos, ex.: 256 512 1024 2048 3072.")
     cmd.add_argument("--scenarios", nargs="+", choices=list(WORKLOADS), default=["short", "medium"])
     cmd.add_argument("--requests", type=positive, default=30)
     cmd.add_argument("--repetitions", type=positive, default=3)
@@ -370,9 +466,17 @@ def main():
     cmd.add_argument("--launch", help="Arquivo JSON com argv para iniciar um runtime LOCAL; encerra só esse processo ao final.")
     cmd.add_argument("--startup-timeout", type=positive, default=1800, help="Limite da espera pela API com --launch, em segundos.")
     cmd.add_argument("--first-prompt-file", help="Texto UTF-8 para a primeira requisição e referência final; default: pergunta sobre RAM/VRAM.")
-    cmd.add_argument("--initial-state", default="disk/CUDA/model caches not controlled", help="Descreva downloads e caches existentes; apenas registra, não limpa.")
+    cmd.add_argument("--initial-state", default="weights local; OS/compilation caches not controlled", help="Descreva SSD e caches existentes; apenas registra, não limpa.")
     cmd.set_defaults(func=run)
     args = parser.parse_args()
+    if getattr(args, "input_tokens", None):
+        if len(set(args.input_tokens)) != len(args.input_tokens):
+            parser.error("Não repita comprimentos em --input-tokens.")
+        args.scenarios = []
+        for size in args.input_tokens:
+            name = f"ctx{size}"
+            WORKLOADS[name] = size
+            args.scenarios.append(name)
     if hasattr(args, "scenarios") and len(set(args.scenarios)) != len(args.scenarios):
         parser.error("Não repita cenários na lista.")
     try:

@@ -48,9 +48,15 @@ O modelo pode encerrar antes de 128 tokens. Não forçamos ignore-EOS porque nã
 
 **Nada disso é descartado:** inicialização e primeira resposta ficam em `lifecycle.html`; aquecimento e blocos posteriores em `summary.html`, com a coluna `phase`. Separar fases não é excluí-las. Não as misturamos em uma única média porque respondem perguntas diferentes.
 
+O critério de validade do bloco é estrito: o relatório precisa conter o número solicitado de sucessos e nenhum erro/incompleta. Se uma execução real devolver apenas 2 de 3 amostras, ela deve ser investigada e repetida; não é evidência de que a validação do runtime passou.
+
+Uma amostra faltante permanece um diagnóstico do caminho GuideLLM/servidor; não deve ser descrita como uma correção universal já comprovada. Enquanto a causa não for reproduzida e verificada, mantenha esse bloco como falho.
+
+Para a versão fixada 0.7.4, o cliente possui um dreno limitado de compatibilidade: depois de o encerramento ser sinalizado, espera até cinco segundos por uma atualização terminal genuína que tenha chegado atrasada à fila local. Ele não repete chamadas nem fabrica contagens; sem atualização real, a guarda de completude permanece falhando. Isso reduz uma condição de corrida conhecida do adaptador, mas não equivale a validar um runtime real.
+
 ```text
 PARTIDA DO PROCESSO  (--launch)
-        │ inicialização, possível carga/compilação/download
+        │ leitura dos pesos locais, inicialização e compilação
         ▼
 API LISTA O MODELO   (não necessariamente já residente na GPU)
         │ primeiro POST medido; possível carregamento tardio
@@ -78,11 +84,11 @@ O tempo até a API responder não é sozinho uma comparação justa de carregame
 
 ### Processo novo não significa todos os caches frios
 
-Há pelo menos quatro estados distintos: processo novo com pesos locais; processo novo precisando baixar pesos; servidor ativo com modelo não residente; servidor e modelo já aquecidos. Cache de disco do sistema operacional e cache de compilação podem sobreviver à reinicialização. Registre em `--initial-state` quais condições existem. O script **não apaga caches, não descarrega modelos de servidores alheios e não reinicia o pod**.
+Estudamos processo novo com pesos locais, servidor ativo com modelo não residente e servidor/modelo aquecidos. Processo precisando baixar pesos está fora do protocolo. Cache de disco e compilação podem sobreviver à reinicialização; registre as condições em `--initial-state`. O script não apaga caches, não descarrega modelos alheios e não reinicia o pod.
 
 Sem `--launch`, a primeira requisição é apenas a primeira que este cliente observou. Não a rotule como cold start comprovado. Com `--launch`, sabemos o início do processo, mas não o estado de todos os caches. Uma porta já ocupada bloqueia o lançamento sem matar o processo existente.
 
-Provisionamento do pod, instalação de dependências e downloads anteriores ao processo estão fora do relógio. Download feito pelo próprio runtime depois da partida entra no intervalo, mas não ganha uma decomposição automática. Separar carregamento de pesos, transferência PCIe, compilação e captura de grafos exige logs ou profiling específicos: não podemos deduzir esses tempos isolados apenas olhando a API.
+Provisionamento, dependências e todos os downloads ficam fora do experimento. `--local-model-path` verifica arquivos não vazios e shards declarados antes do relógio, sem ler os pesos integralmente. `--launch` passa `HF_HUB_OFFLINE=1` e `TRANSFORMERS_OFFLINE=1` ao filho; configure caminho local no runtime. Isso não bloqueia downloads arbitrários nem modifica servidor preexistente: o operador deve garantir o mesmo artefato local. Execução com download é inválida. Leitura de pesos locais, transferência PCIe, compilação e captura de grafos continuam incluídas, mas sua decomposição exige logs/profiling.
 
 ### Repetição de cold start e referência aquecida
 
@@ -107,6 +113,8 @@ As medições são observadas pelo cliente. Incluem custos do serviço e transpo
 | `ttft_ms_p50/p95` | Distribuição da espera pelo primeiro conteúdo/token observado | ms |
 | `e2e_s_p50/p95` | Distribuição do tempo total de requisição | s |
 | `mean_itl_ms_p50/p95` | Distribuição da média de tempo entre tokens de cada requisição | ms |
+| `decode_tokens_s_p50/p95` | Geração após primeiro token: `1000 / mean_itl_ms` | tokens/s |
+| `effective_tokens_s_p50/p95` | Saída / tempo total da requisição, incluindo TTFT | tokens/s |
 | `prompt_tokens_p50/p95` | Comprimento real de entrada registrado | tokens |
 | `output_tokens_p50/p95` | Comprimento real da saída registrada | tokens |
 | `successful/errored/incomplete` | Contagens de resultados por status | requisições |
@@ -150,6 +158,18 @@ Para uma comparação de requisições independentes, tentem desativar reutiliza
 As sementes de aquecimento diferem das sementes de medição, e os prompts variam. Isso reduz repetição exata, mas **não garante cache frio**: templates e prefixos comuns ainda podem ser reaproveitados. `cache_policy` é uma declaração do operador, não uma medição automática.
 
 ## 9. Memória e saúde do pod
+
+O HTML incorpora telemetria por fase/GPU: memória máxima amostrada, capacidade total, utilização média/máxima, temperatura máxima e potência média/máxima. Sem NVIDIA ou permissões, mostra ausência, nunca zero. Este coletor não mede GPU Apple. Em hosts diferentes, os dados do cliente não descrevem o servidor.
+
+### Tokens/s por faixa de KV: o que podemos afirmar?
+
+Agrupamos requisições pela entrada real, incluindo template: [0,512), [512,1024), [1024,2048), [2048,4096), [4096,8192), [8192,16384), [16384,+∞). Mostramos contexto inicial/final, TTFT e duas velocidades. Escolha a grade sintética com `--input-tokens 256 512 1024 2048 3072`. Uma resposta que cruza fronteira permanece no grupo inicial; a unidade é a requisição, não o token individual.
+
+Para atenção completa, uma sequência e cache K/V convencional: `bytes por token = 2 × camadas × cabeças KV × dimensão da cabeça × bytes por elemento do KV`. O 2 representa K e V. Multiplique por tokens e divida por 1.048.576 para MiB. Informe o coeficiente validado com `--kv-bytes-per-token` para exibir estimativas. Bits dos pesos não determinam dtype do KV. Sliding window, MLA, padding, prefixos compartilhados e sharding exigem outro tratamento; o comprimento final é lógico, não prova materialização do último token em KV.
+
+`--collect-kv-metrics` consulta `/metrics` (~1 Hz): usa `vllm:kv_cache_usage_perc` ou o nome legado `vllm:gpu_cache_usage_perc`, sem somar ambos. É fração de blocos ocupados do pool, não bytes de VRAM. Veja a [documentação oficial](https://docs.vllm.ai/en/v0.12.0/design/metrics/). Engines/séries são separados. Ausência não vira zero; a atualização do servidor e a coleta podem perder transientes.
+
+Assim, o HTML separa **velocidade por contexto**, **KV lógico estimado** e **ocupação observada do pool KV**. Velocidade instantânea por faixa exata de bytes físicos exigiria instrumentação adicional do servidor; a API HTTP portátil não oferece isso. Não fazemos uma correlação token a token que a amostragem não sustenta. O proxy de contexto/KV ajuda a organizar a carga, mas não autoriza concluir ocupação real do pool ou da VRAM sem o gauge/telemetria correspondente.
 
 `gpu.csv` amostra memória ocupada, GPU utilization, temperatura e potência. Serve para procurar crescimento inesperado, aquecimento e interferência. O monitor é local ao cliente e não mede banda da GDDR6X, tráfego PCIe, FLOPs ou memória por processo.
 
