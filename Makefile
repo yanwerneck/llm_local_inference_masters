@@ -18,16 +18,41 @@ HF_REPO_ID ?= yanwerneck/Qwen2.5-7B-Instruct-GGUF-Q8_0
 HF_UPLOAD_FILENAME ?= Qwen2.5-7B-Instruct-Q8_0.gguf
 GGUF_OUTPUT_DIR ?= /workspace/models/Qwen2.5-7B-Instruct-GGUF-Q8_0
 QUANTIZE_THREADS ?= $(shell nproc 2>/dev/null || echo 1)
-VLLM_MODEL_DIR ?= /workspace/models/Qwen2.5-7B-Instruct-GGUF-Q8_0
+MODEL_SIZE ?= 7B
+MODEL_7B_GGUF ?= /workspace/models/Qwen2.5-7B-Instruct-GGUF-Q8_0/Qwen2.5-7B-Instruct-original-Q8_0.gguf
+MODEL_14B_GGUF ?= /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf
+MODEL_7B_TOKENIZER ?= /workspace/models/Qwen2.5-7B-Instruct-original
+MODEL_14B_TOKENIZER ?= /workspace/models/Qwen2.5-14B-tokenizer
+VLLM_EXTRA_ARGS ?=
+LLAMA_EXTRA_ARGS ?=
+OLLAMA_EXTRA_ARGS ?=
+ifeq ($(MODEL_SIZE),7B)
+GGUF_FILE := $(MODEL_7B_GGUF)
+TOKENIZER_DIR ?= $(MODEL_7B_TOKENIZER)
+VLLM_MODEL_DIR ?= $(dir $(MODEL_7B_GGUF))
 VLLM_CONFIG ?= configs/vllm-7b-gguf.json
 VLLM_LAUNCH ?= configs/launch-vllm-7b-gguf.example.json
-LLAMA_MODEL_DIR ?= /workspace/models/Qwen2.5-7B-Instruct-GGUF-Q8_0
+LLAMA_MODEL_DIR ?= $(dir $(MODEL_7B_GGUF))
 LLAMA_CONFIG ?= configs/llamacpp-7b-gguf.json
 LLAMA_LAUNCH ?= configs/launch-llamacpp-7b-gguf.json
-OLLAMA_MODEL_DIR ?= /workspace/models/Qwen2.5-7B-Instruct-GGUF-Q8_0
+OLLAMA_MODEL_DIR ?= $(dir $(MODEL_7B_GGUF))
 OLLAMA_CONFIG ?= configs/ollama-7b-gguf.json
 OLLAMA_LAUNCH ?= configs/launch-ollama-7b-gguf.json
-TOKENIZER_DIR ?= /workspace/models/Qwen2.5-7B-Instruct-original
+else ifeq ($(MODEL_SIZE),14B)
+GGUF_FILE := $(MODEL_14B_GGUF)
+TOKENIZER_DIR ?= $(MODEL_14B_TOKENIZER)
+VLLM_MODEL_DIR ?= $(MODEL_14B_GGUF)
+VLLM_CONFIG ?= configs/vllm-14b-gguf.json
+VLLM_LAUNCH ?= configs/launch-vllm-14b-gguf.json
+LLAMA_MODEL_DIR ?= $(MODEL_14B_GGUF)
+LLAMA_CONFIG ?= configs/llamacpp-14b-gguf.json
+LLAMA_LAUNCH ?= configs/launch-llamacpp-14b-gguf.json
+OLLAMA_MODEL_DIR ?= $(MODEL_14B_GGUF)
+OLLAMA_CONFIG ?= configs/ollama-14b-gguf.json
+OLLAMA_LAUNCH ?= configs/launch-ollama-14b-gguf.json
+else
+$(error MODEL_SIZE deve ser 7B ou 14B)
+endif
 VLLM_BIN ?= /workspace/vllm-runtime/.venv/bin/vllm
 LLAMA_SERVER_BIN ?= /workspace/llama.cpp/build/bin/llama-server
 OLLAMA_BIN ?= ollama
@@ -39,7 +64,6 @@ BENCH_STARTUP_TIMEOUT ?= 1800
 
 QUANTIZE_BIN := $(LLAMA_CPP_BUILD_DIR)/bin/llama-quantize
 QUANTIZE_SCRIPT := scripts/quantize_hf_to_gguf_q8_0.sh
-GGUF_FILE := $(GGUF_OUTPUT_DIR)/Qwen2.5-7B-Instruct-original-Q8_0.gguf
 
 .PHONY: help check-tools clone-llama build-llama install-llama-python \
         download-source inspect-source quantize-q8 verify-gguf upload-hf \
@@ -68,6 +92,8 @@ help:
 		'  make docs                 regenera os HTMLs dos documentos' \
 		'' \
 		'Variáveis úteis:' \
+		'  MODEL_SIZE=7B|14B, MODEL_7B_GGUF, MODEL_14B_GGUF' \
+		'  VLLM_EXTRA_ARGS, LLAMA_EXTRA_ARGS, OLLAMA_EXTRA_ARGS' \
 		'  LLAMA_CPP_DIR, HF_MODEL_DIR, GGUF_OUTPUT_DIR, QUANTIZE_THREADS' \
 		'  VLLM_MODEL_DIR, VLLM_CONFIG, VLLM_LAUNCH' \
 		'  LLAMA_MODEL_DIR, LLAMA_CONFIG, LLAMA_LAUNCH' \
@@ -162,6 +188,7 @@ smoke-vllm: verify-gguf
 		--config "$(VLLM_CONFIG)" \
 		--local-model-path "$(VLLM_MODEL_DIR)" \
 		--launch "$(VLLM_LAUNCH)" \
+		--launch-extra-args $(VLLM_EXTRA_ARGS) \
 		--smoke --scenarios short --startup-timeout 1800
 
 bench-vllm: verify-gguf
@@ -182,6 +209,7 @@ bench-vllm: verify-gguf
 		$(PYTHON) scripts/run_kv_sweep.py --runtime-label vllm \
 		--config "$(VLLM_CONFIG)" --launch "$(VLLM_LAUNCH)" \
 		--local-model-path "$(VLLM_MODEL_DIR)" --python "$(PYTHON)" \
+		--launch-extra-args $(VLLM_EXTRA_ARGS) \
 		--requests "$(BENCH_REQUESTS)" --repetitions "$(BENCH_REPETITIONS)" \
 		--warmup "$(BENCH_WARMUP)" --startup-timeout "$(BENCH_STARTUP_TIMEOUT)" \
 		--results results/kv-sweep-vllm
@@ -191,6 +219,7 @@ bench-llama: verify-gguf
 	HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_HUB_ENABLE_HF_TRANSFER=0 \
 		$(PYTHON) bench.py run --config "$(LLAMA_CONFIG)" \
 		--local-model-path "$(LLAMA_MODEL_DIR)" --launch "$(LLAMA_LAUNCH)" \
+		--launch-extra-args $(LLAMA_EXTRA_ARGS) \
 		--scenarios $(BENCH_SCENARIOS) --requests "$(BENCH_REQUESTS)" \
 		--repetitions "$(BENCH_REPETITIONS)" --warmup "$(BENCH_WARMUP)" \
 		--collect-kv-metrics --startup-timeout "$(BENCH_STARTUP_TIMEOUT)"
@@ -199,6 +228,7 @@ bench-llama: verify-gguf
 		$(PYTHON) scripts/run_kv_sweep.py --runtime-label llama.cpp \
 		--config "$(LLAMA_CONFIG)" --launch "$(LLAMA_LAUNCH)" \
 		--local-model-path "$(LLAMA_MODEL_DIR)" --python "$(PYTHON)" \
+		--launch-extra-args $(LLAMA_EXTRA_ARGS) \
 		--context-flag=--ctx-size \
 		--requests "$(BENCH_REQUESTS)" --repetitions "$(BENCH_REPETITIONS)" \
 		--warmup "$(BENCH_WARMUP)" --startup-timeout "$(BENCH_STARTUP_TIMEOUT)" \
@@ -210,6 +240,7 @@ bench-ollama: verify-gguf
 	HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_HUB_ENABLE_HF_TRANSFER=0 \
 		$(PYTHON) bench.py run --config "$(OLLAMA_CONFIG)" \
 		--local-model-path "$(OLLAMA_MODEL_DIR)" --launch "$(OLLAMA_LAUNCH)" \
+		--launch-extra-args $(OLLAMA_EXTRA_ARGS) \
 		--scenarios $(BENCH_SCENARIOS) --requests "$(BENCH_REQUESTS)" \
 		--repetitions "$(BENCH_REPETITIONS)" --warmup "$(BENCH_WARMUP)" \
 		--collect-kv-metrics --startup-timeout "$(BENCH_STARTUP_TIMEOUT)"
@@ -218,6 +249,7 @@ bench-ollama: verify-gguf
 		$(PYTHON) scripts/run_kv_sweep.py --runtime-label ollama \
 		--config "$(OLLAMA_CONFIG)" --launch "$(OLLAMA_LAUNCH)" \
 		--local-model-path "$(OLLAMA_MODEL_DIR)" --python "$(PYTHON)" \
+		--launch-extra-args $(OLLAMA_EXTRA_ARGS) \
 		--context-flag none \
 		--requests "$(BENCH_REQUESTS)" --repetitions "$(BENCH_REPETITIONS)" \
 		--warmup "$(BENCH_WARMUP)" --startup-timeout "$(BENCH_STARTUP_TIMEOUT)" \

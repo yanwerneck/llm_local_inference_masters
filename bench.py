@@ -450,7 +450,7 @@ def run(args):
         try:
             monitor.start()
             if args.launch:
-                launch = Launch(cfg, args.launch, output)
+                launch = Launch(cfg, args.launch, output, args.launch_extra_args)
                 lifecycle["argv"] = redact(launch.argv, secret)
                 monitor.set_phase("process_startup")
                 origin = launch.start()
@@ -578,6 +578,8 @@ def main():
     cmd.add_argument("--results", default="results")
     cmd.add_argument("--smoke", action="store_true", help="3 medições e 1 repetição; não vale como resultado final.")
     cmd.add_argument("--launch", help="Arquivo JSON com argv para iniciar um runtime LOCAL; encerra só esse processo ao final.")
+    cmd.add_argument("--launch-extra-args", nargs="*", default=[],
+                     help="Argumentos experimentais acrescentados ao argv do launch, sem editar o JSON; registrados no lifecycle.")
     cmd.add_argument("--startup-timeout", type=positive, default=1800, help="Limite da espera pela API com --launch, em segundos.")
     cmd.add_argument("--first-prompt-file", help="Texto UTF-8 para a primeira requisição e referência final; default: pergunta sobre RAM/VRAM.")
     cmd.add_argument("--initial-state", default="weights local; OS/compilation caches not controlled", help="Descreva SSD e caches existentes; apenas registra, não limpa.")

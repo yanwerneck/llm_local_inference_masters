@@ -21,7 +21,7 @@ DEFAULT_PROMPT = (
 
 
 class Launch:
-    def __init__(self, cfg, command_file, output):
+    def __init__(self, cfg, command_file, output, extra_args=None):
         url = urlsplit(cfg["base_url"])
         if url.hostname not in {"127.0.0.1", "localhost", "::1"}:
             raise ValueError("--launch só aceita servidor local (localhost).")
@@ -29,6 +29,10 @@ class Launch:
         self.argv = json.loads(Path(command_file).read_text(encoding="utf-8"))
         if not isinstance(self.argv, list) or not self.argv or any(not isinstance(x, str) or not x for x in self.argv):
             raise ValueError("O arquivo --launch deve conter um array JSON não vazio de strings (argv).")
+        if extra_args:
+            if any(not isinstance(x, str) or not x for x in extra_args):
+                raise ValueError("--launch-extra-args aceita somente strings não vazias.")
+            self.argv.extend(extra_args)
         self.output = Path(output)
         self.process = None
         self.log = None

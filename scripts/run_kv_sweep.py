@@ -16,7 +16,7 @@ def positive(value: str) -> int:
     return number
 
 
-def launch_with_context(source: Path, target: Path, context: int, context_flag: str) -> None:
+def launch_with_context(source: Path, target: Path, context: int, context_flag: str, extra_args: list[str]) -> None:
     args = json.loads(source.read_text())
     if not isinstance(args, list):
         raise ValueError("launch JSON deve ser uma lista de argumentos")
@@ -26,6 +26,7 @@ def launch_with_context(source: Path, target: Path, context: int, context_flag: 
             args[index] = str(context)
         else:
             args.extend([context_flag, str(context)])
+    args.extend(extra_args)
     target.write_text(json.dumps(args, indent=2) + "\n")
 
 
@@ -46,6 +47,8 @@ def main() -> int:
     parser.add_argument("--runtime-label", default="runtime")
     parser.add_argument("--context-flag", default="--max-model-len",
                         help="Flag do servidor que controla contexto; use none quando ele é configurado fora do argv.")
+    parser.add_argument("--launch-extra-args", nargs="*", default=[],
+                        help="Argumentos adicionais acrescentados ao launch em todos os pontos.")
     args = parser.parse_args()
     config = json.loads(Path(args.config).read_text())
     root = Path(args.results)
@@ -61,7 +64,8 @@ def main() -> int:
             config_path = temp / f"config-{context}.json"
             launch_path = temp / f"launch-{context}.json"
             config_path.write_text(json.dumps(config_copy, indent=2) + "\n")
-            launch_with_context(Path(args.launch), launch_path, context + 128 + 256, args.context_flag)
+            launch_with_context(Path(args.launch), launch_path, context + 128 + 256,
+                                args.context_flag, args.launch_extra_args)
             command = [args.python, "bench.py", "run", "--config", str(config_path),
                        "--local-model-path", args.local_model_path, "--launch", str(launch_path),
                        "--input-tokens", str(context), "--requests", str(args.requests),

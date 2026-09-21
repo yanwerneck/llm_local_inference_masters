@@ -690,6 +690,19 @@ O primeiro testa validação, estatísticas, lançamento seguro e cronometria in
 
 ### Preparação reproduzível antes do benchmark
 
+O modelo da rodada é selecionado sem editar os comandos:
+
+```bash
+# Qwen 7B GGUF Q8_0 (padrão)
+make prepare-benchmark MODEL_SIZE=7B
+
+# Qwen 14B GGUF Q8_0
+make prepare-benchmark MODEL_SIZE=14B \
+  MODEL_14B_GGUF=/workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf
+```
+
+Os perfis e launchers são escolhidos automaticamente para o tamanho. Se o GGUF estiver em outra pasta, sobrescreva `MODEL_7B_GGUF` ou `MODEL_14B_GGUF`; o arquivo de launch correspondente também pode ser substituído com `VLLM_LAUNCH`, `LLAMA_LAUNCH` ou `OLLAMA_LAUNCH`.
+
 No pod, depois de colocar o GGUF e o tokenizer no SSD, execute:
 
 ```bash
@@ -721,6 +734,21 @@ Para executar tudo:
 ```bash
 make bench-all
 ```
+
+Parâmetros experimentais dos runtimes podem ser acrescentados sem editar JSON. Eles são anexados ao `argv` e aparecem no `lifecycle.json`:
+
+```bash
+make bench-vllm MODEL_SIZE=7B \
+  VLLM_EXTRA_ARGS='--gpu-memory-utilization 0.85 --enforce-eager'
+
+make bench-llama MODEL_SIZE=7B \
+  LLAMA_EXTRA_ARGS='--flash-attn auto --threads 8'
+
+make bench-ollama MODEL_SIZE=7B \
+  OLLAMA_EXTRA_ARGS=''
+```
+
+Use os nomes suportados pela versão instalada. O Make não corrige, remove ou substitui argumentos inválidos: se o runtime falhar, o log deve ser preservado. Para mudar os três ao mesmo tempo, use `VLLM_EXTRA_ARGS`, `LLAMA_EXTRA_ARGS` e `OLLAMA_EXTRA_ARGS` na mesma chamada.
 
 O agregador tenta os três runtimes, imprime um status separado para cada um e retorna erro ao final se algum falhar. Ele não troca modelo, não faz fallback e não esconde falhas. Antes de `make bench-ollama`, crie localmente o alias `qwen7b-q8-gguf` com um `Modelfile` que aponte para o GGUF do SSD; o alvo apenas executa `ollama serve` e nunca faz `ollama pull`:
 
