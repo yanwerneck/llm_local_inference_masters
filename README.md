@@ -67,14 +67,15 @@ hf download arthuravianna/Qwen2.5-14B-Instruct-Q8_0.gguf \
   --revision main \
   --local-dir /workspace/models
 hf download Qwen/Qwen2.5-14B-Instruct \
-  --include 'tokenizer*' 'special_tokens_map.json' 'chat_template.jinja' \
+  --include 'config.json' 'tokenizer*' 'special_tokens_map.json' 'chat_template.jinja' \
   --revision main \
   --local-dir /workspace/models/Qwen2.5-14B-tokenizer
 ls -lh /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf
 sha256sum /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf
+python -c 'import json; print("tokenizer model_type:", json.load(open("/workspace/models/Qwen2.5-14B-tokenizer/config.json"))["model_type"])'
 ```
 
-`huggingface_hub` instala o comando `hf`; o primeiro `hf download` baixa somente o arquivo GGUF para o volume persistente, e o segundo baixa somente os arquivos necessários do tokenizer. Nenhum servidor deve ser iniciado durante essa etapa. `ls` confirma o tamanho no SSD e `sha256sum` produz a impressão digital que deve ser registrada em `configs/*.json` e no relatório.
+`huggingface_hub` instala o comando `hf`; o primeiro `hf download` baixa somente o arquivo GGUF para o volume persistente, e o segundo baixa os arquivos de tokenizer **e o `config.json` mínimo exigido pelo vLLM**, incluindo `model_type: qwen2`. Nenhum servidor deve ser iniciado durante essa etapa. `ls` confirma o tamanho no SSD, `sha256sum` produz a impressão digital que deve ser registrada em `configs/*.json` e o último comando confirma que o vLLM conseguirá reconhecer a arquitetura do tokenizer.
 
 Não é necessário executar `prepare-tokenizer` nem preencher nenhum `SHA_REGISTRADO_NO_SOURCE_JSON`: o comando `hf download` acima já colocou o tokenizer no caminho usado pelos três runtimes. O hash que precisamos controlar nesta rodada é o SHA-256 do GGUF. Compartilhe **a mesma pasta** de tokenizer entre os integrantes. O servidor também aplica seu chat template; compare os templates e as contagens reais retornadas, não só os nomes dos modelos.
 
@@ -148,6 +149,7 @@ mkdir -p /workspace/vllm-runtime
 # Se o ambiente ainda não existir:
 python3 -m venv /workspace/vllm-runtime/.venv
 source /workspace/vllm-runtime/.venv/bin/activate
+unset VLLM_VENV
 python -m pip install -U vllm vllm-gguf-plugin
 python -c 'import vllm; print(vllm.__version__)'
 nvidia-smi
