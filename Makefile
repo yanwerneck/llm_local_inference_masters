@@ -27,6 +27,10 @@ LLAMA_LAUNCH ?= configs/launch-llamacpp-7b-gguf.json
 OLLAMA_MODEL_DIR ?= /workspace/models/Qwen2.5-7B-Instruct-GGUF-Q8_0
 OLLAMA_CONFIG ?= configs/ollama-7b-gguf.json
 OLLAMA_LAUNCH ?= configs/launch-ollama-7b-gguf.json
+TOKENIZER_DIR ?= /workspace/models/Qwen2.5-7B-Instruct-original
+VLLM_BIN ?= /workspace/vllm-runtime/.venv/bin/vllm
+LLAMA_SERVER_BIN ?= /workspace/llama.cpp/build/bin/llama-server
+OLLAMA_BIN ?= ollama
 BENCH_SCENARIOS ?= short medium long
 BENCH_REQUESTS ?= 50
 BENCH_REPETITIONS ?= 3
@@ -39,7 +43,7 @@ GGUF_FILE := $(GGUF_OUTPUT_DIR)/Qwen2.5-7B-Instruct-original-Q8_0.gguf
 
 .PHONY: help check-tools clone-llama build-llama install-llama-python \
         download-source inspect-source quantize-q8 verify-gguf upload-hf \
-        smoke-vllm bench-vllm bench-llama bench-ollama bench-all bench kv-sweep docs clean-info
+        prepare-benchmark prepare-ollama smoke-vllm bench-vllm bench-llama bench-ollama bench-all bench kv-sweep docs clean-info
 
 help:
 	@printf '%s\n' \
@@ -53,6 +57,8 @@ help:
 		'  make quantize-q8          gera GGUF F16 e depois GGUF Q8_0' \
 		'  make verify-gguf          confirma assinatura, tamanho e SHA-256' \
 		'  make upload-hf            publica somente o GGUF no Hugging Face' \
+		'  make prepare-benchmark    instala cliente, cria pastas e valida modelo/configs/runtimes' \
+		'  make prepare-ollama      cria o alias Ollama a partir do GGUF local, sem download' \
 		'  make smoke-vllm           executa smoke do benchmark com GGUF local' \
 		'  make bench-vllm            bateria formal: short/medium/long, 50x3, com telemetria' \
 		'  make bench-llama           mesma bateria usando llama-server' \
@@ -109,6 +115,38 @@ verify-gguf:
 	head -c 4 "$(GGUF_FILE)" | od -An -tc
 	$(PYTHON) -c 'import sys; from pathlib import Path; p=Path(sys.argv[1]); data=p.read_bytes(); sys.exit("assinatura GGUF inválida") if data[:4] != b"GGUF" else print("assinatura GGUF válida")' "$(GGUF_FILE)"
 	sha256sum "$(GGUF_FILE)"
+
+prepare-benchmark: verify-gguf
+	@echo '[PREPARE] criando diretório de resultados'
+	mkdir -p results
+	@echo '[PREPARE] instalando dependências somente no Python indicado por PYTHON=$(PYTHON)'
+	$(PYTHON) -m pip install -r requirements.txt
+	@echo '[PREPARE] validando imports do cliente'
+	$(PYTHON) -c 'import guidellm, httpx, psutil, transformers; print("guidellm", guidellm.__version__, "httpx", httpx.__version__, "psutil", psutil.__version__, "transformers", transformers.__version__)'
+	@echo '[PREPARE] validando tokenizer e JSONs'
+	test -f "$(TOKENIZER_DIR)/tokenizer_config.json"
+	$(PYTHON) -m json.tool "$(VLLM_CONFIG)" >/dev/null
+	$(PYTHON) -m json.tool "$(VLLM_LAUNCH)" >/dev/null
+	$(PYTHON) -m json.tool "$(LLAMA_CONFIG)" >/dev/null
+	$(PYTHON) -m json.tool "$(LLAMA_LAUNCH)" >/dev/null
+	$(PYTHON) -m json.tool "$(OLLAMA_CONFIG)" >/dev/null
+	$(PYTHON) -m json.tool "$(OLLAMA_LAUNCH)" >/dev/null
+	@echo '[PREPARE] verificando executáveis dos runtimes'
+	test -x "$(VLLM_BIN)" || { echo "vLLM ausente: $(VLLM_BIN)"; exit 1; }
+	test -x "$(LLAMA_SERVER_BIN)" || { echo "llama-server ausente: $(LLAMA_SERVER_BIN)"; exit 1; }
+	command -v "$(OLLAMA_BIN)" >/dev/null || { echo "ollama ausente: $(OLLAMA_BIN)"; exit 1; }
+	"$(VLLM_BIN)" --help >/dev/null
+	"$(LLAMA_SERVER_BIN)" --help >/dev/null
+	"$(OLLAMA_BIN)" --version
+	@echo '[PREPARE] pronto: execute make bench-all (Ollama exige alias criado; veja make prepare-ollama)'
+
+prepare-ollama: verify-gguf
+	@echo '[PREPARE] criando qwen7b-q8-gguf a partir do GGUF local; nenhum download será feito'
+	command -v "$(OLLAMA_BIN)" >/dev/null || { echo "ollama ausente: $(OLLAMA_BIN)"; exit 1; }
+	printf 'FROM %s\nPARAMETER num_ctx 16384\n' "$(GGUF_FILE)" > /tmp/Modelfile.qwen7b
+	"$(OLLAMA_BIN)" create qwen7b-q8-gguf -f /tmp/Modelfile.qwen7b
+	"$(OLLAMA_BIN)" show qwen7b-q8-gguf >/dev/null
+	@echo '[PREPARE] alias qwen7b-q8-gguf disponível'
 
 upload-hf: verify-gguf
 	@test -n "$${HF_TOKEN:-}" || { echo 'HF_TOKEN não está definido; exporte-o sem colar o valor no repositório.' >&2; exit 1; }

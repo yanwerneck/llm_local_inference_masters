@@ -688,6 +688,19 @@ O primeiro testa validação, estatísticas, lançamento seguro e cronometria in
 
 ## 8. Protocolo atual: métricas canônicas, telemetria e KV sweep
 
+### Preparação reproduzível antes do benchmark
+
+No pod, depois de colocar o GGUF e o tokenizer no SSD, execute:
+
+```bash
+make prepare-benchmark
+make prepare-ollama
+```
+
+`prepare-benchmark` instala as dependências no Python apontado por `PYTHON`, cria `results/`, valida tokenizer, JSONs, assinatura do GGUF, imports do cliente e executáveis de vLLM, llama-server e Ollama. Não inicia servidores nem faz download de pesos. Se algum caminho for diferente no pod, sobrescreva, por exemplo: `make prepare-benchmark VLLM_BIN=/workspace/vllm-runtime/.venv/bin/vllm LLAMA_SERVER_BIN=/workspace/llama.cpp/build/bin/llama-server`.
+
+`prepare-ollama` cria o alias `qwen7b-q8-gguf` a partir do GGUF local usando um `Modelfile` temporário. Ele requer o daemon Ollama disponível e nunca executa `ollama pull`.
+
 O alvo formal é `make bench-vllm` (ou o mesmo comando trocando os três perfis de runtime). Ele executa automaticamente **short, medium e long**, com 50 requisições de medição por cenário, 3 repetições e 3 aquecimentos por cenário. Isso produz até 150 sucessos por combinação, quantidade suficiente para que p99 deixe de ser apenas uma fotografia de três observações. Uma requisição por vez continua sendo intencional: este trabalho não mede concorrência.
 
 As duas métricas que devem aparecer na comparação são:
