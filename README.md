@@ -702,7 +702,7 @@ make prepare-benchmark MODEL_SIZE=14B \
   MODEL_14B_GGUF=/workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf
 ```
 
-Para colocar o 7B no SSD antes do `make prepare-benchmark`:
+O comando equivalente, sem Make, para baixar o 7B é:
 
 ```bash
 mkdir -p /workspace/models/Qwen2.5-7B-Instruct-Q8_0
@@ -714,14 +714,22 @@ hf download arthuravianna/Qwen2.5-7B-Instruct-Q8_0.gguf \
 
 Os perfis e launchers são escolhidos automaticamente para o tamanho. Se o GGUF estiver em outra pasta, sobrescreva `MODEL_7B_GGUF` ou `MODEL_14B_GGUF`; o arquivo de launch correspondente também pode ser substituído com `VLLM_LAUNCH`, `LLAMA_LAUNCH` ou `OLLAMA_LAUNCH`.
 
-No pod, depois de colocar o GGUF e o tokenizer no SSD, execute:
+No pod, execute a preparação completa. Ela cria as pastas, baixa o GGUF selecionado e baixa somente os arquivos do tokenizer para o SSD:
 
 ```bash
 make prepare-benchmark
 make prepare-ollama
 ```
 
-`prepare-benchmark` instala as dependências no Python apontado por `PYTHON`, cria `results/`, valida tokenizer, JSONs, assinatura do GGUF, imports do cliente e executáveis de vLLM, llama-server e Ollama. Não inicia servidores nem faz download de pesos. Se algum caminho for diferente no pod, sobrescreva, por exemplo: `make prepare-benchmark VLLM_BIN=/workspace/vllm-runtime/.venv/bin/vllm LLAMA_SERVER_BIN=/workspace/llama.cpp/build/bin/llama-server`.
+`prepare-benchmark` cria `results/`, baixa o GGUF do repositório configurado em `HF_GGUF_REPO`, baixa o tokenizer base em `HF_TOKENIZER_MODEL`, instala as dependências no Python apontado por `PYTHON`, valida JSONs, assinatura do GGUF, imports do cliente e executáveis de vLLM, llama-server e Ollama. Não inicia servidores e não mede nenhum tempo. Se algum caminho ou repositório for diferente no pod, sobrescreva `MODEL_7B_GGUF`, `MODEL_14B_GGUF`, `HF_GGUF_REPO`, `HF_GGUF_FILENAME`, `HF_TOKENIZER_MODEL`, `VLLM_BIN` ou `LLAMA_SERVER_BIN`.
+
+Se quiser executar apenas partes da preparação:
+
+```bash
+make download-model MODEL_SIZE=7B
+make download-tokenizer MODEL_SIZE=7B
+make verify-gguf MODEL_SIZE=7B
+```
 
 `prepare-ollama` cria o alias `qwen7b-q8-gguf` a partir do GGUF local usando um `Modelfile` temporário. Ele requer o daemon Ollama disponível e nunca executa `ollama pull`.
 

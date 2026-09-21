@@ -234,7 +234,7 @@ Esse benchmark mede desempenho, **não qualidade**. Uma pequena bateria fixa de 
 
 ## Atualização 0.4: métricas e telemetria operacional
 
-Antes da medição, `make prepare-benchmark` instala o cliente, valida o GGUF, tokenizer, configurações JSON e os três executáveis. `make prepare-ollama` importa o GGUF local no alias Ollama sem download. Essas etapas são preparação e não entram nos tempos do benchmark.
+Antes da medição, `make prepare-benchmark` cria diretórios, baixa o GGUF e tokenizer, instala o cliente e valida configurações e os três executáveis. `make prepare-ollama` importa o GGUF local no alias Ollama sem novo download. Essas etapas são preparação e não entram nos tempos do benchmark.
 
 O protocolo formal usa `short`, `medium` e `long` automaticamente, com 50 requisições, 3 repetições e 3 aquecimentos por cenário. As métricas principais têm nomes canônicos: **Time To First Token (ms)**, um valor por requisição do POST ao primeiro token, e **Tokens/s**, a taxa de decode sem o TTFT. Percentis são calculados sobre requisições bem-sucedidas; p99 é uma cauda de uma distribuição de requisições, não três TTFTs da mesma chamada.
 

@@ -29,6 +29,9 @@ OLLAMA_EXTRA_ARGS ?=
 ifeq ($(MODEL_SIZE),7B)
 GGUF_FILE := $(MODEL_7B_GGUF)
 TOKENIZER_DIR ?= $(MODEL_7B_TOKENIZER)
+HF_GGUF_REPO ?= arthuravianna/Qwen2.5-7B-Instruct-Q8_0.gguf
+HF_GGUF_FILENAME ?= Qwen2.5-7B-Instruct-Q8_0.gguf
+HF_TOKENIZER_MODEL ?= Qwen/Qwen2.5-7B-Instruct
 VLLM_MODEL_DIR ?= $(dir $(MODEL_7B_GGUF))
 VLLM_CONFIG ?= configs/vllm-7b-gguf.json
 VLLM_LAUNCH ?= configs/launch-vllm-7b-gguf.example.json
@@ -41,6 +44,9 @@ OLLAMA_LAUNCH ?= configs/launch-ollama-7b-gguf.json
 else ifeq ($(MODEL_SIZE),14B)
 GGUF_FILE := $(MODEL_14B_GGUF)
 TOKENIZER_DIR ?= $(MODEL_14B_TOKENIZER)
+HF_GGUF_REPO ?= arthuravianna/Qwen2.5-14B-Instruct-Q8_0.gguf
+HF_GGUF_FILENAME ?= Qwen2.5-14B-Instruct-Q8_0.gguf
+HF_TOKENIZER_MODEL ?= Qwen/Qwen2.5-14B-Instruct
 VLLM_MODEL_DIR ?= $(MODEL_14B_GGUF)
 VLLM_CONFIG ?= configs/vllm-14b-gguf.json
 VLLM_LAUNCH ?= configs/launch-vllm-14b-gguf.json
@@ -67,7 +73,7 @@ QUANTIZE_SCRIPT := scripts/quantize_hf_to_gguf_q8_0.sh
 
 .PHONY: help check-tools clone-llama build-llama install-llama-python \
         download-source inspect-source quantize-q8 verify-gguf upload-hf \
-        prepare-benchmark prepare-ollama smoke-vllm bench-vllm bench-llama bench-ollama bench-all bench kv-sweep docs clean-info
+        download-model download-tokenizer prepare-benchmark prepare-ollama smoke-vllm bench-vllm bench-llama bench-ollama bench-all bench kv-sweep docs clean-info
 
 help:
 	@printf '%s\n' \
@@ -81,6 +87,8 @@ help:
 		'  make quantize-q8          gera GGUF F16 e depois GGUF Q8_0' \
 		'  make verify-gguf          confirma assinatura, tamanho e SHA-256' \
 		'  make upload-hf            publica somente o GGUF no Hugging Face' \
+		'  make download-model       baixa o GGUF selecionado para o SSD' \
+		'  make download-tokenizer   baixa somente os arquivos do tokenizer' \
 		'  make prepare-benchmark    instala cliente, cria pastas e valida modelo/configs/runtimes' \
 		'  make prepare-ollama      cria o alias Ollama a partir do GGUF local, sem download' \
 		'  make smoke-vllm           executa smoke do benchmark com GGUF local' \
@@ -142,7 +150,23 @@ verify-gguf:
 	$(PYTHON) -c 'import sys; from pathlib import Path; p=Path(sys.argv[1]); data=p.read_bytes(); sys.exit("assinatura GGUF inválida") if data[:4] != b"GGUF" else print("assinatura GGUF válida")' "$(GGUF_FILE)"
 	sha256sum "$(GGUF_FILE)"
 
-prepare-benchmark: verify-gguf
+download-model:
+	@echo '[PREPARE] baixando GGUF $(MODEL_SIZE): $(HF_GGUF_REPO)'
+	mkdir -p "$(dir $(GGUF_FILE))"
+	HF_HUB_OFFLINE=0 TRANSFORMERS_OFFLINE=0 HF_HUB_ENABLE_HF_TRANSFER="$(HF_HUB_ENABLE_HF_TRANSFER)" \
+		$(HF) download "$(HF_GGUF_REPO)" "$(HF_GGUF_FILENAME)" --revision "$(HF_REVISION)" \
+		--local-dir "$(dir $(GGUF_FILE))"
+	@test -f "$(GGUF_FILE)" || { echo "GGUF baixado em local inesperado; esperado: $(GGUF_FILE)"; exit 1; }
+
+download-tokenizer:
+	@echo '[PREPARE] baixando tokenizer local: $(HF_TOKENIZER_MODEL)'
+	mkdir -p "$(TOKENIZER_DIR)"
+	HF_HUB_OFFLINE=0 TRANSFORMERS_OFFLINE=0 HF_HUB_ENABLE_HF_TRANSFER="$(HF_HUB_ENABLE_HF_TRANSFER)" \
+		$(HF) download "$(HF_TOKENIZER_MODEL)" --revision "$(HF_REVISION)" \
+		--include 'config.json' 'tokenizer*' 'special_tokens_map.json' 'chat_template.jinja' \
+		--local-dir "$(TOKENIZER_DIR)"
+
+prepare-benchmark: download-model download-tokenizer verify-gguf
 	@echo '[PREPARE] criando diretório de resultados'
 	mkdir -p results
 	@echo '[PREPARE] instalando dependências somente no Python indicado por PYTHON=$(PYTHON)'
