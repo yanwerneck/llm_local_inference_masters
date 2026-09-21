@@ -76,28 +76,18 @@ sha256sum /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf
 
 `huggingface_hub` instala o comando `hf`; o primeiro `hf download` baixa somente o arquivo GGUF para o volume persistente, e o segundo baixa somente os arquivos necessários do tokenizer. Nenhum servidor deve ser iniciado durante essa etapa. `ls` confirma o tamanho no SSD e `sha256sum` produz a impressão digital que deve ser registrada em `configs/*.json` e no relatório.
 
-Se preferir usar o preparador do projeto para registrar a revisão do tokenizer, execute depois do download:
+Não é necessário executar `prepare-tokenizer` nem preencher nenhum `SHA_REGISTRADO_NO_SOURCE_JSON`: o comando `hf download` acima já colocou o tokenizer no caminho usado pelos três runtimes. O hash que precisamos controlar nesta rodada é o SHA-256 do GGUF. Compartilhe **a mesma pasta** de tokenizer entre os integrantes. O servidor também aplica seu chat template; compare os templates e as contagens reais retornadas, não só os nomes dos modelos.
 
-```bash
-python bench.py prepare-tokenizer --revision SHA_REGISTRADO_NO_SOURCE_JSON
-```
+## 3. Preparar a configuração do benchmark
 
-Nesse caso, copie a pasta registrada para `/workspace/models/Qwen2.5-14B-tokenizer` ou altere explicitamente o caminho em todos os comandos. O tokenizer converte texto em tokens e é usado para construir a carga sintética. Compartilhe **a mesma pasta** entre os três integrantes. O servidor também aplica seu chat template; compare os templates e as contagens reais retornadas, não só os nomes dos modelos.
-
-## 3. Confirmar o modelo servido
-
-```bash
-curl http://127.0.0.1:8000/v1/models
-```
-
-Esse GET lista os IDs aceitos pelo servidor. Copie o ID para `model` em `configs/vllm.json`. Se usou um alias no servidor, o ID pode ser diferente do nome no Hugging Face.
+Neste ponto ainda não existe servidor. Não execute `curl` agora: primeiro escolha um runtime e siga a seção correspondente em **4. Smoke test**, que mostra o comando exato para iniciar o servidor. Depois que o processo estiver em foreground e o log indicar que a API está disponível, o `curl` de cada runtime confirma o ID servido.
 
 Edite o JSON com seu editor ou com `nano configs/vllm.json` (instale `nano` se não estiver disponível). Cada campo tem uma finalidade:
 
 | Campo | O que registrar |
 |---|---|
 | `base_url` | Raiz HTTP do servidor; não coloque `/chat/completions`. |
-| `model` | ID exatamente como aparece em `/v1/models`. |
+| `model` | ID exatamente como aparece em `/v1/models`; os exemplos usam `qwen14b-q8-gguf`. |
 | `tokenizer` | Pasta local; caminhos relativos são relativos ao diretório em que você executa o comando. |
 | `context_window` | Limite realmente configurado no runtime. Mudar este JSON **não** reconfigura o servidor. |
 | `cache_policy` | Política de reutilização entre requisições, após verificá-la. Ex.: `disabled-confirmed` ou `enabled-recorded: detalhes`. |
