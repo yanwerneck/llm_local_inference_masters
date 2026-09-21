@@ -79,6 +79,36 @@ python -c 'import json; print("tokenizer model_type:", json.load(open("/workspac
 
 Não é necessário executar `prepare-tokenizer` nem preencher nenhum `SHA_REGISTRADO_NO_SOURCE_JSON`: o comando `hf download` acima já colocou o tokenizer no caminho usado pelos três runtimes. O hash que precisamos controlar nesta rodada é o SHA-256 do GGUF. Compartilhe **a mesma pasta** de tokenizer entre os integrantes. O servidor também aplica seu chat template; compare os templates e as contagens reais retornadas, não só os nomes dos modelos.
 
+### Artefato alternativo: safetensors quantizado em 8 bits
+
+Existe um experimento separado para o repositório [`arthuravianna/Qwen2.5-14B-Instruct-GGUF-8bit`](https://huggingface.co/arthuravianna/Qwen2.5-14B-Instruct-GGUF-8bit/tree/main). Apesar do nome conter `GGUF`, ele não contém um arquivo `.gguf`: são cinco shards `.safetensors`, com tensores `qweight` em `uint8`, cerca de 17 GB no total e metadados que declaram `quant_method: gguf`. Portanto, ele **não é o mesmo artefato** do `Q8_0.gguf` e seus resultados não entram na tabela de comparação justa dos três runtimes.
+
+Baixe-o antes de iniciar o benchmark:
+
+```bash
+mkdir -p /workspace/models/Qwen2.5-14B-Instruct-GGUF-8bit
+hf download arthuravianna/Qwen2.5-14B-Instruct-GGUF-8bit \
+  --revision main \
+  --local-dir /workspace/models/Qwen2.5-14B-Instruct-GGUF-8bit
+du -sh /workspace/models/Qwen2.5-14B-Instruct-GGUF-8bit
+ls -lh /workspace/models/Qwen2.5-14B-Instruct-GGUF-8bit/model-*.safetensors
+```
+
+O tokenizer está na própria pasta. Para testar vLLM desde a criação do processo, use os arquivos de configuração já incluídos:
+
+```bash
+unset HF_DEBUG VLLM_VENV
+export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
+nvidia-smi
+python bench.py run \
+  --config configs/vllm-8bit-safetensors.json \
+  --local-model-path /workspace/models/Qwen2.5-14B-Instruct-GGUF-8bit \
+  --launch configs/launch-vllm-8bit-safetensors.example.json \
+  --smoke --scenarios short --startup-timeout 1800
+```
+
+O `--gpu-memory-utilization 0.90` deixa uma margem explícita para buffers e evita ocupar toda a placa; registre-o como parte da configuração. Para a bateria completa, substitua o final por `--scenarios short medium long --repetitions 3`. Se o processo falhar, examine `results/<timestamp>/server.log` e mantenha a falha: não troque automaticamente para o GGUF nem para o checkpoint BF16. Esse repositório pode ser incompatível com o loader GGUF do vLLM mesmo estando armazenado em safetensors; essa incompatibilidade é precisamente o resultado a diagnosticar.
+
 ## 3. Preparar a configuração do benchmark
 
 Neste ponto ainda não existe servidor. Não execute `curl` agora: primeiro escolha um runtime e siga a seção correspondente em **4. Smoke test**, que mostra o comando exato para iniciar o servidor. Depois que o processo estiver em foreground e o log indicar que a API está disponível, o `curl` de cada runtime confirma o ID servido.

@@ -48,6 +48,8 @@ Sem `--launch`, o servidor já existia antes do cronômetro: medimos a primeira 
 
 O protocolo é comum aos três servidores, mas o comando muda: `vllm serve` para vLLM; `llama-server -m caminho/model.gguf` para llama.cpp; e `ollama serve`/preload local mantido em foreground para Ollama. No Ollama, a API pode estar viva antes do modelo ser carregado; por isso não usamos processo → API como substituto do processo → primeiro conteúdo. Cada runtime deve usar o mesmo artefato local e um arquivo `--launch` separado. Downloads antes do processo ficam fora; download iniciado pelo servidor torna a execução inválida para comparação.
 
+Há também um perfil experimental separado para `arthuravianna/Qwen2.5-14B-Instruct-GGUF-8bit`. Apesar do nome, esse repositório contém cinco shards safetensors quantizados em 8 bits, não um arquivo GGUF; seus metadados declaram `qweight`/`uint8` e `quant_method: gguf`. Ele usa `configs/vllm-8bit-safetensors.json` e `configs/launch-vllm-8bit-safetensors.example.json` e não deve ser misturado com os resultados do `Q8_0.gguf`. Falhas de loader, quantização ou memória devem ser preservadas como resultados diagnósticos, sem fallback automático.
+
 1. Validamos configuração, versão do instrumento e arquivos do tokenizer, antes de iniciar o runtime.
 2. Com `--launch`, lançamos o processo e medimos até a API listar o modelo. Sem essa opção, a partida anterior é desconhecida e não recebe um tempo inventado.
 3. Enviamos **a primeira requisição já cronometrada**, que também valida streaming e usage. Não há teste de geração anterior.
