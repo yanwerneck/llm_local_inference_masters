@@ -55,6 +55,8 @@ As dependências diretas centrais estão fixadas. Isso não é um lockfile compl
 
 ## 2. Baixar somente o tokenizer
 
+Modelo desta rodada: `arthuravianna/Qwen2.5-14B-Instruct-Q8_0.gguf`. O GGUF contém apenas os pesos; use o tokenizer do modelo base Qwen2.5. O vLLM GGUF requer `vllm-gguf-plugin` e é experimental. Se não carregar no CUDA/RTX3090, use o fallback `arthuravianna/Qwen2.5-14B-Instruct-GPTQ-8bit` com os arquivos `configs/vllm-gptq-fallback.example.json` e `configs/launch-vllm-gptq-fallback.example.json`.
+
 ```bash
 python bench.py prepare-tokenizer
 ```
@@ -67,7 +69,7 @@ O tokenizer converte texto em tokens e é usado para construir a carga sintétic
 python bench.py prepare-tokenizer --revision SHA_REGISTRADO_NO_SOURCE_JSON
 ```
 
-Se o tokenizer do checkpoint quantizado foi alterado, use `--model arthuravianna/Qwen2.5-14B-Instruct-GPTQ-8bit` e confira a correspondência. Um modelo diferente exige o tokenizer correspondente. O servidor também aplica seu chat template; compare os templates e as contagens reais retornadas, não só os nomes dos modelos.
+Se o tokenizer do checkpoint quantizado foi alterado, use o tokenizer correspondente ao artefato. Um modelo diferente exige seu próprio tokenizer. O servidor também aplica seu chat template; compare os templates e as contagens reais retornadas, não só os nomes dos modelos.
 
 ## 3. Confirmar o modelo servido
 
@@ -102,8 +104,28 @@ A tecla Enter encerra a leitura. O Python obtém o valor do ambiente e o remove 
 
 ## 4. Smoke test: provar que o caminho funciona
 
+### O carregamento do modelo entra onde?
+
+Há duas modalidades. Sem `--launch`, o benchmark conecta a um servidor já existente: **não mede a criação do processo nem pode afirmar quando os pesos foram carregados**. Ele mede apenas a primeira requisição observada por este cliente. Com `--launch`, o próprio benchmark inicia o comando em foreground e mede:
+
+1. `process_to_api_observed_s`: criação do processo até `/v1/models` listar o alias. Isso mede prontidão HTTP, mas não prova que os pesos já estão residentes.
+2. `process_to_first_content_s`: criação do processo até o primeiro conteúdo da primeira geração. Este é o indicador principal do custo de carregamento tardio, pois inclui leitura dos pesos locais, alocação, inicialização de kernels e compilação que ocorram antes/durante a primeira geração.
+3. `process_to_response_end_s`: criação do processo até o fim da primeira resposta; inclui também o decode dessa resposta.
+
+Para os três runtimes, execute o processo real do servidor via um arquivo `--launch` diferente, sempre parado antes do teste:
+
+| Runtime | Comando foreground a colocar no arquivo `--launch` | Marco de carregamento |
+|---|---|---|
+| vLLM | `vllm serve ...` com o caminho local do GGUF ou GPTQ | processo → primeiro conteúdo; `/v1/models` pode anteceder a carga completa |
+| llama.cpp | `llama-server -m /workspace/models/model.gguf ...` | processo → primeiro conteúdo; o servidor normalmente carrega o GGUF no startup |
+| Ollama | `ollama serve` | processo → primeiro conteúdo, porque `ollama serve` pode ficar pronto antes de `ollama run` carregar o modelo |
+
+O arquivo deve conter apenas um array JSON de argumentos, sem `source`, `&`, `docker -d`, pipes ou redirecionamentos. Para Ollama, o benchmark precisa conseguir alcançar `/v1/models` e `/v1/chat/completions`; se `ollama serve` não resolver o modelo sozinho, use um wrapper foreground documentado que mantenha o processo e faça o preload local sem baixar arquivos. O wrapper deve receber as variáveis offline apropriadas e ser validado no `server.log`.
+
+O download do modelo continua fora do benchmark: prepare os arquivos/blob no SSD antes de iniciar. Se o runtime baixar depois da criação do processo, a execução não é comparável entre integrantes e deve ser marcada como inválida, não “corrigida” subtraindo uma estimativa de internet.
+
 ```bash
-python bench.py run --config configs/vllm.json --local-model-path /workspace/models/Qwen2.5-14B-Instruct-GPTQ-8bit --smoke --scenarios short
+python bench.py run --config configs/vllm.json --local-model-path /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf --launch configs/launch-vllm.example.json --smoke --scenarios short
 ```
 
 Faz GET de disponibilidade (sem gerar texto), **uma primeira requisição já cronometrada**, três requisições de aquecimento, três medições GuideLLM e uma referência final com o mesmo prompt inicial. Sempre uma de cada vez. A primeira requisição também verifica SSE/usage; não há um POST oculto de preflight antes dela. O aquecimento agora aparece no resumo, identificado por `phase=warmup`.
@@ -123,7 +145,7 @@ Pare manualmente o servidor que você iniciou. O benchmark **não mata um servid
 O exemplo contém um caminho provável do seu pod e contexto 4096, mas não é uma instalação/tuning universal. O comando escrito em `server_command` continua sendo metadado: **só o arquivo passado com `--launch` é executado**. Não ponha segredos nesse arquivo; use variáveis de ambiente apropriadas ao runtime.
 
 ```bash
-python bench.py run --config configs/vllm.json --local-model-path /workspace/models/Qwen2.5-14B-Instruct-GPTQ-8bit --launch configs/launch-vllm.example.json --smoke --scenarios short --startup-timeout 1800 --initial-state 'Pesos no SSD; caches não limpos'
+python bench.py run --config configs/vllm.json --local-model-path /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf --launch configs/launch-vllm.example.json --smoke --scenarios short --startup-timeout 1800 --initial-state 'GGUF no SSD; caches não limpos'
 ```
 
 Esse comando:
@@ -149,7 +171,7 @@ Downloads, provisionamento e instalação ficam na preparação, fora do experim
 O prompt inicial padrão é uma pergunta em português sobre RAM/VRAM com limite de 128 tokens de saída. Para usar seu próprio caso de chatbot:
 
 ```bash
-python bench.py run --config configs/vllm.json --local-model-path /workspace/models/Qwen2.5-14B-Instruct-GPTQ-8bit --launch configs/launch-vllm.example.json --first-prompt-file pergunta.txt --scenarios short --requests 30 --repetitions 1
+python bench.py run --config configs/vllm.json --local-model-path /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf --launch configs/launch-vllm.example.json --first-prompt-file pergunta.txt --scenarios short --requests 30 --repetitions 1
 ```
 
 Crie `pergunta.txt` em UTF-8 com seu editor e use o mesmo conteúdo nos três runtimes. Esse arquivo não passa por truncamento automático; confirme que cabe no contexto. A referência final repete exatamente esse prompt e pode se beneficiar de cache de prefixo: documente a política ao comparar frio/quente.
@@ -165,7 +187,7 @@ As faixas de contexto e `--kv-bytes-per-token` são um proxy lógico da carga: e
 Depois de preencher os metadados:
 
 ```bash
-python bench.py run --config configs/vllm.json --local-model-path /workspace/models/Qwen2.5-14B-Instruct-GPTQ-8bit --scenarios short medium --requests 30 --repetitions 3
+python bench.py run --config configs/vllm.json --local-model-path /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf --scenarios short medium --requests 30 --repetitions 3
 ```
 
 Isso faz 30 medições por cenário por repetição: **180 requisições na fase measure**, mais aquecimento medido, primeira resposta e referência final. Há apenas **uma requisição em andamento**, não 30 usuários. As três repetições ajudam a observar variação entre blocos; não são três réplicas independentes de hardware nem três partidas.
@@ -175,7 +197,7 @@ As sementes variam por cenário/repetição e são iguais entre runtimes quando 
 ## 6. Cenário longo, só depois
 
 ```bash
-python bench.py run --config configs/vllm.json --local-model-path /workspace/models/Qwen2.5-14B-Instruct-GPTQ-8bit --scenarios short medium long --requests 100 --repetitions 3
+python bench.py run --config configs/vllm.json --local-model-path /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf --scenarios short medium long --requests 100 --repetitions 3
 ```
 
 São **900 medições**; isso pode levar bastante tempo e consumir horas cobradas no RunPod. Primeiro valide os cenários menores. O longo usa aproximadamente 8192 tokens de conteúdo e teto de 128 tokens de saída. O guard exige `context_window >= 8576`, reservando 256 tokens para template; essa margem não comprova que o modelo cabe na VRAM. Configure e valide o servidor, por exemplo com contexto de 9216 ou maior se houver memória, antes de mudar o JSON.
@@ -188,7 +210,7 @@ Não suponha que a RTX 3090 comporte qualquer contexto com um modelo de 14B em 8
 
 ```bash
 python bench.py run --config configs/vllm.json \
-  --local-model-path /workspace/models/Qwen2.5-14B-Instruct-GPTQ-8bit \
+  --local-model-path /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf \
   --input-tokens 256 512 1024 2048 3072 \
   --collect-kv-metrics --requests 30 --repetitions 3
 ```

@@ -1,11 +1,9 @@
 [
   "/workspace/yan-vllm/.venv/bin/vllm",
   "serve",
-  "/workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf",
-  "--tokenizer",
-  "/workspace/models/Qwen2.5-14B-tokenizer",
+  "/workspace/models/Qwen2.5-14B-Instruct-GPTQ-8bit",
   "--served-model-name",
-  "qwen14b-q8-gguf",
+  "qwen14b-gptq-8bit",
   "--host",
   "127.0.0.1",
   "--port",

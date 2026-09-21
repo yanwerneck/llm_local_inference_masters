@@ -1,5 +1,7 @@
 # Um usuário. Três runtimes. Um instrumento.
 
+O artefato principal desta rodada é `arthuravianna/Qwen2.5-14B-Instruct-Q8_0.gguf`. No vLLM, GGUF exige `vllm-gguf-plugin` e é experimental/subotimizado. Se o carregamento falhar na RTX3090, use `arthuravianna/Qwen2.5-14B-Instruct-GPTQ-8bit` como fallback e registre a troca; GGUF Q8_0 e GPTQ-8bit não são o mesmo artefato.
+
 Este estudo pergunta: **como o runtime e seus parâmetros mudam o tempo de resposta de um chatbot para uma pessoa?** A carga de múltiplos usuários fica para o próximo trabalho.
 
 ## 1. Quem faz o quê?
@@ -39,6 +41,12 @@ O texto não é um dataset validado de perguntas em português, nem uma conversa
 O modelo pode encerrar antes de 128 tokens. Não forçamos ignore-EOS porque não é um parâmetro portátil entre os três servidores. Registrar saída efetiva é obrigatório: uma configuração pode parecer mais rápida apenas por gerar menos texto. Textos sintéticos também podem provocar respostas curtas ou estranhas; confirme os comprimentos no piloto antes de investir na bateria inteira.
 
 ## 4. Como uma execução acontece
+
+### O que chamamos de carregamento
+
+Sem `--launch`, o servidor já existia antes do cronômetro: medimos a primeira requisição deste cliente, mas não o carregamento do processo/pesos. Com `--launch`, medimos processo → API, processo → primeiro conteúdo e processo → fim da primeira resposta. O primeiro conteúdo é o marco operacional mais importante para o carregamento, porque cobre pesos locais, alocação, inicialização de kernels e compilação tardia que ocorram antes ou durante a primeira geração. O GET `/v1/models` é apenas prontidão observada.
+
+O protocolo é comum aos três servidores, mas o comando muda: `vllm serve` para vLLM; `llama-server -m caminho/model.gguf` para llama.cpp; e `ollama serve`/preload local mantido em foreground para Ollama. No Ollama, a API pode estar viva antes do modelo ser carregado; por isso não usamos processo → API como substituto do processo → primeiro conteúdo. Cada runtime deve usar o mesmo artefato local e um arquivo `--launch` separado. Downloads antes do processo ficam fora; download iniciado pelo servidor torna a execução inválida para comparação.
 
 1. Validamos configuração, versão do instrumento e arquivos do tokenizer, antes de iniciar o runtime.
 2. Com `--launch`, lançamos o processo e medimos até a API listar o modelo. Sem essa opção, a partida anterior é desconhecida e não recebe um tempo inventado.

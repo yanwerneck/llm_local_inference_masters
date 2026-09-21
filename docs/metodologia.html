@@ -7,6 +7,7 @@
 <li><a href="#2-o-que-um-usuario-significa-aqui">2. O que “um usuário” significa aqui?</a></li>
 <li><a href="#3-qual-carga-sera-usada">3. Qual carga será usada?</a></li>
 <li><a href="#4-como-uma-execucao-acontece">4. Como uma execução acontece</a><ul>
+<li><a href="#o-que-chamamos-de-carregamento">O que chamamos de carregamento</a></li>
 <li><a href="#as-metricas-iniciais">As métricas iniciais</a></li>
 <li><a href="#processo-novo-nao-significa-todos-os-caches-frios">Processo novo não significa todos os caches frios</a></li>
 <li><a href="#repeticao-de-cold-start-e-referencia-aquecida">Repetição de cold start e referência aquecida</a></li>
@@ -28,6 +29,7 @@
 </ul>
 </div>
 <h1 id="um-usuario-tres-runtimes-um-instrumento">Um usuário. Três runtimes. Um instrumento.</h1>
+<p>O artefato principal desta rodada é <code>arthuravianna/Qwen2.5-14B-Instruct-Q8_0.gguf</code>. No vLLM, GGUF exige <code>vllm-gguf-plugin</code> e é experimental/subotimizado. Se o carregamento falhar na RTX3090, use <code>arthuravianna/Qwen2.5-14B-Instruct-GPTQ-8bit</code> como fallback e registre a troca; GGUF Q8_0 e GPTQ-8bit não são o mesmo artefato.</p>
 <p>Este estudo pergunta: <strong>como o runtime e seus parâmetros mudam o tempo de resposta de um chatbot para uma pessoa?</strong> A carga de múltiplos usuários fica para o próximo trabalho.</p>
 <h2 id="1-quem-faz-o-que">1. Quem faz o quê?</h2>
 <pre><code class="language-text">Este projeto → GuideLLM → API HTTP do runtime → modelo na GPU
@@ -76,6 +78,9 @@
 <p>O texto não é um dataset validado de perguntas em português, nem uma conversa real com histórico crescente. Cada requisição é independente. O cenário longo <strong>representa o volume de contexto</strong>, mas não avalia reaproveitamento de uma conversa em vários turnos. Esse escopo evita misturar dois fenômenos no primeiro experimento.</p>
 <p>O modelo pode encerrar antes de 128 tokens. Não forçamos ignore-EOS porque não é um parâmetro portátil entre os três servidores. Registrar saída efetiva é obrigatório: uma configuração pode parecer mais rápida apenas por gerar menos texto. Textos sintéticos também podem provocar respostas curtas ou estranhas; confirme os comprimentos no piloto antes de investir na bateria inteira.</p>
 <h2 id="4-como-uma-execucao-acontece">4. Como uma execução acontece</h2>
+<h3 id="o-que-chamamos-de-carregamento">O que chamamos de carregamento</h3>
+<p>Sem <code>--launch</code>, o servidor já existia antes do cronômetro: medimos a primeira requisição deste cliente, mas não o carregamento do processo/pesos. Com <code>--launch</code>, medimos processo → API, processo → primeiro conteúdo e processo → fim da primeira resposta. O primeiro conteúdo é o marco operacional mais importante para o carregamento, porque cobre pesos locais, alocação, inicialização de kernels e compilação tardia que ocorram antes ou durante a primeira geração. O GET <code>/v1/models</code> é apenas prontidão observada.</p>
+<p>O protocolo é comum aos três servidores, mas o comando muda: <code>vllm serve</code> para vLLM; <code>llama-server -m caminho/model.gguf</code> para llama.cpp; e <code>ollama serve</code>/preload local mantido em foreground para Ollama. No Ollama, a API pode estar viva antes do modelo ser carregado; por isso não usamos processo → API como substituto do processo → primeiro conteúdo. Cada runtime deve usar o mesmo artefato local e um arquivo <code>--launch</code> separado. Downloads antes do processo ficam fora; download iniciado pelo servidor torna a execução inválida para comparação.</p>
 <ol>
 <li>Validamos configuração, versão do instrumento e arquivos do tokenizer, antes de iniciar o runtime.</li>
 <li>Com <code>--launch</code>, lançamos o processo e medimos até a API listar o modelo. Sem essa opção, a partida anterior é desconhecida e não recebe um tempo inventado.</li>

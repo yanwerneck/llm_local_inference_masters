@@ -1,5 +1,9 @@
 # Seu primeiro Qwen no RunPod com vLLM
 
+**Atualização do artefato:** o modelo principal agora é [Qwen2.5-14B-Instruct-Q8_0.gguf](https://huggingface.co/arthuravianna/Qwen2.5-14B-Instruct-Q8_0.gguf). No vLLM CUDA, instale `vllm-gguf-plugin` e use o arquivo GGUF local com `--tokenizer` do Qwen2.5. A documentação do vLLM classifica GGUF como experimental; se o servidor não iniciar, use o [GPTQ-8bit](https://huggingface.co/arthuravianna/Qwen2.5-14B-Instruct-GPTQ-8bit) como fallback. Os comandos GPTQ abaixo permanecem como fallback funcional e devem ser identificados como tal no benchmark.
+
+**Como o benchmark mede o carregamento:** use `--launch` com o servidor parado. O intervalo processo → `/v1/models` mede prontidão HTTP; processo → primeiro conteúdo da primeira geração é o indicador de carregamento efetivo, incluindo pesos locais, alocação e kernels. Sem `--launch`, o carregamento não é conhecido. Para llama.cpp use `llama-server -m ...`; para Ollama use `ollama serve` com preload local mantido em foreground; para vLLM use `vllm serve ...`. O download precisa ocorrer antes do processo.
+
 Guia do Yan · RTX 3090 / 24 GB · conferido em 16/09/2026.
 
 **Objetivo de hoje: receber uma resposta do modelo.** Depois, observar a máquina e mudar uma coisa por vez. Não há uma configuração “vencedora” aqui: os limites iniciais só deixam o primeiro teste pequeno e previsível.
