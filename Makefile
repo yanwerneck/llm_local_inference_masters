@@ -83,7 +83,7 @@ verify-gguf:
 	ls -lh "$(GGUF_FILE)"
 	printf 'assinatura: '
 	head -c 4 "$(GGUF_FILE)" | od -An -tc
-	$(PYTHON) -c 'import sys; from pathlib import Path; p=Path(sys.argv[1]); data=p.read_bytes(); raise SystemExit("assinatura GGUF inválida") if data[:4] != b"GGUF" else print("assinatura GGUF válida")' "$(GGUF_FILE)"
+	$(PYTHON) -c 'import sys; from pathlib import Path; p=Path(sys.argv[1]); data=p.read_bytes(); sys.exit("assinatura GGUF inválida") if data[:4] != b"GGUF" else print("assinatura GGUF válida")' "$(GGUF_FILE)"
 	sha256sum "$(GGUF_FILE)"
 
 smoke-vllm: verify-gguf
