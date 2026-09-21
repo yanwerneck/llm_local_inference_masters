@@ -4,7 +4,7 @@ Leia junto com [a explicação detalhada](codigo-explicado.md). Gerado dos arqui
 
 ## bench.py
 
-SHA-256: `17db50411629499e6b377fa891cc86c0e9274a2545e5125065219f7a23f5574f`.
+SHA-256: `6ac6adefe713ced9336951889271fe850fa230c93b34f8b790a4fc0e80efb3c5`.
 
 | Função/classe | Linhas |
 |---|---|
@@ -25,7 +25,7 @@ SHA-256: `17db50411629499e6b377fa891cc86c0e9274a2545e5125065219f7a23f5574f`.
 | `run` | 404–528 |
 | `positive` | 531–535 |
 | `rebuild_report` | 538–552 |
-| `main` | 555–604 |
+| `main` | 555–606 |
 | `__init__` | 162–169 |
 | `set_phase` | 171–177 |
 | `start` | 179–188 |
@@ -488,7 +488,7 @@ SHA-256: `17db50411629499e6b377fa891cc86c0e9274a2545e5125065219f7a23f5574f`.
 0450 |         try:
 0451 |             monitor.start()
 0452 |             if args.launch:
-0453 |                 launch = Launch(cfg, args.launch, output)
+0453 |                 launch = Launch(cfg, args.launch, output, args.launch_extra_args)
 0454 |                 lifecycle["argv"] = redact(launch.argv, secret)
 0455 |                 monitor.set_phase("process_startup")
 0456 |                 origin = launch.start()
@@ -616,49 +616,51 @@ SHA-256: `17db50411629499e6b377fa891cc86c0e9274a2545e5125065219f7a23f5574f`.
 0578 |     cmd.add_argument("--results", default="results")
 0579 |     cmd.add_argument("--smoke", action="store_true", help="3 medições e 1 repetição; não vale como resultado final.")
 0580 |     cmd.add_argument("--launch", help="Arquivo JSON com argv para iniciar um runtime LOCAL; encerra só esse processo ao final.")
-0581 |     cmd.add_argument("--startup-timeout", type=positive, default=1800, help="Limite da espera pela API com --launch, em segundos.")
-0582 |     cmd.add_argument("--first-prompt-file", help="Texto UTF-8 para a primeira requisição e referência final; default: pergunta sobre RAM/VRAM.")
-0583 |     cmd.add_argument("--initial-state", default="weights local; OS/compilation caches not controlled", help="Descreva SSD e caches existentes; apenas registra, não limpa.")
-0584 |     cmd.set_defaults(func=run)
-0585 |     args = parser.parse_args()
-0586 |     if getattr(args, "input_tokens", None):
-0587 |         if len(set(args.input_tokens)) != len(args.input_tokens):
-0588 |             parser.error("Não repita comprimentos em --input-tokens.")
-0589 |         args.scenarios = []
-0590 |         for size in args.input_tokens:
-0591 |             name = f"ctx{size}"
-0592 |             WORKLOADS[name] = size
-0593 |             args.scenarios.append(name)
-0594 |     if hasattr(args, "scenarios") and len(set(args.scenarios)) != len(args.scenarios):
-0595 |         parser.error("Não repita cenários na lista.")
-0596 |     try:
-0597 |         args.func(args)
-0598 |     except KeyboardInterrupt:
-0599 |         print("Interrompido; resultados já concluídos foram preservados.", file=sys.stderr)
-0600 |         return 130
-0601 |     except Exception as exc:
-0602 |         print(f"ERRO: {redact(str(exc), os.environ.get('BENCH_API_KEY', ''))}", file=sys.stderr)
-0603 |         return 1
-0604 |     return 0
-0605 |
-0606 |
-0607 | if __name__ == "__main__":
-0608 |     raise SystemExit(main())
+0581 |     cmd.add_argument("--launch-extra-args", nargs="*", default=[],
+0582 |                      help="Argumentos experimentais acrescentados ao argv do launch, sem editar o JSON; registrados no lifecycle.")
+0583 |     cmd.add_argument("--startup-timeout", type=positive, default=1800, help="Limite da espera pela API com --launch, em segundos.")
+0584 |     cmd.add_argument("--first-prompt-file", help="Texto UTF-8 para a primeira requisição e referência final; default: pergunta sobre RAM/VRAM.")
+0585 |     cmd.add_argument("--initial-state", default="weights local; OS/compilation caches not controlled", help="Descreva SSD e caches existentes; apenas registra, não limpa.")
+0586 |     cmd.set_defaults(func=run)
+0587 |     args = parser.parse_args()
+0588 |     if getattr(args, "input_tokens", None):
+0589 |         if len(set(args.input_tokens)) != len(args.input_tokens):
+0590 |             parser.error("Não repita comprimentos em --input-tokens.")
+0591 |         args.scenarios = []
+0592 |         for size in args.input_tokens:
+0593 |             name = f"ctx{size}"
+0594 |             WORKLOADS[name] = size
+0595 |             args.scenarios.append(name)
+0596 |     if hasattr(args, "scenarios") and len(set(args.scenarios)) != len(args.scenarios):
+0597 |         parser.error("Não repita cenários na lista.")
+0598 |     try:
+0599 |         args.func(args)
+0600 |     except KeyboardInterrupt:
+0601 |         print("Interrompido; resultados já concluídos foram preservados.", file=sys.stderr)
+0602 |         return 130
+0603 |     except Exception as exc:
+0604 |         print(f"ERRO: {redact(str(exc), os.environ.get('BENCH_API_KEY', ''))}", file=sys.stderr)
+0605 |         return 1
+0606 |     return 0
+0607 |
+0608 |
+0609 | if __name__ == "__main__":
+0610 |     raise SystemExit(main())
 ```
 
 ## lifecycle.py
 
-SHA-256: `fe67f97a9c2a4f14371c0b42c928dbe8ce429068e8111f94dee2378d9b91477c`.
+SHA-256: `dbd55f827039b4c56de9af693e9628142c2c8df30facd3805cceef485fe42586`.
 
 | Função/classe | Linhas |
 |---|---|
-| `Launch` | 23–75 |
-| `wait_models` | 78–109 |
-| `timed_request` | 112–183 |
-| `lifecycle_report` | 186–201 |
-| `__init__` | 24–35 |
-| `start` | 37–55 |
-| `close` | 57–75 |
+| `Launch` | 23–79 |
+| `wait_models` | 82–113 |
+| `timed_request` | 116–187 |
+| `lifecycle_report` | 190–205 |
+| `__init__` | 24–39 |
+| `start` | 41–59 |
+| `close` | 61–79 |
 
 ```text
 0001 | """Cronometria de inicialização/primeiro stream, fora das fases GuideLLM.
@@ -684,7 +686,7 @@ SHA-256: `fe67f97a9c2a4f14371c0b42c928dbe8ce429068e8111f94dee2378d9b91477c`.
 0021 |
 0022 |
 0023 | class Launch:
-0024 |     def __init__(self, cfg, command_file, output):
+0024 |     def __init__(self, cfg, command_file, output, extra_args=None):
 0025 |         url = urlsplit(cfg["base_url"])
 0026 |         if url.hostname not in {"127.0.0.1", "localhost", "::1"}:
 0027 |             raise ValueError("--launch só aceita servidor local (localhost).")
@@ -692,176 +694,180 @@ SHA-256: `fe67f97a9c2a4f14371c0b42c928dbe8ce429068e8111f94dee2378d9b91477c`.
 0029 |         self.argv = json.loads(Path(command_file).read_text(encoding="utf-8"))
 0030 |         if not isinstance(self.argv, list) or not self.argv or any(not isinstance(x, str) or not x for x in self.argv):
 0031 |             raise ValueError("O arquivo --launch deve conter um array JSON não vazio de strings (argv).")
-0032 |         self.output = Path(output)
-0033 |         self.process = None
-0034 |         self.log = None
-0035 |         self.started = None
-0036 |
-0037 |     def start(self):
-0038 |         # Não interrompe servidores existentes nem tenta tomar uma porta ocupada.
-0039 |         try:
-0040 |             connection = socket.create_connection((self.host, self.port), timeout=1)
-0041 |         except OSError:
-0042 |             pass
-0043 |         else:
-0044 |             connection.close()
-0045 |             raise ValueError("A porta já está em uso. Pare o seu servidor manualmente antes de usar --launch.")
-0046 |         self.log = (self.output / "server.log").open("w", encoding="utf-8")
-0047 |         self.started = time.perf_counter()
-0048 |         try:
-0049 |             self.process = subprocess.Popen(self.argv, stdout=self.log, stderr=subprocess.STDOUT,
-0050 |                                             start_new_session=True, shell=False,
-0051 |                                             env={**os.environ, "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1"})
-0052 |         except BaseException:
-0053 |             self.log.close()
-0054 |             raise
-0055 |         return self.started
-0056 |
-0057 |     def close(self):
-0058 |         """Encerra exclusivamente o grupo criado por este objeto, inclusive filhos."""
-0059 |         if self.process is not None:
-0060 |             try:
-0061 |                 os.killpg(self.process.pid, signal.SIGTERM)
-0062 |             except ProcessLookupError:
-0063 |                 pass
+0032 |         if extra_args:
+0033 |             if any(not isinstance(x, str) or not x for x in extra_args):
+0034 |                 raise ValueError("--launch-extra-args aceita somente strings não vazias.")
+0035 |             self.argv.extend(extra_args)
+0036 |         self.output = Path(output)
+0037 |         self.process = None
+0038 |         self.log = None
+0039 |         self.started = None
+0040 |
+0041 |     def start(self):
+0042 |         # Não interrompe servidores existentes nem tenta tomar uma porta ocupada.
+0043 |         try:
+0044 |             connection = socket.create_connection((self.host, self.port), timeout=1)
+0045 |         except OSError:
+0046 |             pass
+0047 |         else:
+0048 |             connection.close()
+0049 |             raise ValueError("A porta já está em uso. Pare o seu servidor manualmente antes de usar --launch.")
+0050 |         self.log = (self.output / "server.log").open("w", encoding="utf-8")
+0051 |         self.started = time.perf_counter()
+0052 |         try:
+0053 |             self.process = subprocess.Popen(self.argv, stdout=self.log, stderr=subprocess.STDOUT,
+0054 |                                             start_new_session=True, shell=False,
+0055 |                                             env={**os.environ, "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1"})
+0056 |         except BaseException:
+0057 |             self.log.close()
+0058 |             raise
+0059 |         return self.started
+0060 |
+0061 |     def close(self):
+0062 |         """Encerra exclusivamente o grupo criado por este objeto, inclusive filhos."""
+0063 |         if self.process is not None:
 0064 |             try:
-0065 |                 self.process.wait(timeout=20)
-0066 |             except subprocess.TimeoutExpired:
-0067 |                 os.killpg(self.process.pid, signal.SIGKILL)
-0068 |                 self.process.wait(timeout=5)
-0069 |             # Alguns workers podem sobreviver ao encerramento do processo líder.
-0070 |             try:
+0065 |                 os.killpg(self.process.pid, signal.SIGTERM)
+0066 |             except ProcessLookupError:
+0067 |                 pass
+0068 |             try:
+0069 |                 self.process.wait(timeout=20)
+0070 |             except subprocess.TimeoutExpired:
 0071 |                 os.killpg(self.process.pid, signal.SIGKILL)
-0072 |             except ProcessLookupError:
-0073 |                 pass
-0074 |         if self.log is not None:
-0075 |             self.log.close()
-0076 |
-0077 |
-0078 | def wait_models(cfg, secret, timeout, launch=None):
-0079 |     """Apenas GET. Modelo listado não comprova que seus pesos estão na GPU."""
-0080 |     headers = {"Authorization": f"Bearer {secret}"} if secret else {}
-0081 |     started = time.perf_counter()
-0082 |     probes, last, next_update = 0, None, started + 15
-0083 |     with httpx.Client(timeout=2, headers=headers, follow_redirects=False) as client:
-0084 |         while True:
-0085 |             probes += 1
-0086 |             if launch is not None and launch.process.poll() is not None:
-0087 |                 raise RuntimeError(f"Servidor encerrou antes de ficar disponível (exit={launch.process.returncode}). Veja server.log.")
-0088 |             try:
-0089 |                 response = client.get(cfg["base_url"] + "/v1/models")
-0090 |                 if response.status_code in {401, 403}:
-0091 |                     raise ValueError("API recusou autenticação; confira BENCH_API_KEY.")
-0092 |                 response.raise_for_status()
-0093 |                 models = [m["id"] for m in response.json().get("data", [])]
-0094 |                 if cfg["model"] in models:
-0095 |                     observed = time.perf_counter()
-0096 |                     return {"models": models, "get_probes": probes,
-0097 |                             "wait_wall_s": observed - started,
-0098 |                             "process_to_api_observed_s": observed - launch.started if launch else None,
-0099 |                             "criterion": "GET /v1/models retornou o ID; não é prova de pesos residentes"}
-0100 |                 last = f"ID ausente; disponíveis: {models}"
-0101 |             except (httpx.HTTPError, json.JSONDecodeError, KeyError, TypeError) as exc:
-0102 |                 last = str(exc)
-0103 |             elapsed = time.perf_counter() - started
-0104 |             if not launch or elapsed >= timeout:
-0105 |                 raise RuntimeError(f"API/modelo não disponível após {elapsed:.1f}s: {last}")
-0106 |             if time.perf_counter() >= next_update:
-0107 |                 print(f"Aguardando API do processo iniciado: {elapsed:.0f}s...", flush=True)
-0108 |                 next_update = time.perf_counter() + 15
-0109 |             time.sleep(min(.5, max(0, timeout - elapsed)))
-0110 |
-0111 |
-0112 | def timed_request(cfg, secret, timeout, prompt, output, process_origin=None):
-0113 |     """Primeiro POST é simultaneamente medição e validação, sem pré-aquecimento oculto.
+0072 |                 self.process.wait(timeout=5)
+0073 |             # Alguns workers podem sobreviver ao encerramento do processo líder.
+0074 |             try:
+0075 |                 os.killpg(self.process.pid, signal.SIGKILL)
+0076 |             except ProcessLookupError:
+0077 |                 pass
+0078 |         if self.log is not None:
+0079 |             self.log.close()
+0080 |
+0081 |
+0082 | def wait_models(cfg, secret, timeout, launch=None):
+0083 |     """Apenas GET. Modelo listado não comprova que seus pesos estão na GPU."""
+0084 |     headers = {"Authorization": f"Bearer {secret}"} if secret else {}
+0085 |     started = time.perf_counter()
+0086 |     probes, last, next_update = 0, None, started + 15
+0087 |     with httpx.Client(timeout=2, headers=headers, follow_redirects=False) as client:
+0088 |         while True:
+0089 |             probes += 1
+0090 |             if launch is not None and launch.process.poll() is not None:
+0091 |                 raise RuntimeError(f"Servidor encerrou antes de ficar disponível (exit={launch.process.returncode}). Veja server.log.")
+0092 |             try:
+0093 |                 response = client.get(cfg["base_url"] + "/v1/models")
+0094 |                 if response.status_code in {401, 403}:
+0095 |                     raise ValueError("API recusou autenticação; confira BENCH_API_KEY.")
+0096 |                 response.raise_for_status()
+0097 |                 models = [m["id"] for m in response.json().get("data", [])]
+0098 |                 if cfg["model"] in models:
+0099 |                     observed = time.perf_counter()
+0100 |                     return {"models": models, "get_probes": probes,
+0101 |                             "wait_wall_s": observed - started,
+0102 |                             "process_to_api_observed_s": observed - launch.started if launch else None,
+0103 |                             "criterion": "GET /v1/models retornou o ID; não é prova de pesos residentes"}
+0104 |                 last = f"ID ausente; disponíveis: {models}"
+0105 |             except (httpx.HTTPError, json.JSONDecodeError, KeyError, TypeError) as exc:
+0106 |                 last = str(exc)
+0107 |             elapsed = time.perf_counter() - started
+0108 |             if not launch or elapsed >= timeout:
+0109 |                 raise RuntimeError(f"API/modelo não disponível após {elapsed:.1f}s: {last}")
+0110 |             if time.perf_counter() >= next_update:
+0111 |                 print(f"Aguardando API do processo iniciado: {elapsed:.0f}s...", flush=True)
+0112 |                 next_update = time.perf_counter() + 15
+0113 |             time.sleep(min(.5, max(0, timeout - elapsed)))
 0114 |
-0115 |     Grava resultado parcial inclusive em timeout, stream inválido ou usage ausente.
-0116 |     TTFT aqui é primeiro conteúdo não vazio recebido (não mero cabeçalho/role).
-0117 |     """
-0118 |     path = Path(output)
-0119 |     body = {"model": cfg["model"], "messages": [{"role": "user", "content": prompt}],
-0120 |             "temperature": 0, "top_p": 1, "max_tokens": 128, "stream": True,
-0121 |             "stream_options": {"include_usage": True}}
-0122 |     result = {"status": "running", "body": body, "stream_usage": None,
-0123 |               "content_event_offsets_s": [], "output": "", "done": False,
-0124 |               "ttft_ms": None, "e2e_s": None, "mean_itl_ms": None,
-0125 |               "process_to_first_content_s": None, "process_to_response_end_s": None}
-0126 |     headers = {"Authorization": f"Bearer {secret}"} if secret else {}
-0127 |     started = None
-0128 |     try:
-0129 |         with httpx.Client(timeout=timeout, headers=headers, follow_redirects=False) as client:
-0130 |             started = time.perf_counter()
-0131 |             with client.stream("POST", cfg["base_url"] + "/v1/chat/completions", json=body) as stream:
-0132 |                 result["headers_ms"] = (time.perf_counter() - started) * 1000
-0133 |                 stream.raise_for_status()
-0134 |                 if "text/event-stream" not in stream.headers.get("content-type", ""):
-0135 |                     raise ValueError("A API não respondeu com SSE.")
-0136 |                 for line in stream.iter_lines():
-0137 |                     if not line.startswith("data:"):
-0138 |                         continue
-0139 |                     value = line[5:].strip()
-0140 |                     if value == "[DONE]":
-0141 |                         result["done"] = True
-0142 |                         break
-0143 |                     event = json.loads(value)
-0144 |                     if "error" in event:
-0145 |                         raise ValueError(f"Erro no stream: {event['error']}")
-0146 |                     result["stream_usage"] = event.get("usage") or result["stream_usage"]
-0147 |                     text = "".join(c.get("delta", {}).get("content") or "" for c in event.get("choices", []))
-0148 |                     if text:
-0149 |                         now = time.perf_counter()
-0150 |                         result["content_event_offsets_s"].append(now - started)
-0151 |                         result["output"] += text
-0152 |                         if result["ttft_ms"] is None:
-0153 |                             result["ttft_ms"] = (now - started) * 1000
-0154 |                             if process_origin is not None:
-0155 |                                 result["process_to_first_content_s"] = now - process_origin
-0156 |             ended = time.perf_counter()
-0157 |             result["e2e_s"] = ended - started
-0158 |             if process_origin is not None:
-0159 |                 result["process_to_response_end_s"] = ended - process_origin
-0160 |             if not result["done"] or not result["output"]:
-0161 |                 raise ValueError("Stream incompleto ou sem conteúdo.")
-0162 |             usage = result["stream_usage"]
-0163 |             if not usage or not all(type(usage.get(k)) is int and usage[k] > 0 for k in ("prompt_tokens", "completion_tokens")):
-0164 |                 raise ValueError("usage ausente/inválido no stream; tempos parciais preservados, contagens não estimadas.")
-0165 |             offsets = result["content_event_offsets_s"]
-0166 |             if usage["completion_tokens"] > 1:
-0167 |                 result["mean_itl_ms"] = 1000 * (offsets[-1] - offsets[0]) / (usage["completion_tokens"] - 1)
-0168 |             from reporting import derived
-0169 |             result.update(derived({"output_tokens": usage["completion_tokens"], "prompt_tokens": usage["prompt_tokens"],
-0170 |                                    "inter_token_latency_ms": result["mean_itl_ms"], "request_latency": result["e2e_s"]}))
-0171 |             result["status"] = "complete"
-0172 |     except BaseException as exc:
-0173 |         result["status"] = "interrupted" if isinstance(exc, KeyboardInterrupt) else "failed"
-0174 |         result["error"] = str(exc)
-0175 |         if started is not None:
-0176 |             result["elapsed_until_exit_s"] = time.perf_counter() - started
-0177 |         raise
-0178 |     finally:
-0179 |         serialized = json.dumps(result, ensure_ascii=False, indent=2)
-0180 |         if secret:
-0181 |             serialized = serialized.replace(secret, "[REDACTED]")
-0182 |         path.write_text(serialized + "\n", encoding="utf-8")
-0183 |     return result
-0184 |
-0185 |
-0186 | def lifecycle_report(output, lifecycle):
-0187 |     import html
-0188 |     output = Path(output)
-0189 |     (output / "lifecycle.json").write_text(json.dumps(lifecycle, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-0190 |     rows = []
-0191 |     readiness = lifecycle.get("readiness", {})
-0192 |     rows.append(("Processo → API observada (s)", readiness.get("process_to_api_observed_s")))
-0193 |     for phase in ("first_request", "warm_reference"):
-0194 |         req = lifecycle.get(phase, {})
-0195 |         for metric in ("ttft_ms", "decode_tokens_s", "effective_tokens_s", "e2e_s", "mean_itl_ms", "process_to_first_content_s", "process_to_response_end_s"):
-0196 |             if phase == "warm_reference" and metric.startswith("process_"):
-0197 |                 continue
-0198 |             rows.append((phase + " · " + metric, req.get(metric)))
-0199 |     table = "".join(f"<tr><th>{html.escape(label)}</th><td>{html.escape(str(value)) if value is not None else 'Não medido'}</td></tr>" for label, value in rows)
-0200 |     page = f'''<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Ciclo de vida</title><style>body{{font:17px/1.7 system-ui;background:#f6f3ec;color:#193835;margin:25px}}td,th{{padding:12px;border-bottom:1px solid #ccd6cc;text-align:left}}table{{width:100%;overflow-wrap:anywhere}}a{{color:#136d58}}</style><h1>Inicialização e primeira resposta</h1><p>Modo: {html.escape(lifecycle['mode'])}. Status: {html.escape(lifecycle['status'])}.</p><p>API disponível não implica modelo na GPU. O primeiro POST é cronometrado, sem teste de geração anterior. Processo novo não implica caches de disco/CUDA frios. A referência final repete o prompt e pode aproveitar prefix caching.</p><table>{table}</table><p><a href="summary.html">Aquecimento e blocos GuideLLM</a> · <a href="lifecycle.json">Dados do ciclo de vida</a></p></html>'''
-0201 |     (output / "lifecycle.html").write_text(page, encoding="utf-8")
+0115 |
+0116 | def timed_request(cfg, secret, timeout, prompt, output, process_origin=None):
+0117 |     """Primeiro POST é simultaneamente medição e validação, sem pré-aquecimento oculto.
+0118 |
+0119 |     Grava resultado parcial inclusive em timeout, stream inválido ou usage ausente.
+0120 |     TTFT aqui é primeiro conteúdo não vazio recebido (não mero cabeçalho/role).
+0121 |     """
+0122 |     path = Path(output)
+0123 |     body = {"model": cfg["model"], "messages": [{"role": "user", "content": prompt}],
+0124 |             "temperature": 0, "top_p": 1, "max_tokens": 128, "stream": True,
+0125 |             "stream_options": {"include_usage": True}}
+0126 |     result = {"status": "running", "body": body, "stream_usage": None,
+0127 |               "content_event_offsets_s": [], "output": "", "done": False,
+0128 |               "ttft_ms": None, "e2e_s": None, "mean_itl_ms": None,
+0129 |               "process_to_first_content_s": None, "process_to_response_end_s": None}
+0130 |     headers = {"Authorization": f"Bearer {secret}"} if secret else {}
+0131 |     started = None
+0132 |     try:
+0133 |         with httpx.Client(timeout=timeout, headers=headers, follow_redirects=False) as client:
+0134 |             started = time.perf_counter()
+0135 |             with client.stream("POST", cfg["base_url"] + "/v1/chat/completions", json=body) as stream:
+0136 |                 result["headers_ms"] = (time.perf_counter() - started) * 1000
+0137 |                 stream.raise_for_status()
+0138 |                 if "text/event-stream" not in stream.headers.get("content-type", ""):
+0139 |                     raise ValueError("A API não respondeu com SSE.")
+0140 |                 for line in stream.iter_lines():
+0141 |                     if not line.startswith("data:"):
+0142 |                         continue
+0143 |                     value = line[5:].strip()
+0144 |                     if value == "[DONE]":
+0145 |                         result["done"] = True
+0146 |                         break
+0147 |                     event = json.loads(value)
+0148 |                     if "error" in event:
+0149 |                         raise ValueError(f"Erro no stream: {event['error']}")
+0150 |                     result["stream_usage"] = event.get("usage") or result["stream_usage"]
+0151 |                     text = "".join(c.get("delta", {}).get("content") or "" for c in event.get("choices", []))
+0152 |                     if text:
+0153 |                         now = time.perf_counter()
+0154 |                         result["content_event_offsets_s"].append(now - started)
+0155 |                         result["output"] += text
+0156 |                         if result["ttft_ms"] is None:
+0157 |                             result["ttft_ms"] = (now - started) * 1000
+0158 |                             if process_origin is not None:
+0159 |                                 result["process_to_first_content_s"] = now - process_origin
+0160 |             ended = time.perf_counter()
+0161 |             result["e2e_s"] = ended - started
+0162 |             if process_origin is not None:
+0163 |                 result["process_to_response_end_s"] = ended - process_origin
+0164 |             if not result["done"] or not result["output"]:
+0165 |                 raise ValueError("Stream incompleto ou sem conteúdo.")
+0166 |             usage = result["stream_usage"]
+0167 |             if not usage or not all(type(usage.get(k)) is int and usage[k] > 0 for k in ("prompt_tokens", "completion_tokens")):
+0168 |                 raise ValueError("usage ausente/inválido no stream; tempos parciais preservados, contagens não estimadas.")
+0169 |             offsets = result["content_event_offsets_s"]
+0170 |             if usage["completion_tokens"] > 1:
+0171 |                 result["mean_itl_ms"] = 1000 * (offsets[-1] - offsets[0]) / (usage["completion_tokens"] - 1)
+0172 |             from reporting import derived
+0173 |             result.update(derived({"output_tokens": usage["completion_tokens"], "prompt_tokens": usage["prompt_tokens"],
+0174 |                                    "inter_token_latency_ms": result["mean_itl_ms"], "request_latency": result["e2e_s"]}))
+0175 |             result["status"] = "complete"
+0176 |     except BaseException as exc:
+0177 |         result["status"] = "interrupted" if isinstance(exc, KeyboardInterrupt) else "failed"
+0178 |         result["error"] = str(exc)
+0179 |         if started is not None:
+0180 |             result["elapsed_until_exit_s"] = time.perf_counter() - started
+0181 |         raise
+0182 |     finally:
+0183 |         serialized = json.dumps(result, ensure_ascii=False, indent=2)
+0184 |         if secret:
+0185 |             serialized = serialized.replace(secret, "[REDACTED]")
+0186 |         path.write_text(serialized + "\n", encoding="utf-8")
+0187 |     return result
+0188 |
+0189 |
+0190 | def lifecycle_report(output, lifecycle):
+0191 |     import html
+0192 |     output = Path(output)
+0193 |     (output / "lifecycle.json").write_text(json.dumps(lifecycle, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+0194 |     rows = []
+0195 |     readiness = lifecycle.get("readiness", {})
+0196 |     rows.append(("Processo → API observada (s)", readiness.get("process_to_api_observed_s")))
+0197 |     for phase in ("first_request", "warm_reference"):
+0198 |         req = lifecycle.get(phase, {})
+0199 |         for metric in ("ttft_ms", "decode_tokens_s", "effective_tokens_s", "e2e_s", "mean_itl_ms", "process_to_first_content_s", "process_to_response_end_s"):
+0200 |             if phase == "warm_reference" and metric.startswith("process_"):
+0201 |                 continue
+0202 |             rows.append((phase + " · " + metric, req.get(metric)))
+0203 |     table = "".join(f"<tr><th>{html.escape(label)}</th><td>{html.escape(str(value)) if value is not None else 'Não medido'}</td></tr>" for label, value in rows)
+0204 |     page = f'''<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Ciclo de vida</title><style>body{{font:17px/1.7 system-ui;background:#f6f3ec;color:#193835;margin:25px}}td,th{{padding:12px;border-bottom:1px solid #ccd6cc;text-align:left}}table{{width:100%;overflow-wrap:anywhere}}a{{color:#136d58}}</style><h1>Inicialização e primeira resposta</h1><p>Modo: {html.escape(lifecycle['mode'])}. Status: {html.escape(lifecycle['status'])}.</p><p>API disponível não implica modelo na GPU. O primeiro POST é cronometrado, sem teste de geração anterior. Processo novo não implica caches de disco/CUDA frios. A referência final repete o prompt e pode aproveitar prefix caching.</p><table>{table}</table><p><a href="summary.html">Aquecimento e blocos GuideLLM</a> · <a href="lifecycle.json">Dados do ciclo de vida</a></p></html>'''
+0205 |     (output / "lifecycle.html").write_text(page, encoding="utf-8")
 ```
 
 ## reporting.py
