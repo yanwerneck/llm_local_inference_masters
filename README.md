@@ -11,6 +11,7 @@ Repositório `yanwerneck/llm_local_inference_masters`: código do benchmark e ma
 - [DDR, GDDR6X e HBM](materiais/runpod-vllm-lab/memorias.html).
 - [Interface simples de chatbot em Python](materiais/runpod-vllm-lab/chat.html).
 - [Revisão de privacidade antes da publicação](docs/seguranca-publicacao.md).
+- [Diagnóstico detalhado do Qwen2.5-14B no vLLM](docs/diagnostico-qwen14b-vllm.md).
 
 Os guias anteriores estão em `materiais/`, com seus fontes e scripts de geração. Suas instruções de instalação referem-se aos ambientes do servidor e do chat; **não misture essas dependências com o venv do benchmark**. Os HTMLs são arquivos estáticos: baixe/clonar e abra localmente; visualizar um arquivo no GitHub não ativa GitHub Pages.
 
@@ -690,7 +691,7 @@ O primeiro testa validação, estatísticas, lançamento seguro e cronometria in
 
 ### Preparação reproduzível antes do benchmark
 
-O modelo da rodada é selecionado sem editar os comandos:
+O modelo da rodada é selecionado sem editar os comandos. O 7B oficial desta rodada é [`arthuravianna/Qwen2.5-7B-Instruct-Q8_0.gguf`](https://huggingface.co/arthuravianna/Qwen2.5-7B-Instruct-Q8_0.gguf):
 
 ```bash
 # Qwen 7B GGUF Q8_0 (padrão)
@@ -699,6 +700,16 @@ make prepare-benchmark MODEL_SIZE=7B
 # Qwen 14B GGUF Q8_0
 make prepare-benchmark MODEL_SIZE=14B \
   MODEL_14B_GGUF=/workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf
+```
+
+Para colocar o 7B no SSD antes do `make prepare-benchmark`:
+
+```bash
+mkdir -p /workspace/models/Qwen2.5-7B-Instruct-Q8_0
+hf download arthuravianna/Qwen2.5-7B-Instruct-Q8_0.gguf \
+  Qwen2.5-7B-Instruct-Q8_0.gguf \
+  --revision main \
+  --local-dir /workspace/models/Qwen2.5-7B-Instruct-Q8_0
 ```
 
 Os perfis e launchers são escolhidos automaticamente para o tamanho. Se o GGUF estiver em outra pasta, sobrescreva `MODEL_7B_GGUF` ou `MODEL_14B_GGUF`; o arquivo de launch correspondente também pode ser substituído com `VLLM_LAUNCH`, `LLAMA_LAUNCH` ou `OLLAMA_LAUNCH`.
@@ -754,7 +765,7 @@ O agregador tenta os três runtimes, imprime um status separado para cada um e r
 
 ```bash
 cat > /tmp/Modelfile.qwen7b <<'EOF'
-FROM /workspace/models/Qwen2.5-7B-Instruct-GGUF-Q8_0/Qwen2.5-7B-Instruct-original-Q8_0.gguf
+FROM /workspace/models/Qwen2.5-7B-Instruct-Q8_0/Qwen2.5-7B-Instruct-Q8_0.gguf
 PARAMETER num_ctx 16384
 EOF
 ollama create qwen7b-q8-gguf -f /tmp/Modelfile.qwen7b

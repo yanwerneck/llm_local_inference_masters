@@ -6,7 +6,7 @@
   "context_window": 16384,
   "cache_policy": "enabled-recorded (Ollama model resident policy; verify server.log)",
   "runtime_version": "Ollama local; record ollama version",
-  "model_artifact": "Qwen2.5-7B-Instruct-original convertido para GGUF Q8_0; SHA-256 registrado pelo make verify-gguf",
+  "model_artifact": "arthuravianna/Qwen2.5-7B-Instruct-Q8_0.gguf; GGUF Q8_0 local; SHA-256 registrado pelo make verify-gguf",
   "server_command": "ollama serve; modelo qwen7b-q8-gguf previamente criado a partir do GGUF local",
   "notes": "Ollama precisa do modelo criado localmente antes do benchmark; nenhum pull ocorre durante a medição."
 }

@@ -1,7 +1,7 @@
 [
   "/workspace/llama.cpp/build/bin/llama-server",
   "-m",
-  "/workspace/models/Qwen2.5-7B-Instruct-GGUF-Q8_0/Qwen2.5-7B-Instruct-original-Q8_0.gguf",
+  "/workspace/models/Qwen2.5-7B-Instruct-Q8_0/Qwen2.5-7B-Instruct-Q8_0.gguf",
   "--host",
   "127.0.0.1",
   "--port",

@@ -1,7 +1,7 @@
 [
   "/workspace/vllm-runtime/.venv/bin/vllm",
   "serve",
-  "/workspace/models/Qwen2.5-7B-Instruct-GGUF-Q8_0/Qwen2.5-7B-Instruct-original-Q8_0.gguf",
+  "/workspace/models/Qwen2.5-7B-Instruct-Q8_0/Qwen2.5-7B-Instruct-Q8_0.gguf",
   "--load-format",
   "gguf",
   "--quantization",
