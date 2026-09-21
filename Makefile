@@ -1,4 +1,6 @@
 SHELL := /usr/bin/env bash
+.ONESHELL:
+.SHELLFLAGS := -eu -o pipefail -c
 
 # Caminhos podem ser sobrescritos na chamada:
 # make quantize-q8 LLAMA_CPP_DIR=/mnt/llama.cpp HF_MODEL_DIR=/mnt/qwen
@@ -19,6 +21,12 @@ QUANTIZE_THREADS ?= $(shell nproc 2>/dev/null || echo 1)
 VLLM_MODEL_DIR ?= /workspace/models/Qwen2.5-7B-Instruct-GGUF-Q8_0
 VLLM_CONFIG ?= configs/vllm-7b-gguf.json
 VLLM_LAUNCH ?= configs/launch-vllm-7b-gguf.example.json
+LLAMA_MODEL_DIR ?= /workspace/models/Qwen2.5-7B-Instruct-GGUF-Q8_0
+LLAMA_CONFIG ?= configs/llamacpp-7b-gguf.json
+LLAMA_LAUNCH ?= configs/launch-llamacpp-7b-gguf.json
+OLLAMA_MODEL_DIR ?= /workspace/models/Qwen2.5-7B-Instruct-GGUF-Q8_0
+OLLAMA_CONFIG ?= configs/ollama-7b-gguf.json
+OLLAMA_LAUNCH ?= configs/launch-ollama-7b-gguf.json
 BENCH_SCENARIOS ?= short medium long
 BENCH_REQUESTS ?= 50
 BENCH_REPETITIONS ?= 3
@@ -31,7 +39,7 @@ GGUF_FILE := $(GGUF_OUTPUT_DIR)/Qwen2.5-7B-Instruct-original-Q8_0.gguf
 
 .PHONY: help check-tools clone-llama build-llama install-llama-python \
         download-source inspect-source quantize-q8 verify-gguf upload-hf \
-        smoke-vllm bench-vllm kv-sweep docs clean-info
+        smoke-vllm bench-vllm bench-llama bench-ollama bench-all bench kv-sweep docs clean-info
 
 help:
 	@printf '%s\n' \
@@ -47,12 +55,17 @@ help:
 		'  make upload-hf            publica somente o GGUF no Hugging Face' \
 		'  make smoke-vllm           executa smoke do benchmark com GGUF local' \
 		'  make bench-vllm            bateria formal: short/medium/long, 50x3, com telemetria' \
-		'  make kv-sweep              contexto/KV 1024 em 1024 até a primeira falha de memória' \
+		'  make bench-llama           mesma bateria usando llama-server' \
+		'  make bench-ollama          mesma bateria usando Ollama (modelo já criado localmente)' \
+		'  make bench-all             executa vLLM, llama.cpp e Ollama; continua e resume falhas' \
+		'  make kv-sweep              compatibilidade: KV sweep do vLLM (já incluído em bench-vllm)' \
 		'  make docs                 regenera os HTMLs dos documentos' \
 		'' \
 		'Variáveis úteis:' \
 		'  LLAMA_CPP_DIR, HF_MODEL_DIR, GGUF_OUTPUT_DIR, QUANTIZE_THREADS' \
-		'  VLLM_MODEL_DIR, VLLM_CONFIG, VLLM_LAUNCH'
+		'  VLLM_MODEL_DIR, VLLM_CONFIG, VLLM_LAUNCH' \
+		'  LLAMA_MODEL_DIR, LLAMA_CONFIG, LLAMA_LAUNCH' \
+		'  OLLAMA_MODEL_DIR, OLLAMA_CONFIG, OLLAMA_LAUNCH'
 
 
 check-tools:
@@ -114,6 +127,7 @@ smoke-vllm: verify-gguf
 		--smoke --scenarios short --startup-timeout 1800
 
 bench-vllm: verify-gguf
+	@echo '[BENCH vLLM] início: short/medium/long + telemetria + KV sweep embutido'
 	HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_HUB_ENABLE_HF_TRANSFER=0 \
 		$(PYTHON) bench.py run \
 		--config "$(VLLM_CONFIG)" \
@@ -125,6 +139,64 @@ bench-vllm: verify-gguf
 		--warmup "$(BENCH_WARMUP)" \
 		--collect-kv-metrics \
 		--startup-timeout "$(BENCH_STARTUP_TIMEOUT)"
+	@echo '[BENCH vLLM] bateria base concluída; iniciando sweep KV em passos de 1024'
+	HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_HUB_ENABLE_HF_TRANSFER=0 \
+		$(PYTHON) scripts/run_kv_sweep.py --runtime-label vllm \
+		--config "$(VLLM_CONFIG)" --launch "$(VLLM_LAUNCH)" \
+		--local-model-path "$(VLLM_MODEL_DIR)" --python "$(PYTHON)" \
+		--requests "$(BENCH_REQUESTS)" --repetitions "$(BENCH_REPETITIONS)" \
+		--warmup "$(BENCH_WARMUP)" --startup-timeout "$(BENCH_STARTUP_TIMEOUT)" \
+		--results results/kv-sweep-vllm
+
+bench-llama: verify-gguf
+	@echo '[BENCH llama.cpp] início: short/medium/long + telemetria + KV sweep embutido'
+	HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_HUB_ENABLE_HF_TRANSFER=0 \
+		$(PYTHON) bench.py run --config "$(LLAMA_CONFIG)" \
+		--local-model-path "$(LLAMA_MODEL_DIR)" --launch "$(LLAMA_LAUNCH)" \
+		--scenarios $(BENCH_SCENARIOS) --requests "$(BENCH_REQUESTS)" \
+		--repetitions "$(BENCH_REPETITIONS)" --warmup "$(BENCH_WARMUP)" \
+		--collect-kv-metrics --startup-timeout "$(BENCH_STARTUP_TIMEOUT)"
+	@echo '[BENCH llama.cpp] bateria base concluída; iniciando sweep KV em passos de 1024'
+	HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_HUB_ENABLE_HF_TRANSFER=0 \
+		$(PYTHON) scripts/run_kv_sweep.py --runtime-label llama.cpp \
+		--config "$(LLAMA_CONFIG)" --launch "$(LLAMA_LAUNCH)" \
+		--local-model-path "$(LLAMA_MODEL_DIR)" --python "$(PYTHON)" \
+		--context-flag=--ctx-size \
+		--requests "$(BENCH_REQUESTS)" --repetitions "$(BENCH_REPETITIONS)" \
+		--warmup "$(BENCH_WARMUP)" --startup-timeout "$(BENCH_STARTUP_TIMEOUT)" \
+		--results results/kv-sweep-llama
+
+bench-ollama: verify-gguf
+	@echo '[BENCH Ollama] início: short/medium/long + telemetria + KV sweep embutido'
+	@echo '[BENCH Ollama] pré-condição: o alias qwen7b-q8-gguf já deve existir em ollama list; nenhum pull será feito'
+	HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_HUB_ENABLE_HF_TRANSFER=0 \
+		$(PYTHON) bench.py run --config "$(OLLAMA_CONFIG)" \
+		--local-model-path "$(OLLAMA_MODEL_DIR)" --launch "$(OLLAMA_LAUNCH)" \
+		--scenarios $(BENCH_SCENARIOS) --requests "$(BENCH_REQUESTS)" \
+		--repetitions "$(BENCH_REPETITIONS)" --warmup "$(BENCH_WARMUP)" \
+		--collect-kv-metrics --startup-timeout "$(BENCH_STARTUP_TIMEOUT)"
+	@echo '[BENCH Ollama] bateria base concluída; iniciando sweep KV em passos de 1024'
+	HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_HUB_ENABLE_HF_TRANSFER=0 \
+		$(PYTHON) scripts/run_kv_sweep.py --runtime-label ollama \
+		--config "$(OLLAMA_CONFIG)" --launch "$(OLLAMA_LAUNCH)" \
+		--local-model-path "$(OLLAMA_MODEL_DIR)" --python "$(PYTHON)" \
+		--context-flag none \
+		--requests "$(BENCH_REQUESTS)" --repetitions "$(BENCH_REPETITIONS)" \
+		--warmup "$(BENCH_WARMUP)" --startup-timeout "$(BENCH_STARTUP_TIMEOUT)" \
+		--results results/kv-sweep-ollama
+
+bench-all: verify-gguf
+	@set +e
+	@echo '[BENCH ALL] 1/3 vLLM'
+	@$(MAKE) --no-print-directory bench-vllm; vllm_status=$$?
+	@echo '[BENCH ALL] 2/3 llama.cpp'
+	@$(MAKE) --no-print-directory bench-llama; llama_status=$$?
+	@echo '[BENCH ALL] 3/3 Ollama'
+	@$(MAKE) --no-print-directory bench-ollama; ollama_status=$$?
+	@echo "[BENCH ALL] status: vLLM=$$vllm_status llama.cpp=$$llama_status Ollama=$$ollama_status"
+	@test "$$vllm_status" -eq 0 -a "$$llama_status" -eq 0 -a "$$ollama_status" -eq 0
+
+bench: bench-all
 
 kv-sweep: verify-gguf
 	HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_HUB_ENABLE_HF_TRANSFER=0 \

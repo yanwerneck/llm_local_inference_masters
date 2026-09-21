@@ -314,7 +314,7 @@ O código não mede qualidade semântica, energia total, FLOPs, banda física, t
 
 `summarize` mantém os campos históricos e acrescenta os aliases canônicos `time_to_first_token_milliseconds_*` e `tokens_per_second_*`. TTFT tem um valor por requisição; os percentis resumem a distribuição de requisições. Tokens/s é decode e não inclui TTFT. O CLI passa a usar short/medium/long por padrão e 50 requisições × 3 repetições fora do smoke.
 
-`scripts/run_kv_sweep.py` reinicia o servidor a cada ponto de 1024 tokens, altera o limite de contexto e guarda cada execução até a primeira falha. `make bench-vllm` executa a bateria formal; `make kv-sweep` executa a capacidade crescente de contexto/KV.
+`scripts/run_kv_sweep.py` reinicia o servidor a cada ponto de 1024 tokens, altera o limite de contexto quando o runtime oferece uma flag (`--max-model-len` no vLLM, `--ctx-size` no llama-server) e guarda cada execução até a primeira falha. O Ollama usa contexto configurado fora do argv; por isso o alvo registra a tentativa e deixa o limite do servidor produzir uma falha observável se excedido. `make bench-vllm`, `make bench-llama` e `make bench-ollama` executam a bateria formal e o sweep; `make bench-all` coordena os três.
 
 ## 12. Referências e fontes numerados
 

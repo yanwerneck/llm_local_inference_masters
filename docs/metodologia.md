@@ -238,7 +238,7 @@ O protocolo formal usa `short`, `medium` e `long` automaticamente, com 50 requis
 
 O monitor escreve `gpu.csv`, `system.csv` e `events.csv` durante toda a vida do processo e gera `telemetry-summary.json` agrupado pelas fases. CPU/RAM/SSD são observações do host; VRAM/utilização/temperatura/potência vêm do `nvidia-smi`. Esses sinais relacionam mudanças a startup, primeiro POST, aquecimento, medida e encerramento, mas não medem o tempo de cada cópia PCIe: para isso, use Nsight/CUDA instrumentation.
 
-`make kv-sweep` reinicia o runtime para 1024, 2048, 3072, … tokens, ajusta o limite de contexto e executa a mesma bateria em cada ponto até a primeira falha. O percentual do pool KV exposto pelo vLLM e a VRAM usada são mantidos como séries distintas; nenhum deles é apresentado como “bytes de KV” sem coeficiente arquitetural verificado.
+Cada alvo formal (`make bench-vllm`, `make bench-llama`, `make bench-ollama`) inclui a bateria short/medium/long e depois reinicia o runtime para 1024, 2048, 3072, … tokens, ajustando o limite de contexto até a primeira falha. `make bench-all` executa os três e resume os códigos de saída. O percentual do pool KV exposto pelo vLLM e a VRAM usada são mantidos como séries distintas; nenhum deles é apresentado como “bytes de KV” sem coeficiente arquitetural verificado.
 
 ## Próximo passo
 

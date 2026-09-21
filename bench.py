@@ -170,6 +170,7 @@ class Monitor:
 
     def set_phase(self, phase, event=None):
         self.phase = phase
+        print(f"[telemetria] fase={phase} evento={event or 'phase_change'}", flush=True)
         if hasattr(self, "events_handle"):
             writer = csv.writer(self.events_handle)
             writer.writerow([datetime.now(timezone.utc).isoformat(), time.monotonic(), phase, event or "phase_change"])
@@ -225,7 +226,9 @@ class Monitor:
                                     "load1", "root_disk_used_mib", "root_disk_free_mib", "disk_read_bytes", "disk_write_bytes"])
             if psutil:
                 psutil.cpu_percent(interval=None)
+            sample_number = 0
             while not self.stop_event.is_set():
+                sample_number += 1
                 phase = self.phase
                 utc = datetime.now(timezone.utc).isoformat()
                 result = capture(["nvidia-smi", "--query-gpu=index,name,memory.used,memory.total,utilization.gpu,temperature.gpu,power.draw",
@@ -233,8 +236,12 @@ class Monitor:
                 if result.get("returncode") != 0:
                     write_json(self.output / "gpu-unavailable.json", result)
                 else:
-                    for row in csv.reader(result["stdout"].splitlines(), skipinitialspace=True):
+                    gpu_rows = list(csv.reader(result["stdout"].splitlines(), skipinitialspace=True))
+                    for row in gpu_rows:
                         writer.writerow([utc, phase, *row])
+                    if sample_number == 1 or sample_number % 10 == 0:
+                        compact = "; ".join(f"GPU{row[0]} VRAM={row[2]}/{row[3]} MiB uso={row[4]}%" for row in gpu_rows)
+                        print(f"[telemetria] fase={phase} {compact or 'GPU sem amostra'}", flush=True)
                 handle.flush()
                 if psutil:
                     vm = psutil.virtual_memory()

@@ -701,7 +701,26 @@ Durante toda a execução, `gpu.csv` e `system.csv` são amostrados aproximadame
 
 Não há como inferir o **tempo exato de uma transferência CPU↔GPU ou RAM↔VRAM** apenas com `nvidia-smi` e contadores do sistema. O benchmark registra os intervalos de fases, os contadores de I/O e os sinais de PCIe disponíveis no host; para bytes e tempos por cópia seria necessária instrumentação CUDA/Nsight. Portanto não chamamos RAM usada ou VRAM usada de “tempo de transferência”.
 
-Para testar o crescimento de KV, use `make kv-sweep`. O script reinicia o runtime em 1024, 2048, 3072, … tokens, ajusta `--max-model-len` para cada ponto e para na primeira falha de inicialização/ memória, preservando o log e o diretório daquele ponto. Cada ponto recebe as mesmas 50×3 requisições, coleta `/metrics` do vLLM e salva `sweep-manifest.json`. Isso mede a capacidade operacional da configuração; não transforma o percentual do pool KV em bytes físicos.
+O crescimento de KV já faz parte de cada alvo formal. `make bench-vllm`, `make bench-llama` e `make bench-ollama` executam a bateria short/medium/long e, em seguida, reiniciam o respectivo runtime em 1024, 2048, 3072, … tokens, ajustam `--max-model-len` e param na primeira falha de inicialização/memória, preservando o log e o diretório daquele ponto. Cada ponto recebe as mesmas 50×3 requisições. `make kv-sweep` permanece como atalho compatível somente para repetir o sweep do vLLM.
+
+Para executar tudo:
+
+```bash
+make bench-all
+```
+
+O agregador tenta os três runtimes, imprime um status separado para cada um e retorna erro ao final se algum falhar. Ele não troca modelo, não faz fallback e não esconde falhas. Antes de `make bench-ollama`, crie localmente o alias `qwen7b-q8-gguf` com um `Modelfile` que aponte para o GGUF do SSD; o alvo apenas executa `ollama serve` e nunca faz `ollama pull`:
+
+```bash
+cat > /tmp/Modelfile.qwen7b <<'EOF'
+FROM /workspace/models/Qwen2.5-7B-Instruct-GGUF-Q8_0/Qwen2.5-7B-Instruct-original-Q8_0.gguf
+PARAMETER num_ctx 16384
+EOF
+ollama create qwen7b-q8-gguf -f /tmp/Modelfile.qwen7b
+ollama list
+```
+
+Para o sweep do Ollama, ajuste `OLLAMA_CONTEXT_LENGTH` conforme a política da versão instalada antes de executar o alvo. O script não injeta uma flag inexistente nem transforma o limite do servidor em um número fictício.
 
 Arquivos novos por execução: `events.csv`, `system.csv` e `telemetry-summary.json`. Para instalar o coletor no venv do benchmark, rode `pip install -r requirements.txt` (ele adiciona `psutil`); não instale esse arquivo no venv do vLLM.
 - [Backends HTTP](https://vllm-project.github.io/guidellm/0.7.0/guides/backends/) e [datasets](https://vllm-project.github.io/guidellm/0.7.0/guides/datasets/).
