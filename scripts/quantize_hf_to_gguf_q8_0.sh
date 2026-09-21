@@ -19,6 +19,7 @@ LLAMA_CPP_DIR=""
 HF_MODEL_DIR=""
 OUTPUT_DIR=""
 THREADS="${LLAMA_QUANTIZE_THREADS:-$(nproc 2>/dev/null || printf '1')}"
+PYTHON_BIN="${PYTHON:-python3}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -44,7 +45,7 @@ CONFIG="$HF_MODEL_DIR/config.json"
 [[ -x "$QUANTIZE" ]] || { printf 'llama-quantize ausente ou sem permissão de execução: %s\n' "$QUANTIZE" >&2; exit 1; }
 [[ -f "$CONFIG" ]] || { printf 'config.json ausente: %s\n' "$CONFIG" >&2; exit 1; }
 
-python3 - "$CONFIG" <<'PY'
+"$PYTHON_BIN" - "$CONFIG" <<'PY'
 import json, sys
 config = json.load(open(sys.argv[1], encoding="utf-8"))
 if config.get("quantization_config"):
@@ -63,7 +64,7 @@ printf 'GGUF intermediário: %s\n' "$F16"
 printf 'GGUF final: %s\n' "$Q8"
 printf 'Threads de quantização: %s\n' "$THREADS"
 
-python3 "$CONVERTER" "$HF_MODEL_DIR" --outfile "$F16" --outtype f16
+"$PYTHON_BIN" "$CONVERTER" "$HF_MODEL_DIR" --outfile "$F16" --outtype f16
 "$QUANTIZE" "$F16" "$Q8" Q8_0 "$THREADS"
 
 printf '\nArquivo GGUF final:\n'

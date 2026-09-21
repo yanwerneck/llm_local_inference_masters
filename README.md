@@ -196,6 +196,8 @@ O script imprime o tamanho, a assinatura `G G U F` e o SHA-256. O arquivo F16 in
 
 O `Makefile` reúne as etapas sem esconder downloads: `quantize-q8` depende apenas do checkpoint que você já baixou em `HF_MODEL_DIR`; o download só acontece quando você chama `download-source` explicitamente.
 
+As dependências Python do conversor llama.cpp são instaladas em `/workspace/llama-cpp-venv`, separado tanto do `.venv` do benchmark quanto do ambiente `/workspace/vllm-runtime/.venv`. Nunca execute `pip install -r /workspace/llama.cpp/requirements.txt` com o venv do vLLM ativado: esse arquivo pode trocar `torch`, `transformers`, `protobuf` e `huggingface_hub` e invalidar o runtime CUDA.
+
 ```bash
 cd /workspace/chatbot-runtime-bench
 make help

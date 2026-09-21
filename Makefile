@@ -6,6 +6,8 @@ PYTHON ?= python3
 HF ?= hf
 LLAMA_CPP_DIR ?= /workspace/llama.cpp
 LLAMA_CPP_BUILD_DIR ?= $(LLAMA_CPP_DIR)/build
+LLAMA_VENV ?= /workspace/llama-cpp-venv
+LLAMA_PYTHON ?= $(LLAMA_VENV)/bin/python
 HF_MODEL_ID ?= Qwen/Qwen2.5-7B-Instruct
 HF_REVISION ?= main
 HF_MODEL_DIR ?= /workspace/models/Qwen2.5-7B-Instruct-original
@@ -29,7 +31,7 @@ help:
 		'' \
 		'  make clone-llama          clona o llama.cpp em LLAMA_CPP_DIR' \
 		'  make build-llama          compila o binário llama-quantize' \
-		'  make install-llama-python instala dependências do conversor HF→GGUF' \
+		'  make install-llama-python instala dependências em venv separado' \
 		'  make download-source      baixa o Qwen original para o SSD' \
 		'  make inspect-source       mostra formato/metadados da fonte' \
 		'  make quantize-q8          gera GGUF F16 e depois GGUF Q8_0' \
@@ -54,7 +56,9 @@ build-llama: clone-llama
 	cmake --build "$(LLAMA_CPP_BUILD_DIR)" --target llama-quantize -j"$(QUANTIZE_THREADS)"
 
 install-llama-python: clone-llama
-	$(PYTHON) -m pip install -r "$(LLAMA_CPP_DIR)/requirements.txt"
+	$(PYTHON) -m venv "$(LLAMA_VENV)"
+	"$(LLAMA_PYTHON)" -m pip install --upgrade pip
+	"$(LLAMA_PYTHON)" -m pip install -r "$(LLAMA_CPP_DIR)/requirements.txt"
 
 download-source:
 	mkdir -p "$(HF_MODEL_DIR)"
@@ -66,7 +70,7 @@ inspect-source:
 
 quantize-q8: build-llama install-llama-python inspect-source
 	chmod +x "$(QUANTIZE_SCRIPT)"
-	LLAMA_QUANTIZE_THREADS="$(QUANTIZE_THREADS)" "$(QUANTIZE_SCRIPT)" \
+	PYTHON="$(LLAMA_PYTHON)" LLAMA_QUANTIZE_THREADS="$(QUANTIZE_THREADS)" "$(QUANTIZE_SCRIPT)" \
 		--llama-cpp-dir "$(LLAMA_CPP_DIR)" \
 		--hf-model-dir "$(HF_MODEL_DIR)" \
 		--output-dir "$(GGUF_OUTPUT_DIR)" \
