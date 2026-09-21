@@ -24,11 +24,12 @@ Comece por [Como funciona o benchmark (HTML)](docs/metodologia.html). O tutorial
 
 ## 1. Preparar o pod
 
-Para testar um servidor existente, deixe seu vLLM funcionando em outro terminal. Para medir desde a partida, use `--launch`, explicado abaixo, com o servidor parado. Execute o cliente no mesmo pod para reduzir interferência da rede externa. Não rode outros servidores ou notebooks usando a GPU ao mesmo tempo.
+Para testar um servidor existente, deixe-o funcionando em outro terminal. Para medir desde a partida, use `--launch`, explicado abaixo, com o servidor parado. Execute o cliente no mesmo pod para reduzir interferência da rede externa. Não rode outros servidores ou notebooks usando a GPU ao mesmo tempo.
 
 Em uma imagem Ubuntu/Debian do RunPod, como root:
 
 ```bash
+mkdir -p /workspace /workspace/models
 apt-get update
 apt-get install -y git python3-venv
 cd /workspace
@@ -53,23 +54,35 @@ O primeiro comando cria um ambiente **separado do vLLM**; `source` o ativa só n
 
 As dependências diretas centrais estão fixadas. Isso não é um lockfile completo e multiplataforma: cada execução salva todas as versões realmente instaladas em `client-packages.json`. Compare esse arquivo entre integrantes. Não atualize pacotes no meio da bateria experimental.
 
-## 2. Baixar somente o tokenizer
+## 2. Baixar o GGUF e o tokenizer para o SSD
 
 Modelo desta rodada: `arthuravianna/Qwen2.5-14B-Instruct-Q8_0.gguf`. O GGUF contém apenas os pesos; use o tokenizer do modelo base Qwen2.5. O vLLM GGUF requer `vllm-gguf-plugin` e é experimental. Se não carregar, preserve o `server.log`, marque a execução como falha e investigue a incompatibilidade; não troque silenciosamente a representação.
 
 ```bash
-python bench.py prepare-tokenizer
+source .venv/bin/activate
+python -m pip install --upgrade huggingface_hub
+mkdir -p /workspace/models /workspace/models/Qwen2.5-14B-tokenizer
+hf download arthuravianna/Qwen2.5-14B-Instruct-Q8_0.gguf \
+  Qwen2.5-14B-Instruct-Q8_0.gguf \
+  --revision main \
+  --local-dir /workspace/models
+hf download Qwen/Qwen2.5-14B-Instruct \
+  --include 'tokenizer*' 'special_tokens_map.json' 'chat_template.jinja' \
+  --revision main \
+  --local-dir /workspace/models/Qwen2.5-14B-tokenizer
+ls -lh /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf
+sha256sum /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf
 ```
 
-Baixa o tokenizer de `Qwen/Qwen2.5-14B-Instruct`, resolve `main` para uma revisão concreta e salva os arquivos em `tokenizer/`, com a origem em `source.json`. **Não baixa 14 bilhões de parâmetros.** A pasta não é sobrescrita caso já exista.
+`huggingface_hub` instala o comando `hf`; o primeiro `hf download` baixa somente o arquivo GGUF para o volume persistente, e o segundo baixa somente os arquivos necessários do tokenizer. Nenhum servidor deve ser iniciado durante essa etapa. `ls` confirma o tamanho no SSD e `sha256sum` produz a impressão digital que deve ser registrada em `configs/*.json` e no relatório.
 
-O tokenizer converte texto em tokens e é usado para construir a carga sintética. Compartilhe **a mesma pasta** entre os três integrantes ou use a revisão registrada:
+Se preferir usar o preparador do projeto para registrar a revisão do tokenizer, execute depois do download:
 
 ```bash
 python bench.py prepare-tokenizer --revision SHA_REGISTRADO_NO_SOURCE_JSON
 ```
 
-Se o tokenizer do checkpoint quantizado foi alterado, use o tokenizer correspondente ao artefato. Um modelo diferente exige seu próprio tokenizer. O servidor também aplica seu chat template; compare os templates e as contagens reais retornadas, não só os nomes dos modelos.
+Nesse caso, copie a pasta registrada para `/workspace/models/Qwen2.5-14B-tokenizer` ou altere explicitamente o caminho em todos os comandos. O tokenizer converte texto em tokens e é usado para construir a carga sintética. Compartilhe **a mesma pasta** entre os três integrantes. O servidor também aplica seu chat template; compare os templates e as contagens reais retornadas, não só os nomes dos modelos.
 
 ## 3. Confirmar o modelo servido
 
@@ -117,7 +130,7 @@ Para os três runtimes, execute o processo real do servidor via um arquivo `--la
 | Runtime | Comando foreground a colocar no arquivo `--launch` | Marco de carregamento |
 |---|---|---|
 | vLLM | `vllm serve ...` com o caminho local do GGUF e tokenizer correspondente | processo → primeiro conteúdo; `/v1/models` pode anteceder a carga completa |
-| llama.cpp | `llama-server -m /workspace/models/model.gguf ...` | processo → primeiro conteúdo; o servidor normalmente carrega o GGUF no startup |
+| llama.cpp | `llama-server -m /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf ...` | processo → primeiro conteúdo; o servidor normalmente carrega o GGUF no startup |
 | Ollama | `ollama serve` | processo → primeiro conteúdo, porque `ollama serve` pode ficar pronto antes de `ollama run` carregar o modelo |
 
 O arquivo deve conter apenas um array JSON de argumentos, sem `source`, `&`, `docker -d`, pipes ou redirecionamentos. Para Ollama, o benchmark precisa conseguir alcançar `/v1/models` e `/v1/chat/completions`; se `ollama serve` não resolver o modelo sozinho, use um wrapper foreground documentado que mantenha o processo e faça o preload local sem baixar arquivos. O wrapper deve receber as variáveis offline apropriadas e ser validado no `server.log`.
