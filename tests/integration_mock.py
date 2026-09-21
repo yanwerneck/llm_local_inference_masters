@@ -108,12 +108,12 @@ def main():
             result = next((folder / "results").glob("*/summary.json"))
             rows = json.loads(result.read_text())
             summary = next(row for row in rows if row["phase"] == "measure")
-            assert next(row for row in rows if row["phase"] == "warmup")["successful"] == 1
-            assert summary["successful"] == 3, summary
-            assert summary["output_tokens_p50"] == 4, summary
-            assert summary["ttft_ms_p50"] > 0, summary
-            assert summary["decode_tokens_s_p50"] > 0, summary
-            assert summary["effective_tokens_s_p50"] > 0, summary
+            assert next(row for row in rows if row["phase"] == "warmup")["successful_request_count"] == 1
+            assert summary["successful_request_count"] == 3, summary
+            assert summary["output_completion_token_count_p50"] == 4, summary
+            assert summary["time_to_first_token_milliseconds_p50"] > 0, summary
+            assert summary["decode_generation_tokens_per_second_p50"] > 0, summary
+            assert summary["effective_output_tokens_per_second_p50"] > 0, summary
             assert (result.parent / "context-summary.json").exists()
             assert (result.parent / "gpu-summary.json").exists()
             kv = (result.parent / "kv-cache.csv").read_text()
@@ -141,7 +141,7 @@ def main():
                 assert json.loads(manifest.read_text())["status"] == "failed"
                 if mode == "failure":
                     failed_summary = next(row for row in json.loads((manifest.parent / "summary.json").read_text()) if row["phase"] == "measure")
-                    assert failed_summary["errored"] >= 1, failed_summary
+                    assert failed_summary["errored_request_count"] >= 1, failed_summary
                 else:
                     assert json.loads((manifest.parent / "summary.json").read_text()) == []
                     partial = json.loads((manifest.parent / "first-request.json").read_text())

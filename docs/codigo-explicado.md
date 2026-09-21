@@ -136,7 +136,7 @@ Remove ausências e valores não finitos, ordena e calcula posição `(n−1)q`.
 
 ### `summarize(report)`
 
-Exige exatamente um benchmark GuideLLM no bloco. Separa `successful`, `errored` e `incomplete`; percentis só usam sucessos. Adiciona as taxas derivadas e calcula n, p50 e p95 por métrica. `n` pode diferir do número de sucessos se a métrica não estiver disponível.
+Exige exatamente um benchmark GuideLLM no bloco. Separa requisições bem-sucedidas, com erro e incompletas; percentis só usam sucessos. Grava nomes longos como `time_to_first_token_milliseconds_p50`, `request_latency_seconds_p95` e `decode_generation_tokens_per_second_p99`, além de `sample_count` por métrica. Também grava `statistics.percentiles_by_metric`, com p05, p50, p95 e p99, a definição da interpolação e a indicação de que caudas com menos de 100 sucessos são exploratórias. O agrupamento externo preserva `phase`, `scenario` e `repetition`, portanto os resultados de short, medium e long ficam separados.
 
 Gera ainda `requests_sha256` a partir de mensagens e `max_tokens`, não do alias do modelo ou chave. Esse hash ajuda a comparar a carga realmente registrada, mas só usa requisições bem-sucedidas: falhas precisam ser examinadas antes. Marca `p95_exploratory=True` abaixo de 100 sucessos; 100 não é garantia estatística de precisão.
 

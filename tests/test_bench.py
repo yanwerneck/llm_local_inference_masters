@@ -51,11 +51,12 @@ class UnitTests(unittest.TestCase):
                "inter_token_latency_ms": 20, "output_tokens": 5, "prompt_tokens": 256}
         report = {"benchmarks": [{"requests": {"successful": [row], "errored": [{"request_latency": 100}], "incomplete": []}}]}
         out = bench.summarize(report)
-        self.assertEqual(out["errored"], 1)
-        self.assertEqual(out["e2e_s_p50"], .5)
-        self.assertTrue(out["p95_exploratory"])
-        self.assertEqual(out["decode_tokens_s_p50"], 50)
-        self.assertEqual(out["effective_tokens_s_p50"], 10)
+        self.assertEqual(out["errored_request_count"], 1)
+        self.assertEqual(out["request_latency_seconds_p50"], .5)
+        self.assertTrue(out["percentiles_are_exploratory"])
+        self.assertEqual(out["decode_generation_tokens_per_second_p50"], 50)
+        self.assertEqual(out["effective_output_tokens_per_second_p50"], 10)
+        self.assertEqual(out["time_to_first_token_milliseconds_p99"], 10)
 
     def test_local_weights_guard(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -145,9 +146,10 @@ class UnitTests(unittest.TestCase):
             p = Path(tmp)
             (p / "r1-short-measure-requests.csv").write_text("status,prompt_tokens,output_tokens,inter_token_latency_ms,request_latency,time_to_first_token_ms\nsuccessful,256,128,20,3,460\nerrored,256,0,0,10,0\n")
             row = context_summary(p, 196608)[0]
-            self.assertEqual(row["n"], 1)
-            self.assertEqual(row["kv_start_mib_estimate"], 48)
-            self.assertEqual(row["decode_tokens_s_p50"], 50)
+            self.assertEqual(row["successful_request_count"], 1)
+            self.assertEqual(row["scenario"], "short")
+            self.assertEqual(row["estimated_start_logical_kv_cache_mebibytes"], 48)
+            self.assertEqual(row["decode_generation_tokens_per_second_p50"], 50)
 
 
 if __name__ == "__main__":

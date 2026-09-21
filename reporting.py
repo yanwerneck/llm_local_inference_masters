@@ -5,13 +5,22 @@ import json
 import math
 from collections import defaultdict
 from pathlib import Path
-from statistics import median
 
 
 def ratio(a, b):
     if not isinstance(a, (int, float)) or not isinstance(b, (int, float)):
         return None
     return a / b if math.isfinite(a) and math.isfinite(b) and a > 0 and b > 0 else None
+
+
+def percentile(values, q):
+    """Percentil empírico com interpolação linear; ausências não viram zero."""
+    values = sorted(v for v in values if v is not None and math.isfinite(v))
+    if not values:
+        return None
+    position = (len(values) - 1) * q
+    lower, upper = math.floor(position), math.ceil(position)
+    return values[lower] + (values[upper] - values[lower]) * (position - lower)
 
 
 def derived(row):
@@ -58,17 +67,32 @@ def context_summary(output, kv_bytes_per_token=None):
                 for key in ("prompt_tokens", "output_tokens", "inter_token_latency_ms", "request_latency", "time_to_first_token_ms"):
                     row[key] = float(row[key]) if row.get(key) else None
                 row.update(derived(row))
-                groups[(phase, rep, row["context_band"])].append(row)
+                # Preservamos o cenário mesmo quando dois cenários caem na
+                # mesma faixa de contexto. Isso evita que short/medium/long
+                # apareçam como uma única população no JSON derivado.
+                groups[(phase, rep, scenario, row["context_band"])].append(row)
     result = []
-    for (phase, rep, band), rows in groups.items():
-        entry = {"phase": phase, "repetition": rep, "context_band": band, "n": len(rows)}
-        for key in ("decode_tokens_s", "effective_tokens_s", "time_to_first_token_ms", "context_start_tokens", "context_end_tokens"):
+    for (phase, rep, scenario, band), rows in groups.items():
+        entry = {"phase": phase, "repetition": rep, "scenario": scenario,
+                 "context_band": band, "successful_request_count": len(rows)}
+        context_metrics = {
+            "decode_generation_tokens_per_second": "decode_tokens_s",
+            "effective_output_tokens_per_second": "effective_tokens_s",
+            "time_to_first_token_milliseconds": "time_to_first_token_ms",
+            "initial_context_input_token_count": "context_start_tokens",
+            "final_logical_context_token_count": "context_end_tokens",
+        }
+        for label, key in context_metrics.items():
             values = [r[key] for r in rows if r[key] is not None and math.isfinite(r[key])]
-            entry[key + "_p50"] = median(values) if values else None
+            entry[label + "_sample_count"] = len(values)
+            entry[label + "_p50"] = percentile(values, .50)
+            entry[label + "_p95"] = percentile(values, .95)
+            entry[label + "_p99"] = percentile(values, .99)
         result.append(entry)
         for edge in ("start", "end"):
-            tokens = entry[f"context_{edge}_tokens_p50"]
-            entry[f"kv_{edge}_mib_estimate"] = tokens * kv_bytes_per_token / 1048576 if tokens is not None and kv_bytes_per_token else None
+            tokens_key = "initial_context_input_token_count_p50" if edge == "start" else "final_logical_context_token_count_p50"
+            tokens = entry[tokens_key]
+            entry[f"estimated_{edge}_logical_kv_cache_mebibytes"] = tokens * kv_bytes_per_token / 1048576 if tokens is not None and kv_bytes_per_token else None
     return result
 
 
@@ -114,15 +138,26 @@ def render(output, rows):
                      "inter_token_latency_ms": req.get("mean_itl_ms"), "request_latency": req.get("e2e_s")})
         initial.append({"phase": label, "ttft": req.get("ttft_ms"), "e2e": req.get("e2e_s"), **d})
     metrics = table(rows, [("phase", "Fase"), ("scenario", "Cenário"), ("repetition", "Repetição"),
-        ("expected", "Previstas"), ("successful", "Sucessos"), ("errored", "Erros"), ("incomplete", "Incompletas"), ("missing", "Ausentes do relatório bruto"),
-        ("ttft_ms_p50", "TTFT p50 (ms)"), ("ttft_ms_p95", "TTFT p95 (ms)"),
-        ("decode_tokens_s_p50", "Geração p50 (tokens/s)"), ("effective_tokens_s_p50", "Efetiva p50 (tokens/s)"),
-        ("e2e_s_p50", "Total p50 (s)"), ("prompt_tokens_p50", "Entrada p50 (tokens)"), ("output_tokens_p50", "Saída p50 (tokens)")])
-    by_context = table(context, [("phase", "Fase"), ("repetition", "Repetição"), ("context_band", "Faixa de entrada (tokens)"),
-        ("n", "n"), ("context_start_tokens_p50", "Contexto inicial p50"), ("context_end_tokens_p50", "Contexto final p50"),
-        ("kv_start_mib_estimate", "KV inicial estimado (MiB)"), ("kv_end_mib_estimate", "KV final estimado (MiB)"),
-        ("time_to_first_token_ms_p50", "TTFT p50 (ms)"), ("decode_tokens_s_p50", "Geração p50 (tokens/s)"),
-        ("effective_tokens_s_p50", "Efetiva p50 (tokens/s)")])
+        ("expected", "Requisições previstas"), ("successful_request_count", "Requisições bem-sucedidas"),
+        ("errored_request_count", "Requisições com erro"), ("incomplete_request_count", "Requisições incompletas"),
+        ("missing_request_count", "Requisições ausentes do relatório bruto"),
+        ("time_to_first_token_milliseconds_p50", "Tempo até primeiro token p50 (ms)"),
+        ("time_to_first_token_milliseconds_p95", "Tempo até primeiro token p95 (ms)"),
+        ("time_to_first_token_milliseconds_p99", "Tempo até primeiro token p99 (ms)"),
+        ("decode_generation_tokens_per_second_p50", "Velocidade de geração p50 (tokens/s)"),
+        ("effective_output_tokens_per_second_p50", "Velocidade efetiva de saída p50 (tokens/s)"),
+        ("request_latency_seconds_p50", "Latência total p50 (s)"),
+        ("input_prompt_token_count_p50", "Tokens de entrada p50"),
+        ("output_completion_token_count_p50", "Tokens de saída p50")])
+    by_context = table(context, [("phase", "Fase"), ("repetition", "Repetição"), ("scenario", "Cenário"), ("context_band", "Faixa de entrada (tokens)"),
+        ("successful_request_count", "Requisições bem-sucedidas"),
+        ("initial_context_input_token_count_p50", "Tokens de entrada inicial p50"),
+        ("final_logical_context_token_count_p50", "Tokens de contexto lógico final p50"),
+        ("estimated_start_logical_kv_cache_mebibytes", "KV lógico inicial estimado (MiB)"),
+        ("estimated_end_logical_kv_cache_mebibytes", "KV lógico final estimado (MiB)"),
+        ("time_to_first_token_milliseconds_p50", "Tempo até primeiro token p50 (ms)"),
+        ("decode_generation_tokens_per_second_p50", "Velocidade de geração p50 (tokens/s)"),
+        ("effective_output_tokens_per_second_p50", "Velocidade efetiva p50 (tokens/s)")])
     hardware = table(gpu, [("phase", "Fase"), ("gpu", "GPU"), ("name", "Nome"), ("samples", "Amostras"),
         ("used_mib_max", "Memória máx. (MiB)"), ("total_mib_max", "Memória total (MiB)"),
         ("gpu_util_pct_mean", "Utilização média (%)"), ("gpu_util_pct_max", "Utilização máx. (%)"),

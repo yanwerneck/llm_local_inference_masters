@@ -4,7 +4,7 @@ Leia junto com [a explicação detalhada](codigo-explicado.md). Gerado dos arqui
 
 ## bench.py
 
-SHA-256: `df1a27e27ab687cc2bcaa64a4687c17e6a81f3205b2a7ddac8a918795114daba`.
+SHA-256: `5ee8ca29b7c5a84fe1d4eaaa817620c076da5f3c756bdec892106ce89c02a1b4`.
 
 | Função/classe | Linhas |
 |---|---|
@@ -19,13 +19,13 @@ SHA-256: `df1a27e27ab687cc2bcaa64a4687c17e6a81f3205b2a7ddac8a918795114daba`.
 | `scenario_config` | 137–156 |
 | `Monitor` | 159–222 |
 | `percentile` | 225–231 |
-| `summarize` | 234–259 |
-| `write_requests_csv` | 262–275 |
-| `write_summary` | 278–288 |
-| `run` | 291–414 |
-| `positive` | 417–421 |
-| `rebuild_report` | 424–438 |
-| `main` | 441–490 |
+| `summarize` | 234–273 |
+| `write_requests_csv` | 276–289 |
+| `write_summary` | 292–302 |
+| `run` | 305–428 |
+| `positive` | 431–435 |
+| `rebuild_report` | 438–452 |
+| `main` | 455–504 |
 | `__init__` | 161–167 |
 | `start` | 169–174 |
 | `kv_loop` | 176–199 |
@@ -274,259 +274,273 @@ SHA-256: `df1a27e27ab687cc2bcaa64a4687c17e6a81f3205b2a7ddac8a918795114daba`.
 0239 |     requests = benchmarks[0]["requests"]
 0240 |     from reporting import derived
 0241 |     good = [{**r, **derived(r)} for r in requests["successful"]]
-0242 |     result = {"successful": len(good), "errored": len(requests["errored"]), "incomplete": len(requests["incomplete"])}
-0243 |     metrics = {"ttft_ms": "time_to_first_token_ms", "e2e_s": "request_latency",
-0244 |                "mean_itl_ms": "inter_token_latency_ms", "output_tokens": "output_tokens", "prompt_tokens": "prompt_tokens",
-0245 |                "decode_tokens_s": "decode_tokens_s", "effective_tokens_s": "effective_tokens_s"}
-0246 |     for label, key in metrics.items():
-0247 |         vals = [r.get(key) for r in good]
-0248 |         result[label + "_n"] = sum(v is not None for v in vals)
-0249 |         result[label + "_p50"] = percentile(vals, .5)
-0250 |         result[label + "_p95"] = percentile(vals, .95)
-0251 |     # O hash exclui aliases do modelo e chaves: apenas carga de entrada e limite de saída.
-0252 |     bodies = []
-0253 |     for row in good:
-0254 |         args = json.loads(row["request_args"])
-0255 |         body = args.get("body", {})
-0256 |         bodies.append({k: body.get(k) for k in ("messages", "max_tokens")})
-0257 |     result["requests_sha256"] = hashlib.sha256(json.dumps(bodies, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
-0258 |     result["p95_exploratory"] = len(good) < 100
-0259 |     return result
-0260 |
-0261 |
-0262 | def write_requests_csv(path, report):
-0263 |     """Amostras individuais para análise no R/Python, incluindo status de erro."""
-0264 |     from reporting import derived
-0265 |     fields = ["status", "request_id", "request_start_time", "request_latency", "time_to_first_token_ms",
-0266 |               "inter_token_latency_ms", "prompt_tokens", "output_tokens", "decode_tokens_s", "effective_tokens_s",
-0267 |               "context_start_tokens", "context_end_tokens", "context_band"]
-0268 |     with Path(path).open("w", newline="", encoding="utf-8") as handle:
-0269 |         writer = csv.DictWriter(handle, fieldnames=fields)
-0270 |         writer.writeheader()
-0271 |         for status in ("successful", "errored", "incomplete"):
-0272 |             for row in report["benchmarks"][0]["requests"][status]:
-0273 |                 if status == "successful":
-0274 |                     row = {**row, **derived(row)}
-0275 |                 writer.writerow({"status": status, **{key: row.get(key) for key in fields[1:]}})
-0276 |
-0277 |
-0278 | def write_summary(output, rows):
-0279 |     from reporting import render
-0280 |     write_json(output / "summary.json", rows)
-0281 |     if not rows:
-0282 |         render(output, rows)
-0283 |         return
-0284 |     with (output / "summary.csv").open("w", newline="", encoding="utf-8") as handle:
-0285 |         writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
-0286 |         writer.writeheader()
-0287 |         writer.writerows(rows)
-0288 |     render(output, rows)
-0289 |
+0242 |     result = {
+0243 |         "successful_request_count": len(good),
+0244 |         "errored_request_count": len(requests["errored"]),
+0245 |         "incomplete_request_count": len(requests["incomplete"]),
+0246 |     }
+0247 |     # Os nomes são deliberadamente longos: summary.json é um artefato de
+0248 |     # análise, e não uma API em que economizar alguns bytes melhora algo.
+0249 |     metrics = {
+0250 |         "time_to_first_token_milliseconds": "time_to_first_token_ms",
+0251 |         "request_latency_seconds": "request_latency",
+0252 |         "mean_inter_token_latency_milliseconds": "inter_token_latency_ms",
+0253 |         "output_completion_token_count": "output_tokens",
+0254 |         "input_prompt_token_count": "prompt_tokens",
+0255 |         "decode_generation_tokens_per_second": "decode_tokens_s",
+0256 |         "effective_output_tokens_per_second": "effective_tokens_s",
+0257 |     }
+0258 |     for label, key in metrics.items():
+0259 |         vals = [r.get(key) for r in good]
+0260 |         result[label + "_sample_count"] = sum(v is not None for v in vals)
+0261 |         result[label + "_p50"] = percentile(vals, .5)
+0262 |         result[label + "_p95"] = percentile(vals, .95)
+0263 |         result[label + "_p99"] = percentile(vals, .99)
+0264 |     # O hash exclui aliases do modelo e chaves: apenas carga de entrada e limite de saída.
+0265 |     bodies = []
+0266 |     for row in good:
+0267 |         args = json.loads(row["request_args"])
+0268 |         body = args.get("body", {})
+0269 |         bodies.append({k: body.get(k) for k in ("messages", "max_tokens")})
+0270 |     result["requests_sha256"] = hashlib.sha256(json.dumps(bodies, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+0271 |     result["percentiles_are_exploratory"] = len(good) < 100
+0272 |     result["percentile_definition"] = "Empirical linear interpolation over successful requests in this phase/scenario/repetition block."
+0273 |     return result
+0274 |
+0275 |
+0276 | def write_requests_csv(path, report):
+0277 |     """Amostras individuais para análise no R/Python, incluindo status de erro."""
+0278 |     from reporting import derived
+0279 |     fields = ["status", "request_id", "request_start_time", "request_latency", "time_to_first_token_ms",
+0280 |               "inter_token_latency_ms", "prompt_tokens", "output_tokens", "decode_tokens_s", "effective_tokens_s",
+0281 |               "context_start_tokens", "context_end_tokens", "context_band"]
+0282 |     with Path(path).open("w", newline="", encoding="utf-8") as handle:
+0283 |         writer = csv.DictWriter(handle, fieldnames=fields)
+0284 |         writer.writeheader()
+0285 |         for status in ("successful", "errored", "incomplete"):
+0286 |             for row in report["benchmarks"][0]["requests"][status]:
+0287 |                 if status == "successful":
+0288 |                     row = {**row, **derived(row)}
+0289 |                 writer.writerow({"status": status, **{key: row.get(key) for key in fields[1:]}})
 0290 |
-0291 | def run(args):
-0292 |     import fcntl
-0293 |     from lifecycle import DEFAULT_PROMPT, Launch, lifecycle_report, timed_request, wait_models
-0294 |     if importlib.metadata.version("guidellm") != GUIDELLM_VERSION:
-0295 |         raise ValueError(f"Este projeto exige guidellm=={GUIDELLM_VERSION}; reinstale requirements.txt.")
-0296 |     cfg = load_config(args.config)
-0297 |     validate_run(cfg, args.scenarios, args.smoke)
-0298 |     availability = local_model_check(args.local_model_path)
-0299 |     availability["kv_bytes_per_token"] = args.kv_bytes_per_token
-0300 |     availability["launch_hf_offline"] = bool(args.launch)
-0301 |     digest = tokenizer_digest(cfg["tokenizer"])
-0302 |     count, repetitions = (3, 1) if args.smoke else (args.requests, args.repetitions)
-0303 |     secret = os.environ.get("BENCH_API_KEY", "")
-0304 |     prompt = Path(args.first_prompt_file).read_text(encoding="utf-8") if args.first_prompt_file else DEFAULT_PROMPT
-0305 |     if not prompt.strip():
-0306 |         raise ValueError("O prompt inicial não pode estar vazio.")
-0307 |     base = Path(args.results)
-0308 |     base.mkdir(parents=True, exist_ok=True)
-0309 |     with (base / ".benchmark.lock").open("a") as lock:
-0310 |         try:
-0311 |             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-0312 |         except BlockingIOError:
-0313 |             raise ValueError("Já existe um benchmark usando esta pasta results. Não execute dois ao mesmo tempo.") from None
-0314 |         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
-0315 |         output = base / stamp
-0316 |         output.mkdir()
-0317 |         manifest = {"project_version": VERSION, "guidellm_version": GUIDELLM_VERSION, "started_utc": stamp,
-0318 |                     "config": cfg, "tokenizer": digest, "smoke": args.smoke, "requests": count,
-0319 |                     "repetitions": repetitions, "warmup_requests_per_case": args.warmup,
-0320 |                     "scenarios": args.scenarios, "seed": args.seed, "profile": "synchronous",
-0321 |                     "model_availability": availability,
-0322 |                     "guidellm_compat": "0.7.4 bounded drain of real late completion updates (5s); no request retry",
-0323 |                     "telemetry": {"gpu_source": "local nvidia-smi", "kv_metrics_requested": args.collect_kv_metrics,
-0324 |                                   "sampling": "approximately 1 Hz; not per-token"},
-0325 |                     "python": sys.version, "platform": platform.platform(),
-0326 |                     "git": capture(["git", "rev-parse", "HEAD"]), "status": "running"}
-0327 |         write_json(output / "manifest.json", redact(manifest, secret))
-0328 |         write_json(output / "client-packages.json", {d.metadata["Name"]: d.version for d in importlib.metadata.distributions()})
-0329 |         write_json(output / "gpu-before.json", capture(["nvidia-smi"]))
-0330 |         monitor, rows = Monitor(output, cfg, secret, args.collect_kv_metrics), []
-0331 |         launch, origin, cleanup_error = None, None, None
-0332 |         lifecycle = {"mode": "new-process" if args.launch else "existing-server-state-unknown",
-0333 |                      "status": "running", "initial_state_note": args.initial_state,
-0334 |                      "startup_timeout_s": args.startup_timeout}
-0335 |         print(f"Resultados: {output.resolve()}", flush=True)
-0336 |         try:
-0337 |             monitor.start()
-0338 |             if args.launch:
-0339 |                 launch = Launch(cfg, args.launch, output)
-0340 |                 lifecycle["argv"] = redact(launch.argv, secret)
-0341 |                 monitor.phase = "process_startup"
-0342 |                 origin = launch.start()
-0343 |                 lifecycle["pid"] = launch.process.pid
-0344 |             lifecycle_report(output, redact(lifecycle, secret))
-0345 |             lifecycle["readiness"] = wait_models(cfg, secret, args.startup_timeout, launch)
-0346 |             lifecycle_report(output, redact(lifecycle, secret))
-0347 |             monitor.phase = "first_request"
-0348 |             print("Primeiro POST: medição da primeira resposta (nenhuma geração prévia enviada pelo cliente).", flush=True)
-0349 |             lifecycle["first_request"] = timed_request(cfg, secret, args.timeout, prompt,
-0350 |                                                        output / "first-request.json", origin)
-0351 |             lifecycle_report(output, redact(lifecycle, secret))
-0352 |             from guidellm.benchmark import BenchmarkScenario, benchmark_generative_text
-0353 |             from guidellm_compat import completion_drain
-0354 |             for rep in range(repetitions):
-0355 |                 # Rotação balanceia parcialmente a posição dos cenários entre repetições.
-0356 |                 names = args.scenarios[rep % len(args.scenarios):] + args.scenarios[:rep % len(args.scenarios)]
-0357 |                 for name in names:
-0358 |                     for phase, n in (("warmup", args.warmup), ("measure", count)):
-0359 |                         if not n:
-0360 |                             continue
-0361 |                         seed = args.seed + rep * 100 + list(WORKLOADS).index(name)
-0362 |                         if phase == "warmup":
-0363 |                             seed += 1_000_000
-0364 |                         prefix = f"r{rep+1}-{name}-{phase}"
-0365 |                         monitor.phase = prefix
-0366 |                         config = scenario_config(cfg, name, n, seed, secret, args.timeout)
-0367 |                         write_json(output / f"{prefix}-config.json", redact(config, secret))
-0368 |                         print(f"{prefix}: {n} requisições, uma por vez", flush=True)
-0369 |                         with completion_drain():
-0370 |                             report, _ = asyncio.run(benchmark_generative_text(BenchmarkScenario.model_validate(config)))
-0371 |                         raw = redact(report.model_dump(mode="json"), secret)
-0372 |                         write_json(output / f"{prefix}.json", raw)
-0373 |                         write_requests_csv(output / f"{prefix}-requests.csv", raw)
-0374 |                         summary = summarize(raw)
-0375 |                         summary["expected"] = n
-0376 |                         summary["missing"] = max(0, n - sum(summary[k] for k in ("successful", "errored", "incomplete")))
-0377 |                         rows.append({"runtime": cfg["runtime"], "model": cfg["model"],
-0378 |                                      "cache_policy": cfg["cache_policy"], "tokenizer_sha256": digest["sha256"],
-0379 |                                      "phase": phase, "scenario": name, "repetition": rep+1, **summary})
-0380 |                         write_summary(output, rows)
-0381 |                         if summary["successful"] != n or summary["errored"] or summary["incomplete"]:
-0382 |                             raise RuntimeError(f"{prefix}: requisições falharam ou execução incompleta. Veja o JSON; não compare como sucesso.")
-0383 |             monitor.phase = "warm_reference"
-0384 |             lifecycle["warm_reference"] = timed_request(cfg, secret, args.timeout, prompt,
-0385 |                                                          output / "warm-reference.json")
-0386 |             manifest["status"] = lifecycle["status"] = "complete"
-0387 |         except BaseException as exc:
-0388 |             manifest["status"] = "interrupted" if isinstance(exc, KeyboardInterrupt) else "failed"
-0389 |             manifest["error"] = redact(str(exc), secret)
-0390 |             lifecycle["status"] = manifest["status"]
-0391 |             lifecycle["error"] = manifest["error"]
-0392 |             raise
-0393 |         finally:
-0394 |             for key, filename in (("first_request", "first-request.json"), ("warm_reference", "warm-reference.json")):
-0395 |                 if (output / filename).exists():
-0396 |                     lifecycle[key] = json.loads((output / filename).read_text(encoding="utf-8"))
-0397 |             if launch is not None:
-0398 |                 monitor.phase = "server_shutdown"
-0399 |                 try:
-0400 |                     launch.close()
-0401 |                     lifecycle["server_cleanup"] = "stopped owned process group only"
-0402 |                 except Exception as exc:
-0403 |                     cleanup_error = redact(str(exc), secret)
-0404 |                     lifecycle["server_cleanup_error"] = cleanup_error
-0405 |                     lifecycle["status"] = manifest["status"] = "failed"
-0406 |             lifecycle_report(output, redact(lifecycle, secret))
-0407 |             monitor.stop()
-0408 |             manifest["ended_utc"] = datetime.now(timezone.utc).isoformat()
-0409 |             write_json(output / "manifest.json", redact(manifest, secret))
-0410 |             write_json(output / "gpu-after.json", capture(["nvidia-smi"]))
-0411 |             write_summary(output, rows)
-0412 |         if cleanup_error:
-0413 |             raise RuntimeError(f"Falha ao encerrar processo criado: {cleanup_error}. Confira o PID no lifecycle.json.")
-0414 |         print(f"Concluído. Abra {output / 'lifecycle.html'} e {output / 'summary.html'}")
-0415 |
-0416 |
-0417 | def positive(value):
-0418 |     number = int(value)
-0419 |     if number <= 0:
-0420 |         raise argparse.ArgumentTypeError("Use um inteiro positivo.")
-0421 |     return number
-0422 |
-0423 |
-0424 | def rebuild_report(args):
-0425 |     """Atualiza apenas derivados, preservando relatórios brutos e manifesto original."""
-0426 |     output = Path(args.output)
-0427 |     rows = json.loads((output / "summary.json").read_text())
-0428 |     manifest = json.loads((output / "manifest.json").read_text())
-0429 |     for row in rows:
-0430 |         prefix = f"r{row['repetition']}-{row['scenario']}-{row['phase']}"
-0431 |         raw = json.loads((output / f"{prefix}.json").read_text())
-0432 |         row.update(summarize(raw))
-0433 |         expected = manifest.get("warmup_requests_per_case") if row["phase"] == "warmup" else manifest.get("requests")
-0434 |         row["expected"] = expected
-0435 |         row["missing"] = max(0, expected - sum(row[k] for k in ("successful", "errored", "incomplete"))) if expected is not None else None
-0436 |         write_requests_csv(output / f"{prefix}-requests.csv", raw)
-0437 |     write_summary(output, rows)
-0438 |     print(f"Relatório atualizado: {output / 'summary.html'}; dados brutos preservados.")
-0439 |
-0440 |
-0441 | def main():
-0442 |     parser = argparse.ArgumentParser(description=__doc__)
-0443 |     commands = parser.add_subparsers(dest="command", required=True)
-0444 |     report = commands.add_parser("report", help="Regenera derivados de uma execução existente, sem nova inferência.")
-0445 |     report.add_argument("--output", required=True)
-0446 |     report.set_defaults(func=rebuild_report)
-0447 |     prep = commands.add_parser("prepare-tokenizer", help="Baixa apenas tokenizer; fixa revisão e guarda origem.")
-0448 |     prep.add_argument("--model", default="Qwen/Qwen2.5-14B-Instruct")
-0449 |     prep.add_argument("--revision", default="main")
-0450 |     prep.add_argument("--output", default="tokenizer")
-0451 |     prep.set_defaults(func=prepare_tokenizer)
-0452 |     cmd = commands.add_parser("run", help="Mede primeiro acesso, aquecimento e GuideLLM; lançamento do servidor é opcional.")
-0453 |     cmd.add_argument("--config", required=True)
-0454 |     cmd.add_argument("--local-model-path", required=True, help="Pesos já no SSD: pasta HF, arquivo GGUF ou blob local do Ollama. Não baixa arquivos.")
-0455 |     cmd.add_argument("--collect-kv-metrics", action="store_true", help="Amostra /metrics do vLLM (~1 Hz); ocupação do pool KV, não bytes.")
-0456 |     cmd.add_argument("--kv-bytes-per-token", type=positive, help="Opcional: bytes de KV lógico por token, calculados para arquitetura/dtype reais. Estimativa, não VRAM medida.")
-0457 |     cmd.add_argument("--input-tokens", nargs="+", type=positive, help="Substitui --scenarios por uma grade de comprimentos sintéticos, ex.: 256 512 1024 2048 3072.")
-0458 |     cmd.add_argument("--scenarios", nargs="+", choices=list(WORKLOADS), default=["short", "medium"])
-0459 |     cmd.add_argument("--requests", type=positive, default=30)
-0460 |     cmd.add_argument("--repetitions", type=positive, default=3)
-0461 |     cmd.add_argument("--warmup", type=positive, default=3)
-0462 |     cmd.add_argument("--seed", type=positive, default=42)
-0463 |     cmd.add_argument("--timeout", type=positive, default=300)
-0464 |     cmd.add_argument("--results", default="results")
-0465 |     cmd.add_argument("--smoke", action="store_true", help="3 medições e 1 repetição; não vale como resultado final.")
-0466 |     cmd.add_argument("--launch", help="Arquivo JSON com argv para iniciar um runtime LOCAL; encerra só esse processo ao final.")
-0467 |     cmd.add_argument("--startup-timeout", type=positive, default=1800, help="Limite da espera pela API com --launch, em segundos.")
-0468 |     cmd.add_argument("--first-prompt-file", help="Texto UTF-8 para a primeira requisição e referência final; default: pergunta sobre RAM/VRAM.")
-0469 |     cmd.add_argument("--initial-state", default="weights local; OS/compilation caches not controlled", help="Descreva SSD e caches existentes; apenas registra, não limpa.")
-0470 |     cmd.set_defaults(func=run)
-0471 |     args = parser.parse_args()
-0472 |     if getattr(args, "input_tokens", None):
-0473 |         if len(set(args.input_tokens)) != len(args.input_tokens):
-0474 |             parser.error("Não repita comprimentos em --input-tokens.")
-0475 |         args.scenarios = []
-0476 |         for size in args.input_tokens:
-0477 |             name = f"ctx{size}"
-0478 |             WORKLOADS[name] = size
-0479 |             args.scenarios.append(name)
-0480 |     if hasattr(args, "scenarios") and len(set(args.scenarios)) != len(args.scenarios):
-0481 |         parser.error("Não repita cenários na lista.")
-0482 |     try:
-0483 |         args.func(args)
-0484 |     except KeyboardInterrupt:
-0485 |         print("Interrompido; resultados já concluídos foram preservados.", file=sys.stderr)
-0486 |         return 130
-0487 |     except Exception as exc:
-0488 |         print(f"ERRO: {redact(str(exc), os.environ.get('BENCH_API_KEY', ''))}", file=sys.stderr)
-0489 |         return 1
-0490 |     return 0
-0491 |
-0492 |
-0493 | if __name__ == "__main__":
-0494 |     raise SystemExit(main())
+0291 |
+0292 | def write_summary(output, rows):
+0293 |     from reporting import render
+0294 |     write_json(output / "summary.json", rows)
+0295 |     if not rows:
+0296 |         render(output, rows)
+0297 |         return
+0298 |     with (output / "summary.csv").open("w", newline="", encoding="utf-8") as handle:
+0299 |         writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
+0300 |         writer.writeheader()
+0301 |         writer.writerows(rows)
+0302 |     render(output, rows)
+0303 |
+0304 |
+0305 | def run(args):
+0306 |     import fcntl
+0307 |     from lifecycle import DEFAULT_PROMPT, Launch, lifecycle_report, timed_request, wait_models
+0308 |     if importlib.metadata.version("guidellm") != GUIDELLM_VERSION:
+0309 |         raise ValueError(f"Este projeto exige guidellm=={GUIDELLM_VERSION}; reinstale requirements.txt.")
+0310 |     cfg = load_config(args.config)
+0311 |     validate_run(cfg, args.scenarios, args.smoke)
+0312 |     availability = local_model_check(args.local_model_path)
+0313 |     availability["kv_bytes_per_token"] = args.kv_bytes_per_token
+0314 |     availability["launch_hf_offline"] = bool(args.launch)
+0315 |     digest = tokenizer_digest(cfg["tokenizer"])
+0316 |     count, repetitions = (3, 1) if args.smoke else (args.requests, args.repetitions)
+0317 |     secret = os.environ.get("BENCH_API_KEY", "")
+0318 |     prompt = Path(args.first_prompt_file).read_text(encoding="utf-8") if args.first_prompt_file else DEFAULT_PROMPT
+0319 |     if not prompt.strip():
+0320 |         raise ValueError("O prompt inicial não pode estar vazio.")
+0321 |     base = Path(args.results)
+0322 |     base.mkdir(parents=True, exist_ok=True)
+0323 |     with (base / ".benchmark.lock").open("a") as lock:
+0324 |         try:
+0325 |             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+0326 |         except BlockingIOError:
+0327 |             raise ValueError("Já existe um benchmark usando esta pasta results. Não execute dois ao mesmo tempo.") from None
+0328 |         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
+0329 |         output = base / stamp
+0330 |         output.mkdir()
+0331 |         manifest = {"project_version": VERSION, "guidellm_version": GUIDELLM_VERSION, "started_utc": stamp,
+0332 |                     "config": cfg, "tokenizer": digest, "smoke": args.smoke, "requests": count,
+0333 |                     "repetitions": repetitions, "warmup_requests_per_case": args.warmup,
+0334 |                     "scenarios": args.scenarios, "seed": args.seed, "profile": "synchronous",
+0335 |                     "model_availability": availability,
+0336 |                     "guidellm_compat": "0.7.4 bounded drain of real late completion updates (5s); no request retry",
+0337 |                     "telemetry": {"gpu_source": "local nvidia-smi", "kv_metrics_requested": args.collect_kv_metrics,
+0338 |                                   "sampling": "approximately 1 Hz; not per-token"},
+0339 |                     "python": sys.version, "platform": platform.platform(),
+0340 |                     "git": capture(["git", "rev-parse", "HEAD"]), "status": "running"}
+0341 |         write_json(output / "manifest.json", redact(manifest, secret))
+0342 |         write_json(output / "client-packages.json", {d.metadata["Name"]: d.version for d in importlib.metadata.distributions()})
+0343 |         write_json(output / "gpu-before.json", capture(["nvidia-smi"]))
+0344 |         monitor, rows = Monitor(output, cfg, secret, args.collect_kv_metrics), []
+0345 |         launch, origin, cleanup_error = None, None, None
+0346 |         lifecycle = {"mode": "new-process" if args.launch else "existing-server-state-unknown",
+0347 |                      "status": "running", "initial_state_note": args.initial_state,
+0348 |                      "startup_timeout_s": args.startup_timeout}
+0349 |         print(f"Resultados: {output.resolve()}", flush=True)
+0350 |         try:
+0351 |             monitor.start()
+0352 |             if args.launch:
+0353 |                 launch = Launch(cfg, args.launch, output)
+0354 |                 lifecycle["argv"] = redact(launch.argv, secret)
+0355 |                 monitor.phase = "process_startup"
+0356 |                 origin = launch.start()
+0357 |                 lifecycle["pid"] = launch.process.pid
+0358 |             lifecycle_report(output, redact(lifecycle, secret))
+0359 |             lifecycle["readiness"] = wait_models(cfg, secret, args.startup_timeout, launch)
+0360 |             lifecycle_report(output, redact(lifecycle, secret))
+0361 |             monitor.phase = "first_request"
+0362 |             print("Primeiro POST: medição da primeira resposta (nenhuma geração prévia enviada pelo cliente).", flush=True)
+0363 |             lifecycle["first_request"] = timed_request(cfg, secret, args.timeout, prompt,
+0364 |                                                        output / "first-request.json", origin)
+0365 |             lifecycle_report(output, redact(lifecycle, secret))
+0366 |             from guidellm.benchmark import BenchmarkScenario, benchmark_generative_text
+0367 |             from guidellm_compat import completion_drain
+0368 |             for rep in range(repetitions):
+0369 |                 # Rotação balanceia parcialmente a posição dos cenários entre repetições.
+0370 |                 names = args.scenarios[rep % len(args.scenarios):] + args.scenarios[:rep % len(args.scenarios)]
+0371 |                 for name in names:
+0372 |                     for phase, n in (("warmup", args.warmup), ("measure", count)):
+0373 |                         if not n:
+0374 |                             continue
+0375 |                         seed = args.seed + rep * 100 + list(WORKLOADS).index(name)
+0376 |                         if phase == "warmup":
+0377 |                             seed += 1_000_000
+0378 |                         prefix = f"r{rep+1}-{name}-{phase}"
+0379 |                         monitor.phase = prefix
+0380 |                         config = scenario_config(cfg, name, n, seed, secret, args.timeout)
+0381 |                         write_json(output / f"{prefix}-config.json", redact(config, secret))
+0382 |                         print(f"{prefix}: {n} requisições, uma por vez", flush=True)
+0383 |                         with completion_drain():
+0384 |                             report, _ = asyncio.run(benchmark_generative_text(BenchmarkScenario.model_validate(config)))
+0385 |                         raw = redact(report.model_dump(mode="json"), secret)
+0386 |                         write_json(output / f"{prefix}.json", raw)
+0387 |                         write_requests_csv(output / f"{prefix}-requests.csv", raw)
+0388 |                         summary = summarize(raw)
+0389 |                         summary["expected"] = n
+0390 |                         summary["missing_request_count"] = max(0, n - sum(summary[k] for k in ("successful_request_count", "errored_request_count", "incomplete_request_count")))
+0391 |                         rows.append({"runtime": cfg["runtime"], "model": cfg["model"],
+0392 |                                      "cache_policy": cfg["cache_policy"], "tokenizer_sha256": digest["sha256"],
+0393 |                                      "phase": phase, "scenario": name, "repetition": rep+1, **summary})
+0394 |                         write_summary(output, rows)
+0395 |                         if summary["successful_request_count"] != n or summary["errored_request_count"] or summary["incomplete_request_count"]:
+0396 |                             raise RuntimeError(f"{prefix}: requisições falharam ou execução incompleta. Veja o JSON; não compare como sucesso.")
+0397 |             monitor.phase = "warm_reference"
+0398 |             lifecycle["warm_reference"] = timed_request(cfg, secret, args.timeout, prompt,
+0399 |                                                          output / "warm-reference.json")
+0400 |             manifest["status"] = lifecycle["status"] = "complete"
+0401 |         except BaseException as exc:
+0402 |             manifest["status"] = "interrupted" if isinstance(exc, KeyboardInterrupt) else "failed"
+0403 |             manifest["error"] = redact(str(exc), secret)
+0404 |             lifecycle["status"] = manifest["status"]
+0405 |             lifecycle["error"] = manifest["error"]
+0406 |             raise
+0407 |         finally:
+0408 |             for key, filename in (("first_request", "first-request.json"), ("warm_reference", "warm-reference.json")):
+0409 |                 if (output / filename).exists():
+0410 |                     lifecycle[key] = json.loads((output / filename).read_text(encoding="utf-8"))
+0411 |             if launch is not None:
+0412 |                 monitor.phase = "server_shutdown"
+0413 |                 try:
+0414 |                     launch.close()
+0415 |                     lifecycle["server_cleanup"] = "stopped owned process group only"
+0416 |                 except Exception as exc:
+0417 |                     cleanup_error = redact(str(exc), secret)
+0418 |                     lifecycle["server_cleanup_error"] = cleanup_error
+0419 |                     lifecycle["status"] = manifest["status"] = "failed"
+0420 |             lifecycle_report(output, redact(lifecycle, secret))
+0421 |             monitor.stop()
+0422 |             manifest["ended_utc"] = datetime.now(timezone.utc).isoformat()
+0423 |             write_json(output / "manifest.json", redact(manifest, secret))
+0424 |             write_json(output / "gpu-after.json", capture(["nvidia-smi"]))
+0425 |             write_summary(output, rows)
+0426 |         if cleanup_error:
+0427 |             raise RuntimeError(f"Falha ao encerrar processo criado: {cleanup_error}. Confira o PID no lifecycle.json.")
+0428 |         print(f"Concluído. Abra {output / 'lifecycle.html'} e {output / 'summary.html'}")
+0429 |
+0430 |
+0431 | def positive(value):
+0432 |     number = int(value)
+0433 |     if number <= 0:
+0434 |         raise argparse.ArgumentTypeError("Use um inteiro positivo.")
+0435 |     return number
+0436 |
+0437 |
+0438 | def rebuild_report(args):
+0439 |     """Atualiza apenas derivados, preservando relatórios brutos e manifesto original."""
+0440 |     output = Path(args.output)
+0441 |     rows = json.loads((output / "summary.json").read_text())
+0442 |     manifest = json.loads((output / "manifest.json").read_text())
+0443 |     for row in rows:
+0444 |         prefix = f"r{row['repetition']}-{row['scenario']}-{row['phase']}"
+0445 |         raw = json.loads((output / f"{prefix}.json").read_text())
+0446 |         row.update(summarize(raw))
+0447 |         expected = manifest.get("warmup_requests_per_case") if row["phase"] == "warmup" else manifest.get("requests")
+0448 |         row["expected"] = expected
+0449 |         row["missing_request_count"] = max(0, expected - sum(row[k] for k in ("successful_request_count", "errored_request_count", "incomplete_request_count"))) if expected is not None else None
+0450 |         write_requests_csv(output / f"{prefix}-requests.csv", raw)
+0451 |     write_summary(output, rows)
+0452 |     print(f"Relatório atualizado: {output / 'summary.html'}; dados brutos preservados.")
+0453 |
+0454 |
+0455 | def main():
+0456 |     parser = argparse.ArgumentParser(description=__doc__)
+0457 |     commands = parser.add_subparsers(dest="command", required=True)
+0458 |     report = commands.add_parser("report", help="Regenera derivados de uma execução existente, sem nova inferência.")
+0459 |     report.add_argument("--output", required=True)
+0460 |     report.set_defaults(func=rebuild_report)
+0461 |     prep = commands.add_parser("prepare-tokenizer", help="Baixa apenas tokenizer; fixa revisão e guarda origem.")
+0462 |     prep.add_argument("--model", default="Qwen/Qwen2.5-14B-Instruct")
+0463 |     prep.add_argument("--revision", default="main")
+0464 |     prep.add_argument("--output", default="tokenizer")
+0465 |     prep.set_defaults(func=prepare_tokenizer)
+0466 |     cmd = commands.add_parser("run", help="Mede primeiro acesso, aquecimento e GuideLLM; lançamento do servidor é opcional.")
+0467 |     cmd.add_argument("--config", required=True)
+0468 |     cmd.add_argument("--local-model-path", required=True, help="Pesos já no SSD: pasta HF, arquivo GGUF ou blob local do Ollama. Não baixa arquivos.")
+0469 |     cmd.add_argument("--collect-kv-metrics", action="store_true", help="Amostra /metrics do vLLM (~1 Hz); ocupação do pool KV, não bytes.")
+0470 |     cmd.add_argument("--kv-bytes-per-token", type=positive, help="Opcional: bytes de KV lógico por token, calculados para arquitetura/dtype reais. Estimativa, não VRAM medida.")
+0471 |     cmd.add_argument("--input-tokens", nargs="+", type=positive, help="Substitui --scenarios por uma grade de comprimentos sintéticos, ex.: 256 512 1024 2048 3072.")
+0472 |     cmd.add_argument("--scenarios", nargs="+", choices=list(WORKLOADS), default=["short", "medium"])
+0473 |     cmd.add_argument("--requests", type=positive, default=30)
+0474 |     cmd.add_argument("--repetitions", type=positive, default=3)
+0475 |     cmd.add_argument("--warmup", type=positive, default=3)
+0476 |     cmd.add_argument("--seed", type=positive, default=42)
+0477 |     cmd.add_argument("--timeout", type=positive, default=300)
+0478 |     cmd.add_argument("--results", default="results")
+0479 |     cmd.add_argument("--smoke", action="store_true", help="3 medições e 1 repetição; não vale como resultado final.")
+0480 |     cmd.add_argument("--launch", help="Arquivo JSON com argv para iniciar um runtime LOCAL; encerra só esse processo ao final.")
+0481 |     cmd.add_argument("--startup-timeout", type=positive, default=1800, help="Limite da espera pela API com --launch, em segundos.")
+0482 |     cmd.add_argument("--first-prompt-file", help="Texto UTF-8 para a primeira requisição e referência final; default: pergunta sobre RAM/VRAM.")
+0483 |     cmd.add_argument("--initial-state", default="weights local; OS/compilation caches not controlled", help="Descreva SSD e caches existentes; apenas registra, não limpa.")
+0484 |     cmd.set_defaults(func=run)
+0485 |     args = parser.parse_args()
+0486 |     if getattr(args, "input_tokens", None):
+0487 |         if len(set(args.input_tokens)) != len(args.input_tokens):
+0488 |             parser.error("Não repita comprimentos em --input-tokens.")
+0489 |         args.scenarios = []
+0490 |         for size in args.input_tokens:
+0491 |             name = f"ctx{size}"
+0492 |             WORKLOADS[name] = size
+0493 |             args.scenarios.append(name)
+0494 |     if hasattr(args, "scenarios") and len(set(args.scenarios)) != len(args.scenarios):
+0495 |         parser.error("Não repita cenários na lista.")
+0496 |     try:
+0497 |         args.func(args)
+0498 |     except KeyboardInterrupt:
+0499 |         print("Interrompido; resultados já concluídos foram preservados.", file=sys.stderr)
+0500 |         return 130
+0501 |     except Exception as exc:
+0502 |         print(f"ERRO: {redact(str(exc), os.environ.get('BENCH_API_KEY', ''))}", file=sys.stderr)
+0503 |         return 1
+0504 |     return 0
+0505 |
+0506 |
+0507 | if __name__ == "__main__":
+0508 |     raise SystemExit(main())
 ```
 
 ## lifecycle.py
@@ -749,18 +763,19 @@ SHA-256: `fe67f97a9c2a4f14371c0b42c928dbe8ce429068e8111f94dee2378d9b91477c`.
 
 ## reporting.py
 
-SHA-256: `1e3bd5b3440038950df1473732650c0b72ad99e8ca867aba135cc692d010d4b0`.
+SHA-256: `d3928c0d4dbc4f3eb393017c0d4a5fbfac0bc761075ca78d8660abd8487e65a0`.
 
 | Função/classe | Linhas |
 |---|---|
-| `ratio` | 11–14 |
-| `derived` | 17–27 |
-| `context_band` | 30–37 |
-| `table` | 40–47 |
-| `context_summary` | 50–72 |
-| `gpu_summary` | 75–97 |
-| `render` | 100–153 |
-| `fmt` | 41–44 |
+| `ratio` | 10–13 |
+| `percentile` | 16–23 |
+| `derived` | 26–36 |
+| `context_band` | 39–46 |
+| `table` | 49–56 |
+| `context_summary` | 59–96 |
+| `gpu_summary` | 99–121 |
+| `render` | 124–188 |
+| `fmt` | 50–53 |
 
 ```text
 0001 | """Métricas derivadas e relatório offline; não confunde contexto com VRAM."""
@@ -770,152 +785,187 @@ SHA-256: `1e3bd5b3440038950df1473732650c0b72ad99e8ca867aba135cc692d010d4b0`.
 0005 | import math
 0006 | from collections import defaultdict
 0007 | from pathlib import Path
-0008 | from statistics import median
+0008 |
 0009 |
-0010 |
-0011 | def ratio(a, b):
-0012 |     if not isinstance(a, (int, float)) or not isinstance(b, (int, float)):
-0013 |         return None
-0014 |     return a / b if math.isfinite(a) and math.isfinite(b) and a > 0 and b > 0 else None
+0010 | def ratio(a, b):
+0011 |     if not isinstance(a, (int, float)) or not isinstance(b, (int, float)):
+0012 |         return None
+0013 |     return a / b if math.isfinite(a) and math.isfinite(b) and a > 0 and b > 0 else None
+0014 |
 0015 |
-0016 |
-0017 | def derived(row):
-0018 |     n, p = row.get("output_tokens"), row.get("prompt_tokens")
-0019 |     itl = row.get("inter_token_latency_ms")
-0020 |     return {
-0021 |         "decode_tokens_s": ratio(1000, itl) if n is not None and n > 1 else None,
-0022 |         "effective_tokens_s": ratio(n, row.get("request_latency")),
-0023 |         "context_start_tokens": p,
-0024 |         # Comprimento lógico final; não é o número exato de posições materializadas.
-0025 |         "context_end_tokens": p + n if p is not None and n is not None else None,
-0026 |         "context_band": context_band(p),
-0027 |     }
-0028 |
-0029 |
-0030 | def context_band(p):
-0031 |     if p is None:
-0032 |         return "não informado"
-0033 |     for limit in (512, 1024, 2048, 4096, 8192, 16384):
-0034 |         if p < limit:
-0035 |             lower = 0 if limit == 512 else limit // 2
-0036 |             return f"[{lower}, {limit})"
-0037 |     return "[16384, +∞)"
+0016 | def percentile(values, q):
+0017 |     """Percentil empírico com interpolação linear; ausências não viram zero."""
+0018 |     values = sorted(v for v in values if v is not None and math.isfinite(v))
+0019 |     if not values:
+0020 |         return None
+0021 |     position = (len(values) - 1) * q
+0022 |     lower, upper = math.floor(position), math.ceil(position)
+0023 |     return values[lower] + (values[upper] - values[lower]) * (position - lower)
+0024 |
+0025 |
+0026 | def derived(row):
+0027 |     n, p = row.get("output_tokens"), row.get("prompt_tokens")
+0028 |     itl = row.get("inter_token_latency_ms")
+0029 |     return {
+0030 |         "decode_tokens_s": ratio(1000, itl) if n is not None and n > 1 else None,
+0031 |         "effective_tokens_s": ratio(n, row.get("request_latency")),
+0032 |         "context_start_tokens": p,
+0033 |         # Comprimento lógico final; não é o número exato de posições materializadas.
+0034 |         "context_end_tokens": p + n if p is not None and n is not None else None,
+0035 |         "context_band": context_band(p),
+0036 |     }
+0037 |
 0038 |
-0039 |
-0040 | def table(rows, columns):
-0041 |     def fmt(v):
-0042 |         if v is None:
-0043 |             return "Não disponível"
-0044 |         return f"{v:.3f}" if isinstance(v, float) else str(v)
-0045 |     head = "".join(f"<th>{html.escape(label)}</th>" for _, label in columns)
-0046 |     body = "".join("<tr>" + "".join(f"<td>{html.escape(fmt(r.get(k)))}</td>" for k, _ in columns) + "</tr>" for r in rows)
-0047 |     return f'<div class="scroll"><table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table></div>'
+0039 | def context_band(p):
+0040 |     if p is None:
+0041 |         return "não informado"
+0042 |     for limit in (512, 1024, 2048, 4096, 8192, 16384):
+0043 |         if p < limit:
+0044 |             lower = 0 if limit == 512 else limit // 2
+0045 |             return f"[{lower}, {limit})"
+0046 |     return "[16384, +∞)"
+0047 |
 0048 |
-0049 |
-0050 | def context_summary(output, kv_bytes_per_token=None):
-0051 |     groups = defaultdict(list)
-0052 |     for file in sorted(Path(output).glob("r*-*-requests.csv")):
-0053 |         rep, scenario, phase, _ = file.stem.split("-", 3)
-0054 |         with file.open() as handle:
-0055 |             for row in csv.DictReader(handle):
-0056 |                 if row["status"] != "successful":
-0057 |                     continue
-0058 |                 for key in ("prompt_tokens", "output_tokens", "inter_token_latency_ms", "request_latency", "time_to_first_token_ms"):
-0059 |                     row[key] = float(row[key]) if row.get(key) else None
-0060 |                 row.update(derived(row))
-0061 |                 groups[(phase, rep, row["context_band"])].append(row)
-0062 |     result = []
-0063 |     for (phase, rep, band), rows in groups.items():
-0064 |         entry = {"phase": phase, "repetition": rep, "context_band": band, "n": len(rows)}
-0065 |         for key in ("decode_tokens_s", "effective_tokens_s", "time_to_first_token_ms", "context_start_tokens", "context_end_tokens"):
-0066 |             values = [r[key] for r in rows if r[key] is not None and math.isfinite(r[key])]
-0067 |             entry[key + "_p50"] = median(values) if values else None
-0068 |         result.append(entry)
-0069 |         for edge in ("start", "end"):
-0070 |             tokens = entry[f"context_{edge}_tokens_p50"]
-0071 |             entry[f"kv_{edge}_mib_estimate"] = tokens * kv_bytes_per_token / 1048576 if tokens is not None and kv_bytes_per_token else None
-0072 |     return result
-0073 |
-0074 |
-0075 | def gpu_summary(output):
-0076 |     groups = defaultdict(list)
-0077 |     path = Path(output) / "gpu.csv"
-0078 |     if path.exists():
-0079 |         with path.open() as handle:
-0080 |             for row in csv.DictReader(handle):
-0081 |                 groups[(row["phase"], row["index"], row["name"])].append(row)
-0082 |     result = []
-0083 |     for (phase, index, name), rows in groups.items():
-0084 |         entry = {"phase": phase, "gpu": index, "name": name, "samples": len(rows)}
-0085 |         for key in ("used_mib", "total_mib", "gpu_util_pct", "temperature_c", "power_w"):
-0086 |             values = []
-0087 |             for row in rows:
-0088 |                 try:
-0089 |                     value = float(row[key])
-0090 |                     if math.isfinite(value):
-0091 |                         values.append(value)
-0092 |                 except (ValueError, TypeError, KeyError):
-0093 |                     pass
-0094 |             entry[key + "_mean"] = sum(values) / len(values) if values else None
-0095 |             entry[key + "_max"] = max(values) if values else None
-0096 |         result.append(entry)
-0097 |     return result
+0049 | def table(rows, columns):
+0050 |     def fmt(v):
+0051 |         if v is None:
+0052 |             return "Não disponível"
+0053 |         return f"{v:.3f}" if isinstance(v, float) else str(v)
+0054 |     head = "".join(f"<th>{html.escape(label)}</th>" for _, label in columns)
+0055 |     body = "".join("<tr>" + "".join(f"<td>{html.escape(fmt(r.get(k)))}</td>" for k, _ in columns) + "</tr>" for r in rows)
+0056 |     return f'<div class="scroll"><table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table></div>'
+0057 |
+0058 |
+0059 | def context_summary(output, kv_bytes_per_token=None):
+0060 |     groups = defaultdict(list)
+0061 |     for file in sorted(Path(output).glob("r*-*-requests.csv")):
+0062 |         rep, scenario, phase, _ = file.stem.split("-", 3)
+0063 |         with file.open() as handle:
+0064 |             for row in csv.DictReader(handle):
+0065 |                 if row["status"] != "successful":
+0066 |                     continue
+0067 |                 for key in ("prompt_tokens", "output_tokens", "inter_token_latency_ms", "request_latency", "time_to_first_token_ms"):
+0068 |                     row[key] = float(row[key]) if row.get(key) else None
+0069 |                 row.update(derived(row))
+0070 |                 # Preservamos o cenário mesmo quando dois cenários caem na
+0071 |                 # mesma faixa de contexto. Isso evita que short/medium/long
+0072 |                 # apareçam como uma única população no JSON derivado.
+0073 |                 groups[(phase, rep, scenario, row["context_band"])].append(row)
+0074 |     result = []
+0075 |     for (phase, rep, scenario, band), rows in groups.items():
+0076 |         entry = {"phase": phase, "repetition": rep, "scenario": scenario,
+0077 |                  "context_band": band, "successful_request_count": len(rows)}
+0078 |         context_metrics = {
+0079 |             "decode_generation_tokens_per_second": "decode_tokens_s",
+0080 |             "effective_output_tokens_per_second": "effective_tokens_s",
+0081 |             "time_to_first_token_milliseconds": "time_to_first_token_ms",
+0082 |             "initial_context_input_token_count": "context_start_tokens",
+0083 |             "final_logical_context_token_count": "context_end_tokens",
+0084 |         }
+0085 |         for label, key in context_metrics.items():
+0086 |             values = [r[key] for r in rows if r[key] is not None and math.isfinite(r[key])]
+0087 |             entry[label + "_sample_count"] = len(values)
+0088 |             entry[label + "_p50"] = percentile(values, .50)
+0089 |             entry[label + "_p95"] = percentile(values, .95)
+0090 |             entry[label + "_p99"] = percentile(values, .99)
+0091 |         result.append(entry)
+0092 |         for edge in ("start", "end"):
+0093 |             tokens_key = "initial_context_input_token_count_p50" if edge == "start" else "final_logical_context_token_count_p50"
+0094 |             tokens = entry[tokens_key]
+0095 |             entry[f"estimated_{edge}_logical_kv_cache_mebibytes"] = tokens * kv_bytes_per_token / 1048576 if tokens is not None and kv_bytes_per_token else None
+0096 |     return result
+0097 |
 0098 |
-0099 |
-0100 | def render(output, rows):
-0101 |     output = Path(output)
-0102 |     lifecycle = json.loads((output / "lifecycle.json").read_text()) if (output / "lifecycle.json").exists() else {}
-0103 |     manifest = json.loads((output / "manifest.json").read_text()) if (output / "manifest.json").exists() else {}
-0104 |     kv_bytes = manifest.get("model_availability", {}).get("kv_bytes_per_token")
-0105 |     context, gpu = context_summary(output, kv_bytes), gpu_summary(output)
-0106 |     (output / "context-summary.json").write_text(json.dumps(context, ensure_ascii=False, indent=2) + "\n")
-0107 |     (output / "gpu-summary.json").write_text(json.dumps(gpu, ensure_ascii=False, indent=2) + "\n")
-0108 |     startup = lifecycle.get("readiness", {}).get("process_to_api_observed_s")
-0109 |     initial = []
-0110 |     for key, label in (("first_request", "Primeira resposta"), ("warm_reference", "Referência final")):
-0111 |         req = lifecycle.get(key, {})
-0112 |         usage = req.get("stream_usage") or {}
-0113 |         d = derived({"output_tokens": usage.get("completion_tokens"), "prompt_tokens": usage.get("prompt_tokens"),
-0114 |                      "inter_token_latency_ms": req.get("mean_itl_ms"), "request_latency": req.get("e2e_s")})
-0115 |         initial.append({"phase": label, "ttft": req.get("ttft_ms"), "e2e": req.get("e2e_s"), **d})
-0116 |     metrics = table(rows, [("phase", "Fase"), ("scenario", "Cenário"), ("repetition", "Repetição"),
-0117 |         ("expected", "Previstas"), ("successful", "Sucessos"), ("errored", "Erros"), ("incomplete", "Incompletas"), ("missing", "Ausentes do relatório bruto"),
-0118 |         ("ttft_ms_p50", "TTFT p50 (ms)"), ("ttft_ms_p95", "TTFT p95 (ms)"),
-0119 |         ("decode_tokens_s_p50", "Geração p50 (tokens/s)"), ("effective_tokens_s_p50", "Efetiva p50 (tokens/s)"),
-0120 |         ("e2e_s_p50", "Total p50 (s)"), ("prompt_tokens_p50", "Entrada p50 (tokens)"), ("output_tokens_p50", "Saída p50 (tokens)")])
-0121 |     by_context = table(context, [("phase", "Fase"), ("repetition", "Repetição"), ("context_band", "Faixa de entrada (tokens)"),
-0122 |         ("n", "n"), ("context_start_tokens_p50", "Contexto inicial p50"), ("context_end_tokens_p50", "Contexto final p50"),
-0123 |         ("kv_start_mib_estimate", "KV inicial estimado (MiB)"), ("kv_end_mib_estimate", "KV final estimado (MiB)"),
-0124 |         ("time_to_first_token_ms_p50", "TTFT p50 (ms)"), ("decode_tokens_s_p50", "Geração p50 (tokens/s)"),
-0125 |         ("effective_tokens_s_p50", "Efetiva p50 (tokens/s)")])
-0126 |     hardware = table(gpu, [("phase", "Fase"), ("gpu", "GPU"), ("name", "Nome"), ("samples", "Amostras"),
-0127 |         ("used_mib_max", "Memória máx. (MiB)"), ("total_mib_max", "Memória total (MiB)"),
-0128 |         ("gpu_util_pct_mean", "Utilização média (%)"), ("gpu_util_pct_max", "Utilização máx. (%)"),
-0129 |         ("temperature_c_max", "Temperatura máx. (°C)"), ("power_w_mean", "Potência média (W)"), ("power_w_max", "Potência máx. (W)")]) if gpu else "<p>Não disponível: nenhuma amostra NVIDIA válida. Em Apple/Metal este coletor não mede GPU; isso não significa utilização zero.</p>"
-0130 |     kvfile = output / "kv-cache.csv"
-0131 |     kvrows = []
-0132 |     if kvfile.exists():
-0133 |         with kvfile.open() as handle:
-0134 |             groups = defaultdict(list)
-0135 |             for r in csv.DictReader(handle):
-0136 |                 groups[(r["phase"], r["series"])].append(float(r["fraction"]) * 100)
-0137 |             kvrows = [{"phase": p, "series": s, "n": len(v), "mean": sum(v)/len(v), "max": max(v)} for (p, s), v in groups.items()]
-0138 |     kv = table(kvrows, [("phase", "Fase"), ("series", "Série do servidor"), ("n", "Amostras"), ("mean", "Ocupação média (%)"), ("max", "Ocupação máx. (%)")]) if kvrows else "<p>Ocupação real de KV não disponível nesta execução. Não foi estimada a partir da VRAM.</p>"
-0139 |     first = table(initial, [("phase", "Fase"), ("ttft", "TTFT (ms)"), ("decode_tokens_s", "Geração (tokens/s)"), ("effective_tokens_s", "Efetiva (tokens/s)"), ("e2e", "Total (s)")])
-0140 |     policy = manifest.get("model_availability", {}).get("policy", "Execução anterior: veja o estado inicial; ausência de download não verificada por esta versão.")
-0141 |     failure = f'<p class="note">Execução não concluída: {html.escape(str(manifest["error"]))}. Dados parciais não constituem uma bateria válida.</p>' if manifest.get("error") else ""
-0142 |     page = f'''<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Benchmark · latência, geração e GPU</title>
-0143 | <style>body{{font:16px/1.7 system-ui;margin:32px;background:#f6f3ec;color:#193835}}main{{max-width:1400px;margin:auto}}table{{border-collapse:collapse;width:100%;font-size:14px}}td,th{{padding:10px;border:1px solid #ccd6cc;text-align:left}}th{{background:#e0e9df}}.scroll{{overflow:auto}}h2{{margin-top:38px}}a{{color:#136d58}}.note{{padding:16px;background:#fff0de;border-left:4px solid #b54e27}}</style><main>
-0144 | <h1>Um usuário · latência, geração e GPU</h1><p>Status: <strong>{html.escape(manifest.get('status', 'desconhecido'))}</strong>. {html.escape(policy)}</p>{failure}
-0145 | <p class="note">TTFT = espera pelo primeiro token/conteúdo observado. Geração = (tokens de saída − 1)/(tempo entre primeiro e último token). Efetiva = tokens de saída/tempo total da requisição, incluindo TTFT. São taxas por requisição, não throughput agregado de usuários.</p>
-0146 | <h2>1. Inicialização e primeira resposta</h2><p>Processo → API disponível: {html.escape(str(startup)) if startup is not None else 'não medido'} s. <a href="lifecycle.html">Ver ciclo de vida completo</a>.</p>{first}
-0147 | <h2>2. Aquecimento e operação posterior</h2><p>Percentis entre requisições bem-sucedidas. Warmup e measure separados; p95 com menos de 100 sucessos é exploratório. Geração indisponível com menos de dois tokens ou intervalo não positivo.</p>{metrics}
-0148 | <h2>3. Tokens/s por faixa de contexto — proxy da carga de KV</h2><p>Faixa definida pela entrada real, incluindo template, antes do decode. O contexto cresce durante a saída; mostramos também seu comprimento lógico final. Esta é uma comparação de velocidades médias de respostas iniciadas em cada faixa, não uma medição token a token dentro de faixas de ocupação física do cache.</p>{by_context}
-0149 | <p>Para atenção completa, mantendo modelo, dtype de KV e uma sequência: KV lógico ≈ 2 × camadas × cabeças KV × dimensão da cabeça × bytes por elemento × tokens. Pesos 4/8 bits não determinam o dtype do KV. Blocos, reserva, prefix caching e sliding window impedem tratar essa fórmula como medição de VRAM. MiB estimados só aparecem com --kv-bytes-per-token informado e verificado pelo operador; caso contrário, ficam indisponíveis.</p>
-0150 | <h2>4. GPU por fase</h2><p>Host do cliente; execute no mesmo pod do servidor. Aproximadamente 1 amostra/s, todas as GPUs visíveis, sem atribuição por processo. Máximos amostrados podem perder picos. N/A é ausência de dado, não zero.</p>{hardware}
-0151 | <h2>5. Ocupação real do pool KV — vLLM</h2><p>Coleta opcional de /metrics via --collect-kv-metrics. Percentual de blocos ocupados do pool, não percentual de VRAM nem bytes. Séries/engines separados. Amostragem e atualização do servidor podem perder transientes; não sincronizada por token.</p>{kv}
-0152 | <p><a href="summary.json">Resumo JSON</a> · <a href="context-summary.json">Faixas JSON</a> · <a href="gpu-summary.json">GPU JSON</a> · <a href="manifest.json">Manifesto</a></p></main></html>'''
-0153 |     (output / "summary.html").write_text(page, encoding="utf-8")
+0099 | def gpu_summary(output):
+0100 |     groups = defaultdict(list)
+0101 |     path = Path(output) / "gpu.csv"
+0102 |     if path.exists():
+0103 |         with path.open() as handle:
+0104 |             for row in csv.DictReader(handle):
+0105 |                 groups[(row["phase"], row["index"], row["name"])].append(row)
+0106 |     result = []
+0107 |     for (phase, index, name), rows in groups.items():
+0108 |         entry = {"phase": phase, "gpu": index, "name": name, "samples": len(rows)}
+0109 |         for key in ("used_mib", "total_mib", "gpu_util_pct", "temperature_c", "power_w"):
+0110 |             values = []
+0111 |             for row in rows:
+0112 |                 try:
+0113 |                     value = float(row[key])
+0114 |                     if math.isfinite(value):
+0115 |                         values.append(value)
+0116 |                 except (ValueError, TypeError, KeyError):
+0117 |                     pass
+0118 |             entry[key + "_mean"] = sum(values) / len(values) if values else None
+0119 |             entry[key + "_max"] = max(values) if values else None
+0120 |         result.append(entry)
+0121 |     return result
+0122 |
+0123 |
+0124 | def render(output, rows):
+0125 |     output = Path(output)
+0126 |     lifecycle = json.loads((output / "lifecycle.json").read_text()) if (output / "lifecycle.json").exists() else {}
+0127 |     manifest = json.loads((output / "manifest.json").read_text()) if (output / "manifest.json").exists() else {}
+0128 |     kv_bytes = manifest.get("model_availability", {}).get("kv_bytes_per_token")
+0129 |     context, gpu = context_summary(output, kv_bytes), gpu_summary(output)
+0130 |     (output / "context-summary.json").write_text(json.dumps(context, ensure_ascii=False, indent=2) + "\n")
+0131 |     (output / "gpu-summary.json").write_text(json.dumps(gpu, ensure_ascii=False, indent=2) + "\n")
+0132 |     startup = lifecycle.get("readiness", {}).get("process_to_api_observed_s")
+0133 |     initial = []
+0134 |     for key, label in (("first_request", "Primeira resposta"), ("warm_reference", "Referência final")):
+0135 |         req = lifecycle.get(key, {})
+0136 |         usage = req.get("stream_usage") or {}
+0137 |         d = derived({"output_tokens": usage.get("completion_tokens"), "prompt_tokens": usage.get("prompt_tokens"),
+0138 |                      "inter_token_latency_ms": req.get("mean_itl_ms"), "request_latency": req.get("e2e_s")})
+0139 |         initial.append({"phase": label, "ttft": req.get("ttft_ms"), "e2e": req.get("e2e_s"), **d})
+0140 |     metrics = table(rows, [("phase", "Fase"), ("scenario", "Cenário"), ("repetition", "Repetição"),
+0141 |         ("expected", "Requisições previstas"), ("successful_request_count", "Requisições bem-sucedidas"),
+0142 |         ("errored_request_count", "Requisições com erro"), ("incomplete_request_count", "Requisições incompletas"),
+0143 |         ("missing_request_count", "Requisições ausentes do relatório bruto"),
+0144 |         ("time_to_first_token_milliseconds_p50", "Tempo até primeiro token p50 (ms)"),
+0145 |         ("time_to_first_token_milliseconds_p95", "Tempo até primeiro token p95 (ms)"),
+0146 |         ("time_to_first_token_milliseconds_p99", "Tempo até primeiro token p99 (ms)"),
+0147 |         ("decode_generation_tokens_per_second_p50", "Velocidade de geração p50 (tokens/s)"),
+0148 |         ("effective_output_tokens_per_second_p50", "Velocidade efetiva de saída p50 (tokens/s)"),
+0149 |         ("request_latency_seconds_p50", "Latência total p50 (s)"),
+0150 |         ("input_prompt_token_count_p50", "Tokens de entrada p50"),
+0151 |         ("output_completion_token_count_p50", "Tokens de saída p50")])
+0152 |     by_context = table(context, [("phase", "Fase"), ("repetition", "Repetição"), ("scenario", "Cenário"), ("context_band", "Faixa de entrada (tokens)"),
+0153 |         ("successful_request_count", "Requisições bem-sucedidas"),
+0154 |         ("initial_context_input_token_count_p50", "Tokens de entrada inicial p50"),
+0155 |         ("final_logical_context_token_count_p50", "Tokens de contexto lógico final p50"),
+0156 |         ("estimated_start_logical_kv_cache_mebibytes", "KV lógico inicial estimado (MiB)"),
+0157 |         ("estimated_end_logical_kv_cache_mebibytes", "KV lógico final estimado (MiB)"),
+0158 |         ("time_to_first_token_milliseconds_p50", "Tempo até primeiro token p50 (ms)"),
+0159 |         ("decode_generation_tokens_per_second_p50", "Velocidade de geração p50 (tokens/s)"),
+0160 |         ("effective_output_tokens_per_second_p50", "Velocidade efetiva p50 (tokens/s)")])
+0161 |     hardware = table(gpu, [("phase", "Fase"), ("gpu", "GPU"), ("name", "Nome"), ("samples", "Amostras"),
+0162 |         ("used_mib_max", "Memória máx. (MiB)"), ("total_mib_max", "Memória total (MiB)"),
+0163 |         ("gpu_util_pct_mean", "Utilização média (%)"), ("gpu_util_pct_max", "Utilização máx. (%)"),
+0164 |         ("temperature_c_max", "Temperatura máx. (°C)"), ("power_w_mean", "Potência média (W)"), ("power_w_max", "Potência máx. (W)")]) if gpu else "<p>Não disponível: nenhuma amostra NVIDIA válida. Em Apple/Metal este coletor não mede GPU; isso não significa utilização zero.</p>"
+0165 |     kvfile = output / "kv-cache.csv"
+0166 |     kvrows = []
+0167 |     if kvfile.exists():
+0168 |         with kvfile.open() as handle:
+0169 |             groups = defaultdict(list)
+0170 |             for r in csv.DictReader(handle):
+0171 |                 groups[(r["phase"], r["series"])].append(float(r["fraction"]) * 100)
+0172 |             kvrows = [{"phase": p, "series": s, "n": len(v), "mean": sum(v)/len(v), "max": max(v)} for (p, s), v in groups.items()]
+0173 |     kv = table(kvrows, [("phase", "Fase"), ("series", "Série do servidor"), ("n", "Amostras"), ("mean", "Ocupação média (%)"), ("max", "Ocupação máx. (%)")]) if kvrows else "<p>Ocupação real de KV não disponível nesta execução. Não foi estimada a partir da VRAM.</p>"
+0174 |     first = table(initial, [("phase", "Fase"), ("ttft", "TTFT (ms)"), ("decode_tokens_s", "Geração (tokens/s)"), ("effective_tokens_s", "Efetiva (tokens/s)"), ("e2e", "Total (s)")])
+0175 |     policy = manifest.get("model_availability", {}).get("policy", "Execução anterior: veja o estado inicial; ausência de download não verificada por esta versão.")
+0176 |     failure = f'<p class="note">Execução não concluída: {html.escape(str(manifest["error"]))}. Dados parciais não constituem uma bateria válida.</p>' if manifest.get("error") else ""
+0177 |     page = f'''<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Benchmark · latência, geração e GPU</title>
+0178 | <style>body{{font:16px/1.7 system-ui;margin:32px;background:#f6f3ec;color:#193835}}main{{max-width:1400px;margin:auto}}table{{border-collapse:collapse;width:100%;font-size:14px}}td,th{{padding:10px;border:1px solid #ccd6cc;text-align:left}}th{{background:#e0e9df}}.scroll{{overflow:auto}}h2{{margin-top:38px}}a{{color:#136d58}}.note{{padding:16px;background:#fff0de;border-left:4px solid #b54e27}}</style><main>
+0179 | <h1>Um usuário · latência, geração e GPU</h1><p>Status: <strong>{html.escape(manifest.get('status', 'desconhecido'))}</strong>. {html.escape(policy)}</p>{failure}
+0180 | <p class="note">TTFT = espera pelo primeiro token/conteúdo observado. Geração = (tokens de saída − 1)/(tempo entre primeiro e último token). Efetiva = tokens de saída/tempo total da requisição, incluindo TTFT. São taxas por requisição, não throughput agregado de usuários.</p>
+0181 | <h2>1. Inicialização e primeira resposta</h2><p>Processo → API disponível: {html.escape(str(startup)) if startup is not None else 'não medido'} s. <a href="lifecycle.html">Ver ciclo de vida completo</a>.</p>{first}
+0182 | <h2>2. Aquecimento e operação posterior</h2><p>Percentis entre requisições bem-sucedidas. Warmup e measure separados; p95 com menos de 100 sucessos é exploratório. Geração indisponível com menos de dois tokens ou intervalo não positivo.</p>{metrics}
+0183 | <h2>3. Tokens/s por faixa de contexto — proxy da carga de KV</h2><p>Faixa definida pela entrada real, incluindo template, antes do decode. O contexto cresce durante a saída; mostramos também seu comprimento lógico final. Esta é uma comparação de velocidades médias de respostas iniciadas em cada faixa, não uma medição token a token dentro de faixas de ocupação física do cache.</p>{by_context}
+0184 | <p>Para atenção completa, mantendo modelo, dtype de KV e uma sequência: KV lógico ≈ 2 × camadas × cabeças KV × dimensão da cabeça × bytes por elemento × tokens. Pesos 4/8 bits não determinam o dtype do KV. Blocos, reserva, prefix caching e sliding window impedem tratar essa fórmula como medição de VRAM. MiB estimados só aparecem com --kv-bytes-per-token informado e verificado pelo operador; caso contrário, ficam indisponíveis.</p>
+0185 | <h2>4. GPU por fase</h2><p>Host do cliente; execute no mesmo pod do servidor. Aproximadamente 1 amostra/s, todas as GPUs visíveis, sem atribuição por processo. Máximos amostrados podem perder picos. N/A é ausência de dado, não zero.</p>{hardware}
+0186 | <h2>5. Ocupação real do pool KV — vLLM</h2><p>Coleta opcional de /metrics via --collect-kv-metrics. Percentual de blocos ocupados do pool, não percentual de VRAM nem bytes. Séries/engines separados. Amostragem e atualização do servidor podem perder transientes; não sincronizada por token.</p>{kv}
+0187 | <p><a href="summary.json">Resumo JSON</a> · <a href="context-summary.json">Faixas JSON</a> · <a href="gpu-summary.json">GPU JSON</a> · <a href="manifest.json">Manifesto</a></p></main></html>'''
+0188 |     (output / "summary.html").write_text(page, encoding="utf-8")
 ```
 
 ## guidellm_compat.py

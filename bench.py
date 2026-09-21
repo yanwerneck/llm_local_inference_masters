@@ -239,15 +239,28 @@ def summarize(report):
     requests = benchmarks[0]["requests"]
     from reporting import derived
     good = [{**r, **derived(r)} for r in requests["successful"]]
-    result = {"successful": len(good), "errored": len(requests["errored"]), "incomplete": len(requests["incomplete"])}
-    metrics = {"ttft_ms": "time_to_first_token_ms", "e2e_s": "request_latency",
-               "mean_itl_ms": "inter_token_latency_ms", "output_tokens": "output_tokens", "prompt_tokens": "prompt_tokens",
-               "decode_tokens_s": "decode_tokens_s", "effective_tokens_s": "effective_tokens_s"}
+    result = {
+        "successful_request_count": len(good),
+        "errored_request_count": len(requests["errored"]),
+        "incomplete_request_count": len(requests["incomplete"]),
+    }
+    # Os nomes são deliberadamente longos: summary.json é um artefato de
+    # análise, e não uma API em que economizar alguns bytes melhora algo.
+    metrics = {
+        "time_to_first_token_milliseconds": "time_to_first_token_ms",
+        "request_latency_seconds": "request_latency",
+        "mean_inter_token_latency_milliseconds": "inter_token_latency_ms",
+        "output_completion_token_count": "output_tokens",
+        "input_prompt_token_count": "prompt_tokens",
+        "decode_generation_tokens_per_second": "decode_tokens_s",
+        "effective_output_tokens_per_second": "effective_tokens_s",
+    }
     for label, key in metrics.items():
         vals = [r.get(key) for r in good]
-        result[label + "_n"] = sum(v is not None for v in vals)
+        result[label + "_sample_count"] = sum(v is not None for v in vals)
         result[label + "_p50"] = percentile(vals, .5)
         result[label + "_p95"] = percentile(vals, .95)
+        result[label + "_p99"] = percentile(vals, .99)
     # O hash exclui aliases do modelo e chaves: apenas carga de entrada e limite de saída.
     bodies = []
     for row in good:
@@ -255,7 +268,8 @@ def summarize(report):
         body = args.get("body", {})
         bodies.append({k: body.get(k) for k in ("messages", "max_tokens")})
     result["requests_sha256"] = hashlib.sha256(json.dumps(bodies, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
-    result["p95_exploratory"] = len(good) < 100
+    result["percentiles_are_exploratory"] = len(good) < 100
+    result["percentile_definition"] = "Empirical linear interpolation over successful requests in this phase/scenario/repetition block."
     return result
 
 
@@ -373,12 +387,12 @@ def run(args):
                         write_requests_csv(output / f"{prefix}-requests.csv", raw)
                         summary = summarize(raw)
                         summary["expected"] = n
-                        summary["missing"] = max(0, n - sum(summary[k] for k in ("successful", "errored", "incomplete")))
+                        summary["missing_request_count"] = max(0, n - sum(summary[k] for k in ("successful_request_count", "errored_request_count", "incomplete_request_count")))
                         rows.append({"runtime": cfg["runtime"], "model": cfg["model"],
                                      "cache_policy": cfg["cache_policy"], "tokenizer_sha256": digest["sha256"],
                                      "phase": phase, "scenario": name, "repetition": rep+1, **summary})
                         write_summary(output, rows)
-                        if summary["successful"] != n or summary["errored"] or summary["incomplete"]:
+                        if summary["successful_request_count"] != n or summary["errored_request_count"] or summary["incomplete_request_count"]:
                             raise RuntimeError(f"{prefix}: requisições falharam ou execução incompleta. Veja o JSON; não compare como sucesso.")
             monitor.phase = "warm_reference"
             lifecycle["warm_reference"] = timed_request(cfg, secret, args.timeout, prompt,
@@ -432,7 +446,7 @@ def rebuild_report(args):
         row.update(summarize(raw))
         expected = manifest.get("warmup_requests_per_case") if row["phase"] == "warmup" else manifest.get("requests")
         row["expected"] = expected
-        row["missing"] = max(0, expected - sum(row[k] for k in ("successful", "errored", "incomplete"))) if expected is not None else None
+        row["missing_request_count"] = max(0, expected - sum(row[k] for k in ("successful_request_count", "errored_request_count", "incomplete_request_count"))) if expected is not None else None
         write_requests_csv(output / f"{prefix}-requests.csv", raw)
     write_summary(output, rows)
     print(f"Relatório atualizado: {output / 'summary.html'}; dados brutos preservados.")
