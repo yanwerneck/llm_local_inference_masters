@@ -156,6 +156,42 @@ python bench.py run \
 
 Os resultados do 7B ficam em uma execução própria. Só depois de o servidor iniciar e o smoke passar devemos executar `short medium long` com as repetições definidas; não misture esses números com o 14B, mesmo que a família Qwen seja a mesma.
 
+### Gerar um GGUF Q8_0 verdadeiro com llama.cpp
+
+O checkpoint `Qwen2.5-7B-Instruct-GGUF-8bit` não deve ser convertido diretamente: ele já é um safetensors quantizado e declara `quant_method: gguf`, justamente o layout que apresentou a incompatibilidade da `lm_head` no vLLM. Para gerar um GGUF verdadeiro, use o checkpoint Hugging Face original BF16/FP16 (`Qwen/Qwen2.5-7B-Instruct`) e faça a conversão em duas etapas:
+
+```bash
+cd /workspace
+git clone https://github.com/ggml-org/llama.cpp.git llama.cpp
+cmake -S /workspace/llama.cpp -B /workspace/llama.cpp/build -DGGML_CUDA=ON
+cmake --build /workspace/llama.cpp/build --target llama-quantize -j"$(nproc)"
+python -m pip install -r /workspace/llama.cpp/requirements.txt
+
+mkdir -p /workspace/models/Qwen2.5-7B-Instruct-original
+hf download Qwen/Qwen2.5-7B-Instruct \
+  --revision main \
+  --local-dir /workspace/models/Qwen2.5-7B-Instruct-original
+```
+
+O script do repositório verifica que a fonte não declara `quantization_config`, converte os pesos originais para um GGUF F16 e então chama `llama-quantize` com `Q8_0`:
+
+```bash
+cd /workspace/chatbot-runtime-bench
+chmod +x scripts/quantize_hf_to_gguf_q8_0.sh
+scripts/quantize_hf_to_gguf_q8_0.sh \
+  --llama-cpp-dir /workspace/llama.cpp \
+  --hf-model-dir /workspace/models/Qwen2.5-7B-Instruct-original \
+  --output-dir /workspace/models/Qwen2.5-7B-Instruct-GGUF-Q8_0
+```
+
+O resultado esperado é um arquivo como:
+
+```text
+/workspace/models/Qwen2.5-7B-Instruct-GGUF-Q8_0/Qwen2.5-7B-Instruct-original-Q8_0.gguf
+```
+
+O script imprime o tamanho, a assinatura `G G U F` e o SHA-256. O arquivo F16 intermediário pode ocupar aproximadamente 14 GB; confirme espaço livre no SSD antes de começar. O `Q8_0` final usa blocos de quantização do llama.cpp, não é o mesmo esquema `q_0` do checkpoint safetensors do Arthur. [Conversor oficial HF→GGUF](https://github.com/ggml-org/llama.cpp/blob/master/convert_hf_to_gguf.py) · [quantização Q8_0 no llama.cpp](https://github.com/ggml-org/llama.cpp/blob/master/tools/quantize/README.md)
+
 ## 3. Preparar a configuração do benchmark
 
 Neste ponto ainda não existe servidor. Não execute `curl` agora: primeiro escolha um runtime e siga a seção correspondente em **4. Smoke test**, que mostra o comando exato para iniciar o servidor. Depois que o processo estiver em foreground e o log indicar que a API está disponível, o `curl` de cada runtime confirma o ID servido.
