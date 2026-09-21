@@ -1,0 +1,15 @@
+[
+  "/workspace/vllm-runtime/.venv/bin/vllm",
+  "serve",
+  "/workspace/models/Qwen2.5-7B-Instruct-GGUF-Q8_0/Qwen2.5-7B-Instruct-original-Q8_0.gguf",
+  "--tokenizer",
+  "/workspace/models/Qwen2.5-7B-Instruct-original",
+  "--served-model-name",
+  "qwen7b-q8-gguf",
+  "--host",
+  "127.0.0.1",
+  "--port",
+  "8000",
+  "--max-model-len",
+  "4096"
+]

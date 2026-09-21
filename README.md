@@ -192,6 +192,38 @@ O resultado esperado é um arquivo como:
 
 O script imprime o tamanho, a assinatura `G G U F` e o SHA-256. O arquivo F16 intermediário pode ocupar aproximadamente 14 GB; confirme espaço livre no SSD antes de começar. O `Q8_0` final usa blocos de quantização do llama.cpp, não é o mesmo esquema `q_0` do checkpoint safetensors do Arthur. [Conversor oficial HF→GGUF](https://github.com/ggml-org/llama.cpp/blob/master/convert_hf_to_gguf.py) · [quantização Q8_0 no llama.cpp](https://github.com/ggml-org/llama.cpp/blob/master/tools/quantize/README.md)
 
+#### Atalhos pelo Makefile
+
+O `Makefile` reúne as etapas sem esconder downloads: `quantize-q8` depende apenas do checkpoint que você já baixou em `HF_MODEL_DIR`; o download só acontece quando você chama `download-source` explicitamente.
+
+```bash
+cd /workspace/chatbot-runtime-bench
+make help
+make download-source
+make inspect-source
+make quantize-q8
+make verify-gguf
+```
+
+Depois de validar o arquivo, aponte o perfil de benchmark para o diretório que contém o GGUF e rode:
+
+```bash
+make smoke-vllm \
+  VLLM_MODEL_DIR=/workspace/models/Qwen2.5-7B-Instruct-GGUF-Q8_0 \
+  VLLM_CONFIG=configs/vllm-7b-gguf.json \
+  VLLM_LAUNCH=configs/launch-vllm-7b-gguf.example.json
+```
+
+Para usar outros volumes ou mais threads, sobrescreva variáveis sem editar o Makefile:
+
+```bash
+make quantize-q8 \
+  LLAMA_CPP_DIR=/workspace/llama.cpp \
+  HF_MODEL_DIR=/workspace/models/Qwen2.5-7B-Instruct-original \
+  GGUF_OUTPUT_DIR=/workspace/models/Qwen2.5-7B-Instruct-GGUF-Q8_0 \
+  QUANTIZE_THREADS=8
+```
+
 ## 3. Preparar a configuração do benchmark
 
 Neste ponto ainda não existe servidor. Não execute `curl` agora: primeiro escolha um runtime e siga a seção correspondente em **4. Smoke test**, que mostra o comando exato para iniciar o servidor. Depois que o processo estiver em foreground e o log indicar que a API está disponível, o `curl` de cada runtime confirma o ID servido.
