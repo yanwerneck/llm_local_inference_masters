@@ -1,0 +1,7 @@
+# Mesmo motor de medição em todos os runtimes. Não instalar no venv do vLLM.
+guidellm==0.7.4
+httpx==0.28.1
+transformers==5.17.0
+faker==40.39.0
+datasets==5.0.1
+markdown==3.8.2

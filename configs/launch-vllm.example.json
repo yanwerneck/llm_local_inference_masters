@@ -1,0 +1,11 @@
+[
+  "/workspace/yan-vllm/.venv/bin/vllm",
+  "serve",
+  "arthuravianna/Qwen2.5-14B-Instruct-GPTQ-8bit",
+  "--host",
+  "127.0.0.1",
+  "--port",
+  "8000",
+  "--max-model-len",
+  "4096"
+]
