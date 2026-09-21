@@ -170,8 +170,8 @@ AQUECIMENTO MEDIDO → BLOCOS POSTERIORES → REFERÊNCIA FINAL
 </thead>
 <tbody>
 <tr>
-<td><code>time_to_first_token_milliseconds_p50/p95/p99</code></td>
-<td>Distribuição da espera pelo primeiro conteúdo/token observado</td>
+<td><code>request_first_token_latency_milliseconds_p50/p95/p99</code></td>
+<td>Distribuição, por requisição, da espera pelo primeiro conteúdo/token observado</td>
 <td>ms</td>
 </tr>
 <tr>
@@ -180,8 +180,8 @@ AQUECIMENTO MEDIDO → BLOCOS POSTERIORES → REFERÊNCIA FINAL
 <td>s</td>
 </tr>
 <tr>
-<td><code>mean_inter_token_latency_milliseconds_p50/p95/p99</code></td>
-<td>Distribuição da média de tempo entre tokens de cada requisição</td>
+<td><code>within_response_next_token_latency_milliseconds_p50/p95/p99</code></td>
+<td>Distribuição, dentro de cada resposta, da média entre um token e o próximo</td>
 <td>ms</td>
 </tr>
 <tr>
@@ -211,7 +211,7 @@ AQUECIMENTO MEDIDO → BLOCOS POSTERIORES → REFERÊNCIA FINAL
 </tr>
 </tbody>
 </table></div>
-<p>Cada linha de <code>summary.json</code> é um grupo independente identificado por <code>phase</code>, <code>scenario</code> e <code>repetition</code>. Portanto, p50/p95/p99 de <code>short</code>, <code>medium</code>, <code>long</code>, <code>warmup</code> e <code>measure</code> não são misturados. A chave <code>statistics.percentiles_by_metric</code> repete essa estrutura em formato aninhado, com nomes completos e <code>sample_size</code> explícito. Com apenas três requisições, p95 e p99 são estatísticas exploratórias, não caudas estáveis.</p>
+<p>Cada linha de <code>summary.json</code> é um grupo independente identificado por <code>phase</code>, <code>scenario</code> e <code>repetition</code>. Portanto, p50/p95/p99 de <code>short</code>, <code>medium</code>, <code>long</code>, <code>warmup</code> e <code>measure</code> não são misturados. <code>request_first_token_latency</code> é medido uma vez por requisição: cada requisição tem seu próprio primeiro token. Já <code>within_response_next_token_latency</code> mede os intervalos entre tokens sucessivos dentro da mesma resposta. A chave <code>statistics.percentiles_by_metric</code> repete essa estrutura em formato aninhado, com nomes completos e <code>sample_size</code> explícito. Com apenas três requisições, p95 e p99 são estatísticas exploratórias, não caudas estáveis.</p>
 <p><strong>Atenção ao nome TPOT.</strong> Na versão fixada do GuideLLM, <code>time_per_output_token_ms</code> inclui o tempo inicial. Já <code>inter_token_latency_ms</code> é calculado como <code>(último token − primeiro token)/(número de tokens − 1)</code>. Usamos essa segunda medida no resumo como <code>mean_itl_ms</code>, evitando dar o mesmo nome a definições diferentes. Veja o <a href="https://github.com/vllm-project/guidellm/blob/v0.7.4/src/guidellm/schemas/request_stats.py">código da versão 0.7.4</a>.</p>
 <p>Um evento SSE pode carregar mais de um token. Por isso exigimos suporte a usage na primeira requisição medida e mantemos as contagens do servidor no instrumento. Se usage estiver ausente, salvamos os tempos iniciais parciais e marcamos falha, sem fabricar contagens. Os timestamps continuam limitados pela granularidade dos eventos e buffering: não revelam exatamente quando cada token foi calculado na GPU. Verifique essa compatibilidade em cada versão do servidor.</p>
 <p>O p95 de <code>mean_itl_ms</code> <strong>não é o p95 de todas as pausas individuais do streaming</strong>. Uma resposta pode ter uma pausa grande e ainda ter média aceitável. O relatório bruto preserva detalhes do instrumento para investigações posteriores; o resumo é deliberadamente menor.</p>

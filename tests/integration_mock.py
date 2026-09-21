@@ -111,7 +111,7 @@ def main():
             assert next(row for row in rows if row["phase"] == "warmup")["successful_request_count"] == 1
             assert summary["successful_request_count"] == 3, summary
             assert summary["output_completion_token_count_p50"] == 4, summary
-            assert summary["time_to_first_token_milliseconds_p50"] > 0, summary
+            assert summary["request_first_token_latency_milliseconds_p50"] > 0, summary
             assert summary["decode_generation_tokens_per_second_p50"] > 0, summary
             assert summary["effective_output_tokens_per_second_p50"] > 0, summary
             assert (result.parent / "context-summary.json").exists()

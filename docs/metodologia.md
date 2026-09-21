@@ -118,16 +118,16 @@ As medições são observadas pelo cliente. Incluem custos do serviço e transpo
 
 | Coluna do resumo | Interpretação | Unidade |
 |---|---|---|
-| `time_to_first_token_milliseconds_p50/p95/p99` | Distribuição da espera pelo primeiro conteúdo/token observado | ms |
+| `request_first_token_latency_milliseconds_p50/p95/p99` | Distribuição, por requisição, da espera pelo primeiro conteúdo/token observado | ms |
 | `request_latency_seconds_p50/p95/p99` | Distribuição do tempo total de requisição | s |
-| `mean_inter_token_latency_milliseconds_p50/p95/p99` | Distribuição da média de tempo entre tokens de cada requisição | ms |
+| `within_response_next_token_latency_milliseconds_p50/p95/p99` | Distribuição, dentro de cada resposta, da média entre um token e o próximo | ms |
 | `decode_generation_tokens_per_second_p50/p95/p99` | Geração após primeiro token: `1000 / mean_itl_ms` | tokens/s |
 | `effective_output_tokens_per_second_p50/p95/p99` | Saída / tempo total da requisição, incluindo TTFT | tokens/s |
 | `input_prompt_token_count_p50/p95/p99` | Comprimento real de entrada registrado | tokens |
 | `output_completion_token_count_p50/p95/p99` | Comprimento real da saída registrada | tokens |
 | `successful_request_count`, `errored_request_count`, `incomplete_request_count` | Contagens de resultados por status | requisições |
 
-Cada linha de `summary.json` é um grupo independente identificado por `phase`, `scenario` e `repetition`. Portanto, p50/p95/p99 de `short`, `medium`, `long`, `warmup` e `measure` não são misturados. A chave `statistics.percentiles_by_metric` repete essa estrutura em formato aninhado, com nomes completos e `sample_size` explícito. Com apenas três requisições, p95 e p99 são estatísticas exploratórias, não caudas estáveis.
+Cada linha de `summary.json` é um grupo independente identificado por `phase`, `scenario` e `repetition`. Portanto, p50/p95/p99 de `short`, `medium`, `long`, `warmup` e `measure` não são misturados. `request_first_token_latency` é medido uma vez por requisição: cada requisição tem seu próprio primeiro token. Já `within_response_next_token_latency` mede os intervalos entre tokens sucessivos dentro da mesma resposta. A chave `statistics.percentiles_by_metric` repete essa estrutura em formato aninhado, com nomes completos e `sample_size` explícito. Com apenas três requisições, p95 e p99 são estatísticas exploratórias, não caudas estáveis.
 
 **Atenção ao nome TPOT.** Na versão fixada do GuideLLM, `time_per_output_token_ms` inclui o tempo inicial. Já `inter_token_latency_ms` é calculado como `(último token − primeiro token)/(número de tokens − 1)`. Usamos essa segunda medida no resumo como `mean_itl_ms`, evitando dar o mesmo nome a definições diferentes. Veja o [código da versão 0.7.4](https://github.com/vllm-project/guidellm/blob/v0.7.4/src/guidellm/schemas/request_stats.py).
 

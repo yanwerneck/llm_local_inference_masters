@@ -78,7 +78,7 @@ def context_summary(output, kv_bytes_per_token=None):
         context_metrics = {
             "decode_generation_tokens_per_second": "decode_tokens_s",
             "effective_output_tokens_per_second": "effective_tokens_s",
-            "time_to_first_token_milliseconds": "time_to_first_token_ms",
+            "request_first_token_latency_milliseconds": "time_to_first_token_ms",
             "initial_context_input_token_count": "context_start_tokens",
             "final_logical_context_token_count": "context_end_tokens",
         }
@@ -141,9 +141,9 @@ def render(output, rows):
         ("expected", "Requisições previstas"), ("successful_request_count", "Requisições bem-sucedidas"),
         ("errored_request_count", "Requisições com erro"), ("incomplete_request_count", "Requisições incompletas"),
         ("missing_request_count", "Requisições ausentes do relatório bruto"),
-        ("time_to_first_token_milliseconds_p50", "Tempo até primeiro token p50 (ms)"),
-        ("time_to_first_token_milliseconds_p95", "Tempo até primeiro token p95 (ms)"),
-        ("time_to_first_token_milliseconds_p99", "Tempo até primeiro token p99 (ms)"),
+        ("request_first_token_latency_milliseconds_p50", "Latência da requisição até primeiro token p50 (ms)"),
+        ("request_first_token_latency_milliseconds_p95", "Latência da requisição até primeiro token p95 (ms)"),
+        ("request_first_token_latency_milliseconds_p99", "Latência da requisição até primeiro token p99 (ms)"),
         ("decode_generation_tokens_per_second_p50", "Velocidade de geração p50 (tokens/s)"),
         ("effective_output_tokens_per_second_p50", "Velocidade efetiva de saída p50 (tokens/s)"),
         ("request_latency_seconds_p50", "Latência total p50 (s)"),
@@ -155,7 +155,7 @@ def render(output, rows):
         ("final_logical_context_token_count_p50", "Tokens de contexto lógico final p50"),
         ("estimated_start_logical_kv_cache_mebibytes", "KV lógico inicial estimado (MiB)"),
         ("estimated_end_logical_kv_cache_mebibytes", "KV lógico final estimado (MiB)"),
-        ("time_to_first_token_milliseconds_p50", "Tempo até primeiro token p50 (ms)"),
+        ("request_first_token_latency_milliseconds_p50", "Latência da requisição até primeiro token p50 (ms)"),
         ("decode_generation_tokens_per_second_p50", "Velocidade de geração p50 (tokens/s)"),
         ("effective_output_tokens_per_second_p50", "Velocidade efetiva p50 (tokens/s)")])
     hardware = table(gpu, [("phase", "Fase"), ("gpu", "GPU"), ("name", "Nome"), ("samples", "Amostras"),

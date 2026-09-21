@@ -56,7 +56,7 @@ class UnitTests(unittest.TestCase):
         self.assertTrue(out["percentiles_are_exploratory"])
         self.assertEqual(out["decode_generation_tokens_per_second_p50"], 50)
         self.assertEqual(out["effective_output_tokens_per_second_p50"], 10)
-        self.assertEqual(out["time_to_first_token_milliseconds_p99"], 10)
+        self.assertEqual(out["request_first_token_latency_milliseconds_p99"], 10)
 
     def test_local_weights_guard(self):
         with tempfile.TemporaryDirectory() as tmp:

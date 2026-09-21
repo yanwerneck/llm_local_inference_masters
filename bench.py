@@ -247,9 +247,9 @@ def summarize(report):
     # Os nomes são deliberadamente longos: summary.json é um artefato de
     # análise, e não uma API em que economizar alguns bytes melhora algo.
     metrics = {
-        "time_to_first_token_milliseconds": "time_to_first_token_ms",
+        "request_first_token_latency_milliseconds": "time_to_first_token_ms",
         "request_latency_seconds": "request_latency",
-        "mean_inter_token_latency_milliseconds": "inter_token_latency_ms",
+        "within_response_next_token_latency_milliseconds": "inter_token_latency_ms",
         "output_completion_token_count": "output_tokens",
         "input_prompt_token_count": "prompt_tokens",
         "decode_generation_tokens_per_second": "decode_tokens_s",

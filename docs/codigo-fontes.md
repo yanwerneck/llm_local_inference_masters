@@ -4,7 +4,7 @@ Leia junto com [a explicação detalhada](codigo-explicado.md). Gerado dos arqui
 
 ## bench.py
 
-SHA-256: `5ee8ca29b7c5a84fe1d4eaaa817620c076da5f3c756bdec892106ce89c02a1b4`.
+SHA-256: `2c60765b7039ab2c035111fda25e79dabc14e5879be14619b7a39e003fc166bb`.
 
 | Função/classe | Linhas |
 |---|---|
@@ -282,9 +282,9 @@ SHA-256: `5ee8ca29b7c5a84fe1d4eaaa817620c076da5f3c756bdec892106ce89c02a1b4`.
 0247 |     # Os nomes são deliberadamente longos: summary.json é um artefato de
 0248 |     # análise, e não uma API em que economizar alguns bytes melhora algo.
 0249 |     metrics = {
-0250 |         "time_to_first_token_milliseconds": "time_to_first_token_ms",
+0250 |         "request_first_token_latency_milliseconds": "time_to_first_token_ms",
 0251 |         "request_latency_seconds": "request_latency",
-0252 |         "mean_inter_token_latency_milliseconds": "inter_token_latency_ms",
+0252 |         "within_response_next_token_latency_milliseconds": "inter_token_latency_ms",
 0253 |         "output_completion_token_count": "output_tokens",
 0254 |         "input_prompt_token_count": "prompt_tokens",
 0255 |         "decode_generation_tokens_per_second": "decode_tokens_s",
@@ -763,7 +763,7 @@ SHA-256: `fe67f97a9c2a4f14371c0b42c928dbe8ce429068e8111f94dee2378d9b91477c`.
 
 ## reporting.py
 
-SHA-256: `d3928c0d4dbc4f3eb393017c0d4a5fbfac0bc761075ca78d8660abd8487e65a0`.
+SHA-256: `00c798d6a5f5687dee1b8b3463f582aaf8c9771c96f32f32612aed44e0125a81`.
 
 | Função/classe | Linhas |
 |---|---|
@@ -858,7 +858,7 @@ SHA-256: `d3928c0d4dbc4f3eb393017c0d4a5fbfac0bc761075ca78d8660abd8487e65a0`.
 0078 |         context_metrics = {
 0079 |             "decode_generation_tokens_per_second": "decode_tokens_s",
 0080 |             "effective_output_tokens_per_second": "effective_tokens_s",
-0081 |             "time_to_first_token_milliseconds": "time_to_first_token_ms",
+0081 |             "request_first_token_latency_milliseconds": "time_to_first_token_ms",
 0082 |             "initial_context_input_token_count": "context_start_tokens",
 0083 |             "final_logical_context_token_count": "context_end_tokens",
 0084 |         }
@@ -921,9 +921,9 @@ SHA-256: `d3928c0d4dbc4f3eb393017c0d4a5fbfac0bc761075ca78d8660abd8487e65a0`.
 0141 |         ("expected", "Requisições previstas"), ("successful_request_count", "Requisições bem-sucedidas"),
 0142 |         ("errored_request_count", "Requisições com erro"), ("incomplete_request_count", "Requisições incompletas"),
 0143 |         ("missing_request_count", "Requisições ausentes do relatório bruto"),
-0144 |         ("time_to_first_token_milliseconds_p50", "Tempo até primeiro token p50 (ms)"),
-0145 |         ("time_to_first_token_milliseconds_p95", "Tempo até primeiro token p95 (ms)"),
-0146 |         ("time_to_first_token_milliseconds_p99", "Tempo até primeiro token p99 (ms)"),
+0144 |         ("request_first_token_latency_milliseconds_p50", "Latência da requisição até primeiro token p50 (ms)"),
+0145 |         ("request_first_token_latency_milliseconds_p95", "Latência da requisição até primeiro token p95 (ms)"),
+0146 |         ("request_first_token_latency_milliseconds_p99", "Latência da requisição até primeiro token p99 (ms)"),
 0147 |         ("decode_generation_tokens_per_second_p50", "Velocidade de geração p50 (tokens/s)"),
 0148 |         ("effective_output_tokens_per_second_p50", "Velocidade efetiva de saída p50 (tokens/s)"),
 0149 |         ("request_latency_seconds_p50", "Latência total p50 (s)"),
@@ -935,7 +935,7 @@ SHA-256: `d3928c0d4dbc4f3eb393017c0d4a5fbfac0bc761075ca78d8660abd8487e65a0`.
 0155 |         ("final_logical_context_token_count_p50", "Tokens de contexto lógico final p50"),
 0156 |         ("estimated_start_logical_kv_cache_mebibytes", "KV lógico inicial estimado (MiB)"),
 0157 |         ("estimated_end_logical_kv_cache_mebibytes", "KV lógico final estimado (MiB)"),
-0158 |         ("time_to_first_token_milliseconds_p50", "Tempo até primeiro token p50 (ms)"),
+0158 |         ("request_first_token_latency_milliseconds_p50", "Latência da requisição até primeiro token p50 (ms)"),
 0159 |         ("decode_generation_tokens_per_second_p50", "Velocidade de geração p50 (tokens/s)"),
 0160 |         ("effective_output_tokens_per_second_p50", "Velocidade efetiva p50 (tokens/s)")])
 0161 |     hardware = table(gpu, [("phase", "Fase"), ("gpu", "GPU"), ("name", "Nome"), ("samples", "Amostras"),
