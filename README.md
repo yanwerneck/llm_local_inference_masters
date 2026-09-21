@@ -324,8 +324,17 @@ O `ollama create` fica fora da medição; o `--launch` mede apenas o processo `o
 
 Para cada runtime, mantenha o mesmo GGUF, a mesma revisão do tokenizer quando aplicável, contexto 4096, uma requisição em andamento e prompts idênticos. Use os três comandos com `--launch` para comparar inicialização, e os três sem `--launch` somente para comparar operação contra servidores já aquecidos. Salve a versão (`vllm --version`, commit do llama.cpp, `ollama version`), o comando, o SHA-256 e os logs. Não combine resultados se um runtime tiver falhado, feito download durante a execução ou usado outro artefato.
 
+Execute o mesmo smoke, trocando apenas a configuração e o arquivo `--launch`:
+
 ```bash
+# vLLM
 python bench.py run --config configs/vllm.json --local-model-path /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf --launch configs/launch-vllm.example.json --smoke --scenarios short
+
+# llama.cpp
+python bench.py run --config configs/llamacpp.json --local-model-path /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf --launch configs/launch-llamacpp.json --smoke --scenarios short
+
+# Ollama
+python bench.py run --config configs/ollama.json --local-model-path /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf --launch configs/launch-ollama.json --smoke --scenarios short
 ```
 
 Faz GET de disponibilidade (sem gerar texto), **uma primeira requisição já cronometrada**, três requisições de aquecimento, três medições GuideLLM e uma referência final com o mesmo prompt inicial. Sempre uma de cada vez. A primeira requisição também verifica SSE/usage; não há um POST oculto de preflight antes dela. O aquecimento agora aparece no resumo, identificado por `phase=warmup`.
@@ -338,14 +347,21 @@ Esse caso de amostra faltante continua sendo um diagnóstico do caminho GuideLLM
 
 O cliente inclui uma compatibilidade estreita para o GuideLLM 0.7.4: após o encerramento sinalizado, ela drena por até cinco segundos uma atualização terminal real que tenha chegado atrasada à fila. Não repete requisições nem cria métricas e não substitui a guarda de contagem; se a atualização não chegar, o bloco continua falhando.
 
-### 4.1. Medir desde a partida do vLLM
+### 4.1. Medir desde a partida de qualquer runtime
 
-Pare manualmente o servidor que você iniciou. O benchmark **não mata um servidor existente**: se a porta já estiver ocupada, recusa o lançamento. Edite `configs/launch-vllm.example.json` para reproduzir o seu comando funcional, incluindo o caminho do executável no venv do runtime e suas flags. Cada argumento é um elemento do array JSON; não coloque `source`, `&`, redirecionamentos ou comandos de shell.
+Pare manualmente o servidor que você iniciou. O benchmark **não mata um servidor existente**: se a porta já estiver ocupada, recusa o lançamento. Use o arquivo `launch` correspondente ao runtime (`configs/launch-vllm.example.json`, `configs/launch-llamacpp.json` ou `configs/launch-ollama.json`) e mantenha nele apenas argumentos JSON, sem `source`, `&`, redirecionamentos ou comandos de shell.
 
-O exemplo contém um caminho provável do seu pod e contexto 4096, mas não é uma instalação/tuning universal. O comando escrito em `server_command` continua sendo metadado: **só o arquivo passado com `--launch` é executado**. Não ponha segredos nesse arquivo; use variáveis de ambiente apropriadas ao runtime.
+Os exemplos contêm caminhos do pod e contexto 4096, mas não são tuning universal. O comando escrito em `server_command` continua sendo metadado: **só o arquivo passado com `--launch` é executado**. Não ponha segredos nesses arquivos; use variáveis de ambiente apropriadas ao runtime.
 
 ```bash
+# vLLM
 python bench.py run --config configs/vllm.json --local-model-path /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf --launch configs/launch-vllm.example.json --smoke --scenarios short --startup-timeout 1800 --initial-state 'GGUF no SSD; caches não limpos'
+
+# llama.cpp
+python bench.py run --config configs/llamacpp.json --local-model-path /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf --launch configs/launch-llamacpp.json --smoke --scenarios short --startup-timeout 1800 --initial-state 'GGUF no SSD; caches não limpos'
+
+# Ollama
+python bench.py run --config configs/ollama.json --local-model-path /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf --launch configs/launch-ollama.json --smoke --scenarios short --startup-timeout 1800 --initial-state 'GGUF no SSD; caches não limpos'
 ```
 
 Esse comando:
@@ -374,6 +390,13 @@ O prompt inicial padrão é uma pergunta em português sobre RAM/VRAM com limite
 python bench.py run --config configs/vllm.json --local-model-path /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf --launch configs/launch-vllm.example.json --first-prompt-file pergunta.txt --scenarios short --requests 30 --repetitions 1
 ```
 
+Para repetir a mesma pergunta nos outros runtimes:
+
+```bash
+python bench.py run --config configs/llamacpp.json --local-model-path /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf --launch configs/launch-llamacpp.json --first-prompt-file pergunta.txt --scenarios short --requests 30 --repetitions 1
+python bench.py run --config configs/ollama.json --local-model-path /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf --launch configs/launch-ollama.json --first-prompt-file pergunta.txt --scenarios short --requests 30 --repetitions 1
+```
+
 Crie `pergunta.txt` em UTF-8 com seu editor e use o mesmo conteúdo nos três runtimes. Esse arquivo não passa por truncamento automático; confirme que cabe no contexto. A referência final repete exatamente esse prompt e pode se beneficiar de cache de prefixo: documente a política ao comparar frio/quente.
 
 ### 4.3. Como ler as velocidades
@@ -384,10 +407,17 @@ As faixas de contexto e `--kv-bytes-per-token` são um proxy lógico da carga: e
 
 ## 5. Primeira bateria: curta e média
 
-Depois de preencher os metadados:
+Depois de preencher os metadados e confirmar o smoke de cada runtime, rode a bateria curta/média. Pare os três servidores manuais antes de usar `--launch`.
 
 ```bash
 python bench.py run --config configs/vllm.json --local-model-path /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf --scenarios short medium --requests 30 --repetitions 3
+```
+
+Repita exatamente a mesma bateria para os outros runtimes:
+
+```bash
+python bench.py run --config configs/llamacpp.json --local-model-path /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf --scenarios short medium --requests 30 --repetitions 3
+python bench.py run --config configs/ollama.json --local-model-path /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf --scenarios short medium --requests 30 --repetitions 3
 ```
 
 Isso faz 30 medições por cenário por repetição: **180 requisições na fase measure**, mais aquecimento medido, primeira resposta e referência final. Há apenas **uma requisição em andamento**, não 30 usuários. As três repetições ajudam a observar variação entre blocos; não são três réplicas independentes de hardware nem três partidas.
@@ -398,6 +428,13 @@ As sementes variam por cenário/repetição e são iguais entre runtimes quando 
 
 ```bash
 python bench.py run --config configs/vllm.json --local-model-path /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf --scenarios short medium long --requests 100 --repetitions 3
+```
+
+Para llama.cpp e Ollama, use os mesmos argumentos e apenas troque a configuração:
+
+```bash
+python bench.py run --config configs/llamacpp.json --local-model-path /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf --scenarios short medium long --requests 100 --repetitions 3
+python bench.py run --config configs/ollama.json --local-model-path /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf --scenarios short medium long --requests 100 --repetitions 3
 ```
 
 São **900 medições**; isso pode levar bastante tempo e consumir horas cobradas no RunPod. Primeiro valide os cenários menores. O longo usa aproximadamente 8192 tokens de conteúdo e teto de 128 tokens de saída. O guard exige `context_window >= 8576`, reservando 256 tokens para template; essa margem não comprova que o modelo cabe na VRAM. Configure e valide o servidor, por exemplo com contexto de 9216 ou maior se houver memória, antes de mudar o JSON.
@@ -415,7 +452,23 @@ python bench.py run --config configs/vllm.json \
   --collect-kv-metrics --requests 30 --repetitions 3
 ```
 
+Rode a mesma grade para cada runtime, mantendo o servidor correspondente iniciado e a porta/configuração corretas:
+
+```bash
+python bench.py run --config configs/llamacpp.json \
+  --local-model-path /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf \
+  --input-tokens 256 512 1024 2048 3072 \
+  --requests 30 --repetitions 3
+
+python bench.py run --config configs/ollama.json \
+  --local-model-path /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf \
+  --input-tokens 256 512 1024 2048 3072 \
+  --requests 30 --repetitions 3
+```
+
 `--input-tokens` substitui os cenários fixos. O template soma tokens; as faixas no HTML usam a entrada real. `--collect-kv-metrics` coleta ocupação real do pool KV em `/metrics`, quando disponível no vLLM; não é percentual da VRAM. Mantenha a coleta igual entre execuções, pois tem custo.
+
+O parâmetro `--collect-kv-metrics` só produz dados quando o runtime expõe o gauge esperado; mantenha-o no vLLM e registre a ausência nos outros dois. A grade de `--input-tokens`, TTFT, tokens/s, tokens reais, erros e GPU continua comparável entre os três.
 
 Para adicionar MiB de KV lógico **estimado**, use `--kv-bytes-per-token N`: `N = 2 × camadas × cabeças KV × dimensão da cabeça × bytes por elemento`, para uma sequência e atenção completa. Use arquitetura e dtype real do cache, não os bits dos pesos. Sem o coeficiente, não inventamos MiB; reserva, blocos e arquiteturas diferentes não são cobertos pela estimativa.
 
