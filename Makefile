@@ -11,6 +11,7 @@ LLAMA_PYTHON ?= $(LLAMA_VENV)/bin/python
 HF_MODEL_ID ?= Qwen/Qwen2.5-7B-Instruct
 HF_REVISION ?= main
 HF_MODEL_DIR ?= /workspace/models/Qwen2.5-7B-Instruct-original
+HF_HUB_ENABLE_HF_TRANSFER ?= 0
 GGUF_OUTPUT_DIR ?= /workspace/models/Qwen2.5-7B-Instruct-GGUF-Q8_0
 QUANTIZE_THREADS ?= $(shell nproc 2>/dev/null || echo 1)
 VLLM_MODEL_DIR ?= /workspace/models/Qwen2.5-7B-Instruct-GGUF-Q8_0
@@ -62,7 +63,8 @@ install-llama-python: clone-llama
 
 download-source:
 	mkdir -p "$(HF_MODEL_DIR)"
-	$(HF) download "$(HF_MODEL_ID)" --revision "$(HF_REVISION)" --local-dir "$(HF_MODEL_DIR)"
+	HF_HUB_OFFLINE=0 TRANSFORMERS_OFFLINE=0 HF_HUB_ENABLE_HF_TRANSFER="$(HF_HUB_ENABLE_HF_TRANSFER)" \
+		$(HF) download "$(HF_MODEL_ID)" --revision "$(HF_REVISION)" --local-dir "$(HF_MODEL_DIR)"
 
 inspect-source:
 	@test -f "$(HF_MODEL_DIR)/config.json" || { echo "config.json ausente em $(HF_MODEL_DIR)"; exit 1; }
@@ -85,7 +87,8 @@ verify-gguf:
 	sha256sum "$(GGUF_FILE)"
 
 smoke-vllm: verify-gguf
-	$(PYTHON) bench.py run \
+	HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_HUB_ENABLE_HF_TRANSFER=0 \
+		$(PYTHON) bench.py run \
 		--config "$(VLLM_CONFIG)" \
 		--local-model-path "$(VLLM_MODEL_DIR)" \
 		--launch "$(VLLM_LAUNCH)" \
