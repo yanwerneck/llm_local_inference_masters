@@ -7,7 +7,7 @@ import json
 import os
 from pathlib import Path
 
-from results_layout import artifact, href
+from results_layout import artifact, href, prepare
 import signal
 import socket
 import subprocess
@@ -51,7 +51,7 @@ class Launch:
         else:
             connection.close()
             raise ValueError("A porta já está em uso. Pare o seu servidor manualmente antes de usar --launch.")
-        self.output.mkdir(parents=True, exist_ok=True)
+        prepare(self.output)
         self.log = artifact(self.output, "server.log").open("w", encoding="utf-8")
         self.started = time.perf_counter()
         try:
