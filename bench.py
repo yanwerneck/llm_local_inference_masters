@@ -20,6 +20,8 @@ import time
 from datetime import datetime, timezone
 from urllib.parse import urlsplit
 
+from results_layout import artifact, execution_label, href, locate, prepare, runtime_root, slug
+
 ROOT = Path(__file__).resolve().parent
 VERSION = "0.4.0"
 GUIDELLM_VERSION = "0.7.4"
@@ -368,8 +370,8 @@ class Monitor:
 
     def start(self):
         self.started_monotonic = time.monotonic()
-        self.telemetry_handle = (self.output / "telemetry.log").open("a", encoding="utf-8")
-        self.events_handle = (self.output / "events.csv").open("w", newline="", encoding="utf-8")
+        self.telemetry_handle = artifact(self.output, "telemetry.log").open("a", encoding="utf-8")
+        self.events_handle = artifact(self.output, "events.csv").open("w", newline="", encoding="utf-8")
         csv.writer(self.events_handle).writerow(["utc", "monotonic_s", "elapsed_s", "phase", "event"])
         self.set_phase(self.phase, "monitor_started")
         self.thread = threading.Thread(target=self.loop, daemon=True)
@@ -388,7 +390,7 @@ class Monitor:
         import httpx
         headers = {"Authorization": f"Bearer {self.secret}"} if self.secret else {}
         pattern = re.compile(r'^(vllm:(?:kv_cache_usage_perc|gpu_cache_usage_perc))(\{[^}]*\})?\s+([0-9.eE+\-]+)(?:\s|$)')
-        with (self.output / "kv-cache.csv").open("w", newline="") as handle, httpx.Client(timeout=1, headers=headers, follow_redirects=False) as client:
+        with artifact(self.output, "kv-cache.csv").open("w", newline="") as handle, httpx.Client(timeout=1, headers=headers, follow_redirects=False) as client:
             writer = csv.writer(handle)
             writer.writerow(["utc", "elapsed_s", "phase", "series", "fraction"])
             while not self.stop_event.is_set():
@@ -415,8 +417,8 @@ class Monitor:
             import psutil
         except ImportError:
             psutil = None
-        with (self.output / "gpu.csv").open("w", newline="", encoding="utf-8") as handle, \
-             (self.output / "system.csv").open("w", newline="", encoding="utf-8") as system_handle:
+        with artifact(self.output, "gpu.csv").open("w", newline="", encoding="utf-8") as handle, \
+             artifact(self.output, "system.csv").open("w", newline="", encoding="utf-8") as system_handle:
             writer = csv.writer(handle)
             writer.writerow(["utc", "elapsed_s", "sample_index", "phase", "index", "name", "used_mib", "total_mib", "used_gib", "total_gib",
                              "vram_used_pct", "gpu_util_pct", "memory_util_pct", "temperature_c", "power_w"])
@@ -433,7 +435,7 @@ class Monitor:
                 result = capture(["nvidia-smi", "--query-gpu=index,name,memory.used,memory.total,utilization.gpu,utilization.memory,temperature.gpu,power.draw",
                                   "--format=csv,noheader,nounits"])
                 if result.get("returncode") != 0:
-                    write_json(self.output / "gpu-unavailable.json", result)
+                    write_json(artifact(self.output, "gpu-unavailable.json"), result)
                 else:
                     gpu_rows = list(csv.reader(result["stdout"].splitlines(), skipinitialspace=True))
                     for row in gpu_rows:
@@ -476,7 +478,7 @@ class Monitor:
     def write_telemetry_summary(self):
         """Agrega telemetria por fase para relacionar picos com eventos do benchmark."""
         def read_rows(name):
-            path = self.output / name
+            path = locate(self.output, name)
             if not path.exists():
                 return []
             with path.open() as handle:
@@ -486,7 +488,7 @@ class Monitor:
         # com UTC, tempo desde o início do monitor e fase experimental.
         if sources["gpu"]:
             import shutil
-            shutil.copyfile(self.output / "gpu.csv", self.output / "telemetry-timeseries.csv")
+            shutil.copyfile(artifact(self.output, "gpu.csv"), artifact(self.output, "telemetry-timeseries.csv"))
         phases = sorted({r.get("phase") for rows in sources.values() for r in rows if r.get("phase")})
         output = {"definition": "Amostras observadas por fase; não são bytes nem tempos de transferência PCIe.", "phases": {}}
         for phase in phases:
@@ -520,7 +522,7 @@ class Monitor:
             entry["kv_occupancy_pct_max"] = max(vals) if vals else None
             entry["kv_samples"] = len(vals)
             output["phases"][phase] = entry
-        write_json(self.output / "telemetry-summary.json", output)
+        write_json(artifact(self.output, "telemetry-summary.json"), output)
 
 
 def percentile(values, q):
@@ -671,11 +673,11 @@ def write_requests_csv(path, report):
 
 def write_summary(output, rows):
     from reporting import render
-    write_json(output / "summary.json", rows)
+    write_json(artifact(output, "summary.json"), rows)
     if not rows:
         render(output, rows)
         return
-    with (output / "summary.csv").open("w", newline="", encoding="utf-8") as handle:
+    with artifact(output, "summary.csv").open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
         writer.writeheader()
         writer.writerows(rows)
@@ -714,9 +716,13 @@ def run(args):
         except BlockingIOError:
             raise ValueError("Já existe um benchmark usando esta pasta results. Não execute dois ao mesmo tempo.") from None
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
-        output = base / stamp
-        output.mkdir()
+        label = execution_label(smoke=args.smoke, scenarios=args.scenarios,
+                                input_tokens=args.input_tokens, result_name=args.result_name)
+        output = runtime_root(base, cfg["runtime"], stamp, label)
+        prepare(output)
         manifest = {"project_version": VERSION, "guidellm_version": GUIDELLM_VERSION, "started_utc": stamp,
+                    "results_layout": "runtime/timestamp/human-name/{html,json,csv,logs,text}",
+                    "result_name": label, "runtime_directory": slug(cfg["runtime"]),
                     "config": cfg, "tokenizer": digest, "smoke": args.smoke, "requests": count,
                     "repetitions": repetitions, "warmup_requests_per_case": args.warmup,
                     "scenarios": args.scenarios, "seed": args.seed, "profile": "synchronous",
@@ -733,9 +739,9 @@ def run(args):
                                   "sampling": "approximately 1 Hz; not per-token; PCIe copy time is not directly measured"},
                     "python": sys.version, "platform": platform.platform(),
                     "git": capture(["git", "rev-parse", "HEAD"]), "status": "running"}
-        write_json(output / "manifest.json", redact(manifest, secret))
-        write_json(output / "client-packages.json", {d.metadata["Name"]: d.version for d in importlib.metadata.distributions()})
-        write_json(output / "gpu-before.json", capture(["nvidia-smi"]))
+        write_json(artifact(output, "manifest.json"), redact(manifest, secret))
+        write_json(artifact(output, "client-packages.json"), {d.metadata["Name"]: d.version for d in importlib.metadata.distributions()})
+        write_json(artifact(output, "gpu-before.json"), capture(["nvidia-smi"]))
         monitor, rows = Monitor(output, cfg, secret, args.collect_kv_metrics), []
         launch, origin, cleanup_error = None, None, None
         lifecycle = {"mode": "new-process" if args.launch else "existing-server-state-unknown",
@@ -757,7 +763,7 @@ def run(args):
             monitor.set_phase("first_request")
             print("Primeiro POST: medição da primeira resposta (nenhuma geração prévia enviada pelo cliente).", flush=True)
             lifecycle["first_request"] = timed_request(cfg, secret, args.timeout, prompt,
-                                                       output / "first-request.json", origin)
+                                                       artifact(output, "first-request.json"), origin)
             lifecycle_report(output, redact(lifecycle, secret))
             for rep in range(repetitions):
                 # Rotação balanceia parcialmente a posição dos cenários entre repetições.
@@ -777,7 +783,7 @@ def run(args):
                             config["conversation_turns"] = args.conversation_turns
                             config["conversation_fixture_sha256"] = conversation_fixture["sha256"]
                             config["spec_note"] = "GuideLLM synthetic data spec is retained for independent baseline context only; measured conversational requests are generated from the fixed fixture with accumulated chat history."
-                        write_json(output / f"{prefix}-config.json", redact(config, secret))
+                        write_json(artifact(output, f"{prefix}-config.json"), redact(config, secret))
                         expected = n * args.conversation_turns if conversation_mode else n
                         unit = "conversas" if conversation_mode else "requisições"
                         print(f"{prefix}: {n} {unit}, uma chamada por vez", flush=True)
@@ -787,14 +793,14 @@ def run(args):
                         else:
                             report = run_stream_batch(cfg, measurement_tokenizer, name, n, args.timeout, secret)
                         raw = redact(report, secret)
-                        write_json(output / f"{prefix}.json", raw)
+                        write_json(artifact(output, f"{prefix}.json"), raw)
                         turns = turn_manifest(raw) if conversation_mode else []
                         conversation_file = None
                         if conversation_mode:
-                            write_json(output / f"{prefix}-turns.json", turns)
+                            write_json(artifact(output, f"{prefix}-turns.json"), turns)
                             conversation_file = f"{prefix}-conversation.json"
-                            write_json(output / conversation_file, conversation_artifact(raw, conversation_fixture))
-                        write_requests_csv(output / f"{prefix}-requests.csv", raw)
+                            write_json(artifact(output, conversation_file), conversation_artifact(raw, conversation_fixture))
+                        write_requests_csv(artifact(output, f"{prefix}-requests.csv"), raw)
                         summary = summarize(raw)
                         summary["expected"] = expected
                         summary["missing_request_count"] = max(0, expected - sum(summary[k] for k in ("successful_request_count", "errored_request_count", "incomplete_request_count")))
@@ -806,7 +812,7 @@ def run(args):
                                                    "requests_sha256": summary["requests_sha256"],
                                                    "conversation_artifact": conversation_file,
                                                    "turns": turns if conversation_mode else None})
-                        write_json(output / "manifest.json", redact(manifest, secret))
+                        write_json(artifact(output, "manifest.json"), redact(manifest, secret))
                         rows.append({"runtime": cfg["runtime"], "model": cfg["model"],
                                      "cache_policy": cfg["cache_policy"], "tokenizer_sha256": digest["sha256"],
                                      "mode": args.mode, "phase": phase, "scenario": name, "repetition": rep+1, **summary})
@@ -815,7 +821,7 @@ def run(args):
                             raise RuntimeError(f"{prefix}: requisições falharam ou execução incompleta. Veja o JSON; não compare como sucesso.")
             monitor.set_phase("warm_reference")
             lifecycle["warm_reference"] = timed_request(cfg, secret, args.timeout, prompt,
-                                                         output / "warm-reference.json")
+                                                         artifact(output, "warm-reference.json"))
             manifest["status"] = lifecycle["status"] = "complete"
         except BaseException as exc:
             manifest["status"] = "interrupted" if isinstance(exc, KeyboardInterrupt) else "failed"
@@ -825,8 +831,8 @@ def run(args):
             raise
         finally:
             for key, filename in (("first_request", "first-request.json"), ("warm_reference", "warm-reference.json")):
-                if (output / filename).exists():
-                    lifecycle[key] = json.loads((output / filename).read_text(encoding="utf-8"))
+                if artifact(output, filename).exists():
+                    lifecycle[key] = json.loads(artifact(output, filename).read_text(encoding="utf-8"))
             if launch is not None:
                 monitor.set_phase("server_shutdown")
                 try:
@@ -839,12 +845,12 @@ def run(args):
             lifecycle_report(output, redact(lifecycle, secret))
             monitor.stop()
             manifest["ended_utc"] = datetime.now(timezone.utc).isoformat()
-            write_json(output / "manifest.json", redact(manifest, secret))
-            write_json(output / "gpu-after.json", capture(["nvidia-smi"]))
+            write_json(artifact(output, "manifest.json"), redact(manifest, secret))
+            write_json(artifact(output, "gpu-after.json"), capture(["nvidia-smi"]))
             write_summary(output, rows)
         if cleanup_error:
             raise RuntimeError(f"Falha ao encerrar processo criado: {cleanup_error}. Confira o PID no lifecycle.json.")
-        print(f"Concluído. Abra {output / 'lifecycle.html'} e {output / 'summary.html'}")
+        print(f"Concluído. Abra {artifact(output, 'lifecycle.html')} e {artifact(output, 'summary.html')}")
 
 
 def positive(value):
@@ -864,18 +870,18 @@ def nonnegative(value):
 def rebuild_report(args):
     """Atualiza apenas derivados, preservando relatórios brutos e manifesto original."""
     output = Path(args.output)
-    rows = json.loads((output / "summary.json").read_text())
-    manifest = json.loads((output / "manifest.json").read_text())
+    rows = json.loads(locate(output, "summary.json").read_text())
+    manifest = json.loads(locate(output, "manifest.json").read_text())
     for row in rows:
         prefix = f"r{row['repetition']}-{row['scenario']}-{row['phase']}"
-        raw = json.loads((output / f"{prefix}.json").read_text())
+        raw = json.loads(locate(output, f"{prefix}.json").read_text())
         row.update(summarize(raw))
         expected = manifest.get("warmup_requests_per_case") if row["phase"] == "warmup" else manifest.get("requests")
         row["expected"] = expected
         row["missing_request_count"] = max(0, expected - sum(row[k] for k in ("successful_request_count", "errored_request_count", "incomplete_request_count"))) if expected is not None else None
-        write_requests_csv(output / f"{prefix}-requests.csv", raw)
+        write_requests_csv(artifact(output, f"{prefix}-requests.csv"), raw)
     write_summary(output, rows)
-    print(f"Relatório atualizado: {output / 'summary.html'}; dados brutos preservados.")
+    print(f"Relatório atualizado: {artifact(output, 'summary.html')}; dados brutos preservados.")
 
 
 def main():
@@ -908,6 +914,7 @@ def main():
     cmd.add_argument("--seed", type=positive, default=42)
     cmd.add_argument("--timeout", type=positive, default=300)
     cmd.add_argument("--results", default="results")
+    cmd.add_argument("--result-name", help="Nome humano da execução na pasta timestamp; sem isso é derivado do modo/cenário.")
     cmd.add_argument("--smoke", action="store_true", help="3 medições e 1 repetição; não vale como resultado final.")
     cmd.add_argument("--launch", help="Arquivo JSON com argv para iniciar um runtime LOCAL; encerra só esse processo ao final.")
     cmd.add_argument("--launch-extra-args", nargs="*", default=[],

@@ -131,20 +131,22 @@ O primeiro código de saída diferente de zero encerra o sweep. Nenhum ponto fal
 
 ## 8. Onde estão os resultados
 
-Cada execução tem um timestamp em `results/`. Os arquivos importantes são:
+Cada execução fica em `results/<runtime>/<timestamp>/<nome-humano>/`, com subpastas por formato:
 
 | Arquivo | Função |
 |---|---|
-| `summary.html` | leitura humana dos resultados |
-| `summary.json` | métricas estruturadas |
-| `gpu.csv` | amostras NVIDIA |
-| `system.csv` | CPU/RAM/disco do host |
-| `events.csv` | fases e timestamps |
-| `telemetry-summary.json` | agregação por fase |
-| `kv-cache.csv` | gauge KV do servidor, se existir |
-| `server.log` | log do runtime iniciado |
-| `lifecycle.json` | readiness, primeira resposta, argv e encerramento |
-| `telemetry-timeseries.csv` | série temporal da GPU com `elapsed_s`, VRAM ocupada e utilização |
+| `html/summary.html` | leitura humana, tabelas e gráficos SVG |
+| `html/telemetry-memory.svg` | memória ocupada da GPU ao longo do tempo |
+| `html/telemetry-gpu-util.svg` | GPU-utilização ao longo do tempo |
+| `json/summary.json` | métricas estruturadas |
+| `csv/gpu.csv` | amostras NVIDIA |
+| `csv/system.csv` | CPU/RAM/disco do host |
+| `csv/events.csv` | fases e timestamps |
+| `json/telemetry-summary.json` | agregação por fase |
+| `csv/kv-cache.csv` | gauge KV do servidor, se existir |
+| `logs/server.log` | log do runtime iniciado |
+| `json/lifecycle.json` | readiness, primeira resposta, argv e encerramento |
+| `csv/telemetry-timeseries.csv` | série temporal da GPU com `elapsed_s`, VRAM ocupada e utilização |
 
 As métricas de throughput dos requests não são extraídas do `server.log`. O cliente abre SSE e registra relógios monotônicos por requisição: início, primeiro evento com conteúdo e fim. `decode_tokens_per_second` usa tokens de `usage` dividido pelo intervalo primeiro–último evento; `end_to_end_tokens_per_second` divide pela latência total. O `Avg generation throughput` periódico do vLLM permanece apenas como observabilidade agregada. Ausência de `usage` produz `null`, e uma resposta de um token não recebe inter-token latency zero.
 
@@ -152,18 +154,15 @@ As métricas de throughput dos requests não são extraídas do `server.log`. O 
 
 `nvidia-smi` mostra VRAM total usada pela GPU, não bytes exclusivamente do KV. CPU/RAM/SSD são contadores observacionais do host. O benchmark não mede o tempo de cada cópia PCIe ou RAM↔VRAM; isso exige Nsight Systems/Compute ou instrumentação CUDA no runtime.
 
-Para copiar os resultados do pod para o computador local, execute localmente: `make pull-results POD_SSH=root@HOST_DO_POD`. O alvo usa `scp`, aceita `POD_PORT`, `REMOTE_RESULTS_DIR` e `LOCAL_RESULTS_DIR`, e não apaga resultados locais. `make check-profilers` verifica `nsys` e `ncu`; profiling é complementar e deve ser executado separadamente, pois altera a latência.
+Para copiar os resultados de um host com SSH TCP direto, execute localmente: `make pull-results POD_SSH=root@HOST_DO_POD`. O alvo usa `scp`, aceita `POD_PORT`, `REMOTE_RESULTS_DIR` e `LOCAL_RESULTS_DIR`, e não apaga resultados locais. O terminal básico `ssh.runpod.io` é um proxy com PTY sem SCP/SFTP; nesse caso, use `runpodctl send` no pod e `runpodctl receive CODIGO` no computador local. `make check-profilers` verifica `nsys` e `ncu`; profiling é complementar e deve ser executado separadamente, pois altera a latência.
 
 O profiling automatizado fica em `Makefile.profiling`, separado da bateria oficial. Execute `make -f Makefile.profiling profile-vllm-nsys MODEL_SIZE=7B` ou o alvo equivalente de `ncu`/llama.cpp em outro ambiente. O alvo inicia o servidor em primeiro plano; envie uma única requisição curta em outro terminal e encerre com `Ctrl-C`. Os relatórios ficam em `results/profiling/`. Não instale/remova Nsight durante `bench-vllm`, pois isso mudaria o ambiente e contaminaria a medição.
 
 ## 10. Estado atual da validação no Pod
 
-Ainda não há validação ao vivo completa e bem-sucedida da integração. As tentativas confirmaram dois bugs de integração, sem convertê-los em resultados:
+A integração foi validada ao vivo em 22/09/2026 no RunPod com uma RTX 3090 e o GGUF 7B. Preparação offline, três smokes, três quick sweeps e `bench-all` reduzido passaram; o agregado terminou com `vLLM=0 llama.cpp=0 Ollama=0`. As métricas e os caminhos dos artefatos estão em [resultados-pod-20260922.md](resultados-pod-20260922.md).
 
-- llama.cpp só detectou CUDA depois que `GGML_BACKEND_PATH` recebeu o arquivo exato `cuda_v13/libggml-cuda.so` e seu diretório entrou em `LD_LIBRARY_PATH`;
-- uma API viva sem o alias configurado fez readiness continuar aguardando, como esperado.
-
-Separadamente, o ambiente vLLM observado, versão `0.0.5`, não tinha `vllm-gguf-plugin` instalado e permaneceu bloqueado antes da validação ao vivo.
+O vLLM foi executado com `--enforce-eager --max-model-len 2048 --gpu-memory-utilization 0.80`. O `EngineDeadError` visto no encerramento do sweep ocorre após respostas HTTP 200 e o SIGTERM intencional do harness; não foi OOM e o alvo retornou zero.
 
 ## 11. Sequência recomendada
 

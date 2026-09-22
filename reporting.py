@@ -6,6 +6,8 @@ import math
 from collections import defaultdict
 from pathlib import Path
 
+from results_layout import artifact, href, locate
+
 
 def ratio(a, b):
     if not isinstance(a, (int, float)) or not isinstance(b, (int, float)):
@@ -58,7 +60,9 @@ def table(rows, columns):
 
 def context_summary(output, kv_bytes_per_token=None):
     groups = defaultdict(list)
-    for file in sorted(Path(output).glob("r*-*-requests.csv")):
+    csv_dir = Path(output) / "csv"
+    files = csv_dir.glob("r*-*-requests.csv") if csv_dir.exists() else Path(output).glob("r*-*-requests.csv")
+    for file in sorted(files):
         rep, scenario, phase, _ = file.stem.split("-", 3)
         with file.open() as handle:
             for row in csv.DictReader(handle):
@@ -98,7 +102,7 @@ def context_summary(output, kv_bytes_per_token=None):
 
 def gpu_summary(output):
     groups = defaultdict(list)
-    path = Path(output) / "gpu.csv"
+    path = locate(Path(output), "gpu.csv")
     if path.exists():
         with path.open() as handle:
             for row in csv.DictReader(handle):
@@ -121,14 +125,58 @@ def gpu_summary(output):
     return result
 
 
+def _timeseries(output):
+    path = locate(Path(output), "gpu.csv")
+    if not path.exists():
+        return []
+    with path.open() as handle:
+        rows = []
+        for row in csv.DictReader(handle):
+            try:
+                elapsed = float(row["elapsed_s"])
+                used = float(row["used_mib"])
+                util = float(row["gpu_util_pct"])
+                if all(math.isfinite(value) for value in (elapsed, used, util)):
+                    rows.append({"elapsed_s": elapsed, "used_mib": used, "gpu_util_pct": util})
+            except (KeyError, TypeError, ValueError):
+                continue
+        return rows
+
+
+def _chart(rows, key, title, ylabel, color, maximum=None):
+    """Gera SVG autônomo para abrir no navegador sem dependências externas."""
+    if not rows:
+        return f'<p class="chart-empty">Sem amostras válidas para {html.escape(title.lower())}.</p>'
+    width, height, pad = 920, 260, 42
+    xmax = max(row["elapsed_s"] for row in rows) or 1.0
+    ymax = maximum or max(row[key] for row in rows) or 1.0
+    points = []
+    for row in rows:
+        x = pad + (width - 2 * pad) * row["elapsed_s"] / xmax
+        y = height - pad - (height - 2 * pad) * row[key] / ymax
+        points.append(f"{x:.1f},{y:.1f}")
+    polyline = " ".join(points)
+    svg = (f'<svg class="chart" viewBox="0 0 {width} {height}" role="img" aria-label="{html.escape(title)}">'
+           f'<rect width="100%" height="100%" fill="#fbfaf5"/><line x1="{pad}" y1="{height-pad}" x2="{width-pad}" y2="{height-pad}" stroke="#789"/>'
+           f'<line x1="{pad}" y1="{pad}" x2="{pad}" y2="{height-pad}" stroke="#789"/>'
+           f'<polyline points="{polyline}" fill="none" stroke="{color}" stroke-width="3" stroke-linejoin="round"/>'
+           f'<text x="{pad}" y="20" fill="#193835">{html.escape(title)}</text>'
+           f'<text x="{pad}" y="{height-8}" fill="#526">0 s</text>'
+           f'<text x="{width-pad-55}" y="{height-8}" fill="#526">{xmax:.1f} s</text>'
+           f'<text x="6" y="{pad+5}" fill="#526">{ymax:.0f}</text>'
+           f'<text x="6" y="{height-pad+5}" fill="#526">0</text></svg>')
+    return svg
+
+
 def render(output, rows):
     output = Path(output)
-    lifecycle = json.loads((output / "lifecycle.json").read_text()) if (output / "lifecycle.json").exists() else {}
-    manifest = json.loads((output / "manifest.json").read_text()) if (output / "manifest.json").exists() else {}
+    lifecycle_path, manifest_path = locate(output, "lifecycle.json"), locate(output, "manifest.json")
+    lifecycle = json.loads(lifecycle_path.read_text()) if lifecycle_path.exists() else {}
+    manifest = json.loads(manifest_path.read_text()) if manifest_path.exists() else {}
     kv_bytes = manifest.get("model_availability", {}).get("kv_bytes_per_token")
     context, gpu = context_summary(output, kv_bytes), gpu_summary(output)
-    (output / "context-summary.json").write_text(json.dumps(context, ensure_ascii=False, indent=2) + "\n")
-    (output / "gpu-summary.json").write_text(json.dumps(gpu, ensure_ascii=False, indent=2) + "\n")
+    artifact(output, "context-summary.json").write_text(json.dumps(context, ensure_ascii=False, indent=2) + "\n")
+    artifact(output, "gpu-summary.json").write_text(json.dumps(gpu, ensure_ascii=False, indent=2) + "\n")
     startup = lifecycle.get("readiness", {}).get("process_to_api_observed_s")
     initial = []
     for key, label in (("first_request", "Primeira resposta"), ("warm_reference", "Referência final")):
@@ -163,7 +211,7 @@ def render(output, rows):
         ("used_mib_max", "Memória máx. (MiB)"), ("total_mib_max", "Memória total (MiB)"),
         ("gpu_util_pct_mean", "Utilização média (%)"), ("gpu_util_pct_max", "Utilização máx. (%)"),
         ("temperature_c_max", "Temperatura máx. (°C)"), ("power_w_mean", "Potência média (W)"), ("power_w_max", "Potência máx. (W)")]) if gpu else "<p>Não disponível: nenhuma amostra NVIDIA válida. Em Apple/Metal este coletor não mede GPU; isso não significa utilização zero.</p>"
-    kvfile = output / "kv-cache.csv"
+    kvfile = locate(output, "kv-cache.csv")
     kvrows = []
     if kvfile.exists():
         with kvfile.open() as handle:
@@ -175,15 +223,20 @@ def render(output, rows):
     first = table(initial, [("phase", "Fase"), ("ttft", "TTFT (ms)"), ("decode_tokens_s", "Geração (tokens/s)"), ("effective_tokens_s", "Efetiva (tokens/s)"), ("e2e", "Total (s)")])
     policy = manifest.get("model_availability", {}).get("policy", "Execução anterior: veja o estado inicial; ausência de download não verificada por esta versão.")
     failure = f'<p class="note">Execução não concluída: {html.escape(str(manifest["error"]))}. Dados parciais não constituem uma bateria válida.</p>' if manifest.get("error") else ""
+    series = _timeseries(output)
+    memory_chart = _chart(series, "used_mib", "Memória da GPU ocupada (MiB)", "MiB", "#b54e27")
+    util_chart = _chart(series, "gpu_util_pct", "Utilização computacional da GPU (%)", "%", "#136d58", 100)
+    artifact(output, "telemetry-memory.svg").write_text(memory_chart, encoding="utf-8") if series else None
+    artifact(output, "telemetry-gpu-util.svg").write_text(util_chart, encoding="utf-8") if series else None
     page = f'''<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Benchmark · latência, geração e GPU</title>
-<style>body{{font:16px/1.7 system-ui;margin:32px;background:#f6f3ec;color:#193835}}main{{max-width:1400px;margin:auto}}table{{border-collapse:collapse;width:100%;font-size:14px}}td,th{{padding:10px;border:1px solid #ccd6cc;text-align:left}}th{{background:#e0e9df}}.scroll{{overflow:auto}}h2{{margin-top:38px}}a{{color:#136d58}}.note{{padding:16px;background:#fff0de;border-left:4px solid #b54e27}}</style><main>
+<style>body{{font:16px/1.7 system-ui;margin:32px;background:#f6f3ec;color:#193835}}main{{max-width:1400px;margin:auto}}table{{border-collapse:collapse;width:100%;font-size:14px}}td,th{{padding:10px;border:1px solid #ccd6cc;text-align:left}}th{{background:#e0e9df}}.scroll{{overflow:auto}}h2{{margin-top:38px}}a{{color:#136d58}}.note{{padding:16px;background:#fff0de;border-left:4px solid #b54e27}}.chart{{width:100%;max-height:280px;border:1px solid #ccd6cc;margin:10px 0 22px}}.chart-empty{{padding:16px;background:#fff0de}}</style><main>
 <h1>Um usuário · latência, geração e GPU</h1><p>Status: <strong>{html.escape(manifest.get('status', 'desconhecido'))}</strong>. {html.escape(policy)}</p>{failure}
 <p class="note">TTFT = espera pelo primeiro token/conteúdo observado. Geração = (tokens de saída − 1)/(tempo entre primeiro e último token). Efetiva = tokens de saída/tempo total da requisição, incluindo TTFT. São taxas por requisição, não throughput agregado de usuários.</p>
 <h2>1. Inicialização e primeira resposta</h2><p>Processo → API disponível: {html.escape(str(startup)) if startup is not None else 'não medido'} s. <a href="lifecycle.html">Ver ciclo de vida completo</a>.</p>{first}
 <h2>2. Aquecimento e operação posterior</h2><p>Percentis entre requisições bem-sucedidas. Warmup e measure separados; p95 com menos de 100 sucessos é exploratório. Geração indisponível com menos de dois tokens ou intervalo não positivo.</p>{metrics}
 <h2>3. Tokens/s por faixa de contexto — proxy da carga de KV</h2><p>Faixa definida pela entrada real, incluindo template, antes do decode. O contexto cresce durante a saída; mostramos também seu comprimento lógico final. Esta é uma comparação de velocidades médias de respostas iniciadas em cada faixa, não uma medição token a token dentro de faixas de ocupação física do cache.</p>{by_context}
 <p>Para atenção completa, mantendo modelo, dtype de KV e uma sequência: KV lógico ≈ 2 × camadas × cabeças KV × dimensão da cabeça × bytes por elemento × tokens. Pesos 4/8 bits não determinam o dtype do KV. Blocos, reserva, prefix caching e sliding window impedem tratar essa fórmula como medição de VRAM. MiB estimados só aparecem com --kv-bytes-per-token informado e verificado pelo operador; caso contrário, ficam indisponíveis.</p>
-<h2>4. GPU, CPU, RAM e SSD por fase</h2><p>O monitor amostra aproximadamente 1 vez/s e relaciona cada amostra a eventos/fases. GPU vem do nvidia-smi; CPU, RAM e I/O de disco vêm do host. Máximos amostrados podem perder picos e não há atribuição por processo. N/A é ausência de dado, não zero. <a href="telemetry-summary.json">Resumo de telemetria</a> · <a href="events.csv">Eventos</a> · <a href="system.csv">CPU/RAM/SSD</a></p>{hardware}
+<h2>4. GPU, CPU, RAM e SSD por fase</h2><p>O monitor amostra aproximadamente 1 vez/s e relaciona cada amostra a eventos/fases. GPU vem do nvidia-smi; CPU, RAM e I/O de disco vêm do host. Máximos amostrados podem perder picos e não há atribuição por processo. N/A é ausência de dado, não zero.</p><h3>Memória e utilização ao longo da execução</h3>{memory_chart}{util_chart}<p><a href="{href('telemetry-memory.svg')}">SVG da memória</a> · <a href="{href('telemetry-gpu-util.svg')}">SVG da GPU-util</a> · <a href="{href('telemetry-summary.json')}">Resumo de telemetria</a> · <a href="{href('events.csv')}">Eventos</a> · <a href="{href('system.csv')}">CPU/RAM/SSD</a></p>{hardware}
 <h2>5. Ocupação real do pool KV — vLLM</h2><p>Coleta opcional de /metrics via --collect-kv-metrics. Percentual de blocos ocupados do pool, não percentual de VRAM nem bytes. Séries/engines separados. Amostragem e atualização do servidor podem perder transientes; não sincronizada por token.</p>{kv}
-<p><a href="summary.json">Resumo JSON</a> · <a href="context-summary.json">Faixas JSON</a> · <a href="gpu-summary.json">GPU JSON</a> · <a href="manifest.json">Manifesto</a></p></main></html>'''
-    (output / "summary.html").write_text(page, encoding="utf-8")
+<p><a href="{href('summary.json')}">Resumo JSON</a> · <a href="{href('context-summary.json')}">Faixas JSON</a> · <a href="{href('gpu-summary.json')}">GPU JSON</a> · <a href="{href('manifest.json')}">Manifesto</a></p></main></html>'''
+    artifact(output, "summary.html").write_text(page, encoding="utf-8")

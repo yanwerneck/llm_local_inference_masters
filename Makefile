@@ -144,7 +144,7 @@ help:
 		'  make bench-all             executa vLLM, llama.cpp e Ollama; continua e resume falhas' \
 		'  make kv-sweep              compatibilidade: KV sweep do vLLM (já incluído em bench-vllm)' \
 		'  make docs                 regenera os HTMLs dos documentos' \
-		'  make pull-results POD_SSH=root@host  copia results do pod via SCP' \
+		'  make pull-results POD_SSH=root@host  copia results via SCP (SSH TCP direto)' \
 		'  make check-profilers      verifica nsys/ncu para profiling dedicado' \
 		'' \
 		'Variáveis úteis:' \
@@ -260,7 +260,15 @@ check-runtimes:
 	missing=0
 	if command -v "$(VLLM_BIN)" >/dev/null 2>&1 || test -x "$(VLLM_BIN)"; then echo "[RUNTIME] vLLM: $(VLLM_BIN)"; "$(VLLM_BIN)" --help >/dev/null; else echo "[RUNTIME] vLLM ausente: $(VLLM_BIN)"; missing=1; fi
 	if test -x "$(LLAMA_SERVER_BIN)"; then echo "[RUNTIME] llama-server: $(LLAMA_SERVER_BIN)"; "$(LLAMA_SERVER_BIN)" --help >/dev/null; else echo "[RUNTIME] llama-server ausente: $(LLAMA_SERVER_BIN)"; missing=1; fi
-	if command -v "$(OLLAMA_BIN)" >/dev/null 2>&1; then echo "[RUNTIME] Ollama: $(OLLAMA_BIN)"; "$(OLLAMA_BIN)" --version; else echo "[RUNTIME] Ollama ausente: $(OLLAMA_BIN)"; missing=1; fi
+	if command -v "$(OLLAMA_BIN)" >/dev/null 2>&1 || test -x "$(OLLAMA_BIN)"; then
+		echo "[RUNTIME] Ollama: $(OLLAMA_BIN)"
+		# `ollama --version` pode retornar 1 quando o daemon ainda não está ativo;
+		# a checagem deste alvo é do executável, não da API.
+		"$(OLLAMA_BIN)" --version 2>&1 || true
+	else
+		echo "[RUNTIME] Ollama ausente: $(OLLAMA_BIN)"
+		missing=1
+	fi
 	if test "$$missing" -ne 0; then echo '[RUNTIME] instale o runtime ausente no ambiente próprio ou sobrescreva VLLM_BIN/LLAMA_SERVER_BIN/OLLAMA_BIN'; exit 1; fi
 
 check-vllm-gguf:
@@ -362,7 +370,7 @@ bench-vllm: prepare-vllm
 		--warmup "$(SWEEP_WARMUP)" --mode "$(SWEEP_MODE)" --conversation-turns "$(SWEEP_CONVERSATION_TURNS)" \
 		--conversation-fixture "$(SWEEP_CONVERSATION_FIXTURE)" \
 		--startup-timeout "$(BENCH_STARTUP_TIMEOUT)" \
-		--results results/kv-sweep-vllm
+		--results results
 
 bench-llama: prepare-llama
 	@echo '[BENCH llama.cpp] início: short/medium/long + telemetria + KV sweep embutido'
@@ -391,7 +399,7 @@ bench-llama: prepare-llama
 		--warmup "$(SWEEP_WARMUP)" --mode "$(SWEEP_MODE)" --conversation-turns "$(SWEEP_CONVERSATION_TURNS)" \
 		--conversation-fixture "$(SWEEP_CONVERSATION_FIXTURE)" \
 		--startup-timeout "$(BENCH_STARTUP_TIMEOUT)" \
-		--results results/kv-sweep-llama
+		--results results
 
 bench-ollama: prepare-ollama
 	@echo '[BENCH Ollama] início: short/medium/long + telemetria + KV sweep embutido'
@@ -419,7 +427,7 @@ bench-ollama: prepare-ollama
 		--warmup "$(SWEEP_WARMUP)" --mode "$(SWEEP_MODE)" --conversation-turns "$(SWEEP_CONVERSATION_TURNS)" \
 		--conversation-fixture "$(SWEEP_CONVERSATION_FIXTURE)" \
 		--startup-timeout "$(BENCH_STARTUP_TIMEOUT)" \
-		--results results/kv-sweep-ollama
+		--results results
 
 bench-all:
 	@set +e
@@ -447,7 +455,7 @@ kv-sweep-vllm: prepare-vllm
 		--requests "$(SWEEP_REQUESTS)" --repetitions "$(SWEEP_REPETITIONS)" \
 		--warmup "$(SWEEP_WARMUP)" --mode "$(SWEEP_MODE)" --conversation-turns "$(SWEEP_CONVERSATION_TURNS)" \
 		--conversation-fixture "$(SWEEP_CONVERSATION_FIXTURE)" \
-		--startup-timeout "$(BENCH_STARTUP_TIMEOUT)" --results results/kv-sweep-vllm
+		--startup-timeout "$(BENCH_STARTUP_TIMEOUT)" --results results
 
 kv-sweep-llama: prepare-llama
 	backend='$(LLAMA_BACKEND_PATH)'; if test -n "$$backend"; then export GGML_BACKEND_PATH="$$backend"; export LD_LIBRARY_PATH="$$(dirname "$$backend"):$${LD_LIBRARY_PATH:-}"; fi
@@ -459,7 +467,7 @@ kv-sweep-llama: prepare-llama
 		--requests "$(SWEEP_REQUESTS)" --repetitions "$(SWEEP_REPETITIONS)" \
 		--warmup "$(SWEEP_WARMUP)" --mode "$(SWEEP_MODE)" --conversation-turns "$(SWEEP_CONVERSATION_TURNS)" \
 		--conversation-fixture "$(SWEEP_CONVERSATION_FIXTURE)" \
-		--startup-timeout "$(BENCH_STARTUP_TIMEOUT)" --results results/kv-sweep-llama
+		--startup-timeout "$(BENCH_STARTUP_TIMEOUT)" --results results
 
 kv-sweep-ollama: prepare-ollama
 	HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_HUB_ENABLE_HF_TRANSFER=0 \
@@ -470,7 +478,7 @@ kv-sweep-ollama: prepare-ollama
 		--requests "$(SWEEP_REQUESTS)" --repetitions "$(SWEEP_REPETITIONS)" \
 		--warmup "$(SWEEP_WARMUP)" --mode "$(SWEEP_MODE)" --conversation-turns "$(SWEEP_CONVERSATION_TURNS)" \
 		--conversation-fixture "$(SWEEP_CONVERSATION_FIXTURE)" \
-		--startup-timeout "$(BENCH_STARTUP_TIMEOUT)" --results results/kv-sweep-ollama
+		--startup-timeout "$(BENCH_STARTUP_TIMEOUT)" --results results
 
 quick-sweep-vllm: SWEEP_REQUESTS=1
 quick-sweep-vllm: SWEEP_REPETITIONS=1

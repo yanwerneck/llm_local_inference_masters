@@ -4,7 +4,7 @@ Benchmark acadêmico de inferência local para comparar **vLLM, llama.cpp e Olla
 
 O fluxo oficial é baseado no `Makefile`. O benchmark não baixa modelos, não troca artefatos automaticamente e não faz fallback quando um runtime falha. Download, criação de diretórios e instalação são preparação; não entram nos tempos medidos.
 
-Documentação detalhada: [fluxo completo do Make](docs/make-fluxo.md) · [metodologia](docs/metodologia.html) · [código explicado](docs/codigo-explicado.html).
+Documentação detalhada: [fluxo completo do Make](docs/make-fluxo.md) · [metodologia](docs/metodologia.html) · [código explicado](docs/codigo-explicado.html) · [resultados reais do Pod de 22/09/2026](docs/resultados-pod-20260922.md).
 
 ## Preparar um pod novo
 
@@ -194,16 +194,19 @@ make quick-sweep-llama MODEL_SIZE=7B
 make quick-sweep-ollama MODEL_SIZE=7B
 ```
 
-Cada alvo percorre apenas 1024 e 2048 tokens de contexto, com 1 requisição, 1 repetição e 1 aquecimento por ponto. É uma verificação de integração do launcher, API e coleta; a amostra não sustenta comparação estatística nem substitui o sweep formal.
+Cada alvo usa por padrão início em 1024, passo 2048, máximo 8192, 1 requisição, 1 repetição e nenhum aquecimento. Para validar apenas um ponto, use `SWEEP_MAX_CONTEXT=1024`. É uma verificação de integração do launcher, API e coleta; a amostra não sustenta comparação estatística nem substitui o sweep formal.
 
 ### Estado da validação no Pod
 
-Ainda não houve uma execução ao vivo completa e bem-sucedida desta integração. Dois bugs de integração foram confirmados e devem permanecer explícitos:
+A integração foi validada ao vivo em 22/09/2026 no RunPod, com o mesmo GGUF 7B e uma RTX 3090. O comando `bench-all` reduzido terminou com:
 
-- o llama.cpp não detectou o plugin CUDA até receber `LLAMA_BACKEND_PATH` apontando exatamente para `cuda_v13/libggml-cuda.so`, junto do respectivo diretório em `LD_LIBRARY_PATH`;
-- o servidor chegou a responder, mas sem o alias esperado em `/v1/models`; readiness corretamente continuou aguardando em vez de aceitar uma API viva com o modelo errado.
+```text
+[BENCH ALL] status: vLLM=0 llama.cpp=0 Ollama=0
+```
 
-Além disso, o ambiente vLLM testado, versão `0.0.5`, não tinha o pacote `vllm-gguf-plugin` instalado e permaneceu bloqueado antes da validação ao vivo.
+Os três smokes, os três quick sweeps de 1024 tokens, as preparações offline e a bateria agregada reduzida passaram. O relatório completo, com métricas, comandos e caminhos dos artefatos, está em [docs/resultados-pod-20260922.md](docs/resultados-pod-20260922.md).
+
+O vLLM precisou da configuração diagnóstica `--enforce-eager --max-model-len 2048 --gpu-memory-utilization 0.80`; o startup levou aproximadamente 96 segundos. O `EngineDeadError` registrado no encerramento do sweep ocorreu depois de respostas HTTP 200 e do SIGTERM intencional de shutdown; o alvo terminou com código zero. Isso não foi classificado como OOM ou falha de inferência.
 
 Durante uma inicialização demorada, o progresso informa o endpoint `GET /v1/models`, o ID de modelo esperado e a última observação/erro. Uma resposta HTTP sem o alias correto não conta como disponibilidade.
 
@@ -268,19 +271,20 @@ CONVERSATION_TURNS / CONVERSATION_FIXTURE
 
 ## Telemetria e resultados
 
-Cada execução cria `results/<timestamp>/` com:
+Cada execução cria uma árvore legível, sem misturar formatos:
 
-- `summary.json`, `summary.csv`, `summary.html`: resultados por fase, cenário e repetição;
-- JSONs brutos e CSVs por requisição;
-- `*-turns.json` e `*-conversation.json`: artefatos por turno quando `BENCH_MODE` é `closed-loop` ou `replay`;
-- `gpu.csv`: VRAM, utilização, temperatura e potência aproximadamente a cada segundo;
-- `telemetry-timeseries.csv`: série temporal da GPU com `elapsed_s`, percentual de VRAM ocupada e fases, pronta para gráficos;
-- `system.csv`: CPU, RAM, espaço e I/O host-wide;
-- `events.csv`: timestamps das fases;
-- `telemetry-summary.json`: médias e máximos por fase;
-- `kv-cache.csv`: ocupação KV quando o endpoint existe;
-- `server.log`: stdout/stderr do processo iniciado;
-- `manifest.json` e `lifecycle.json`: versões, argumentos, modelo e falhas.
+```text
+results/<runtime>/<timestamp>/<nome-humano>/
+├── html/   summary.html, lifecycle.html, telemetry-memory.svg, telemetry-gpu-util.svg
+├── json/   manifestos, métricas, respostas brutas e artefatos de conversa
+├── csv/    summary.csv, gpu.csv, system.csv, events.csv e requests.csv
+├── logs/   server.log e telemetry.log
+└── text/   artefatos sem extensão conhecida
+```
+
+O `summary.html` incorpora gráficos offline de memória ocupada da GPU (MiB) e de GPU-utilização (%) ao longo do tempo, além das tabelas por fase. `telemetry-timeseries.csv` mantém a série temporal para análise externa; `gpu-summary.json` e `telemetry-summary.json` mantêm as agregações. Ausência de amostra aparece como indisponível, nunca como zero.
+
+O nome humano é derivado do alvo, por exemplo `smoke-short`, `benchmark-short-medium-long` ou `contexto-1024-tokens`. Para uma execução manual, use `--result-name nome-descritivo`.
 
 Os eventos relacionam picos de VRAM/CPU a startup, primeira requisição, aquecimento, medição ou encerramento. O instrumento não mede diretamente o tempo de cada transferência PCIe/RAM↔VRAM; isso exige Nsight/CUDA instrumentation.
 
@@ -300,7 +304,24 @@ make pull-results POD_SSH=root@HOST_DO_POD POD_PORT=2222 \
   LOCAL_RESULTS_DIR=results-pod
 ```
 
-O alvo usa `scp` e copia todas as execuções para `LOCAL_RESULTS_DIR`. Ele não apaga arquivos locais.
+O alvo usa `scp` e copia todas as execuções para `LOCAL_RESULTS_DIR`; ele não apaga arquivos locais. Porém, o endereço `ssh.runpod.io` do terminal básico do RunPod é um proxy com PTY e não oferece SCP/SFTP. Nesse caso, use o relay oficial `runpodctl`:
+
+No pod:
+
+```bash
+runpodctl send /tmp/llm-local-inference-results.tar.gz
+```
+
+Na máquina local, entre em `~/Documents` e use o código exibido:
+
+```bash
+cd ~/Documents
+runpodctl receive CODIGO_EXIBIDO
+tar -xzf llm-local-inference-results.tar.gz \
+  -C llm_local_inference_masters-results --strip-components=1
+```
+
+O `runpodctl send/receive` funciona por código de transferência e não depende de uma sessão SCP tradicional. Consulte o [relatório da rodada](docs/resultados-pod-20260922.md) para o pacote já transferido desta execução.
 
 ### Profiling para memory-bound/compute-bound
 
@@ -352,8 +373,8 @@ make smoke-vllm MODEL_SIZE=7B
 Se o servidor encerrar:
 
 ```bash
-cat results/<timestamp>/server.log
-cat results/<timestamp>/lifecycle.json
+cat results/<runtime>/<timestamp>/<nome-humano>/logs/server.log
+cat results/<runtime>/<timestamp>/<nome-humano>/json/lifecycle.json
 nvidia-smi
 ```
 

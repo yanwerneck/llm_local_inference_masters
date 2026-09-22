@@ -6,7 +6,9 @@
 
 ## Objetivo e estado do handoff
 
-Concluir o diagnóstico e a correção dos Makefiles do benchmark no RunPod, usando apenas testes rápidos e preservando as alterações existentes. Este documento é um plano de continuação para outro modelo: **a validação completa ainda não terminou**. O usuário solicitou interromper a implementação para receber este plano; não iniciar novos testes automaticamente.
+> **Estado final — 22/09/2026:** este plano foi executado no pod. A preparação offline, os três smokes, os três quick sweeps e o `bench-all` reduzido passaram. O agregado terminou com `vLLM=0 llama.cpp=0 Ollama=0`. Os resultados e limitações estão em [resultados-pod-20260922.md](resultados-pod-20260922.md).
+
+Concluir o diagnóstico e a correção dos Makefiles do benchmark no RunPod, usando testes rápidos e preservando as alterações existentes. A execução prevista neste documento foi concluída no pod; os itens que permanecem são operações externas ou experimentos deliberadamente não executados, como upload, build/quantização e profiling bloqueado pelo host.
 
 - Workspace local: `/Users/yanwerneck/projects/master_ai_uff/llm_inference_2026_02`.
 - Repositório Git real local: `/Users/yanwerneck/projects/master_ai_uff/llm_inference_2026_02/chatbot-runtime-bench`.
@@ -28,7 +30,7 @@ Ler `AGENTS.md` do workspace e do repositório antes de continuar. O usuário pr
 2. Conferir os arquivos presentes no pod contra os locais e os backups da sessão. Backup remoto disponível em `/tmp/codex-make-backup` (Makefiles, módulos, scripts e configs originais). O pod estava limpo no commit `d5494a3` antes da sincronização, enquanto o checkout local já tinha alterações não commitadas do usuário.
 3. Nunca usar `git reset --hard`, `git checkout -- .`, `git clean` ou sincronização com exclusão. Aplicar diferenças incrementais; preservar arquivos de evidência.
 4. Os arquivos previamente alterados incluíam `Makefile`, `README.md`, `bench.py`, `lifecycle.py`, `scripts/run_kv_sweep.py`, configs de vLLM/llama.cpp, `docs/make-fluxo.md` e `tests/test_lifecycle.py`; `scripts/prepare_ollama.py` e `tests/test_prepare_ollama.py` já existiam como não rastreados. **Não atribuir todo o diff desta sessão ao agente.**
-5. `Makefile`, `Makefile.profiling`, módulos/configs necessários e `docs/make-fluxo.md` foram sincronizados ao pod. **Ainda não sincronizados**: README, `docs/codigo-fontes.md`, diagnóstico/plano e testes novos locais. Confirmar hashes antes de transferir.
+5. Durante a execução inicial, `Makefile`, `Makefile.profiling`, módulos/configs necessários e `docs/make-fluxo.md` foram sincronizados ao pod antes dos demais documentos. Essa reconciliação foi concluída depois da validação; README, referências de código, diagnóstico, plano e testes locais foram atualizados no checkout local e estão refletidos neste handoff.
 6. Se um patch desta sessão causar regressão, reverter apenas seus trechos após comparar baseline, backup remoto e arquivo atual. Não restaurar cegamente o backup remoto inteiro: isso também retiraria as alterações anteriores do usuário que foram sincronizadas.
 
 Critério: possuir uma lista explícita do que diverge, com backup dos arquivos que serão substituídos, sem apagar alterações ou resultados.
@@ -39,7 +41,7 @@ Critério: possuir uma lista explícita do que diverge, com backup dos arquivos 
 |---|---|
 | Verificação de vLLM usava Python sem `vllm` | Alteração local anterior fixa o Python do runtime; arquivo sincronizado e `check-vllm-gguf` passou no pod |
 | `llama-server` fora do PATH e CUDA não detectada | Descoberta do binário existente e default do plugin `.so` v12/v13; backend exportado antes dos checks; inferência real passou |
-| `bench-vllm` ignorava `VLLM_EXTRA_ARGS` na bateria base | Argumentos JSON agora repassados como no smoke/sweep; validação GPU do alvo formal ainda pendente |
+| `bench-vllm` ignorava `VLLM_EXTRA_ARGS` na bateria base | Argumentos JSON agora repassados como no smoke/sweep; alvo validado no `bench-all` reduzido |
 | `smoke-vllm` fixava timeout em 1800s | Agora usa `BENCH_STARTUP_TIMEOUT` |
 | Todo smoke reinstalava cliente e consultava downloads | `PREPARE_OFFLINE=1` elimina essas etapas; mantém checks de imports, GGUF, tokenizer e JSONs |
 | Wrappers Nsight sem bit executável (`100644`) davam `Permission denied` | `Makefile.profiling` chama os wrappers via Bash |
@@ -54,7 +56,7 @@ Arquivos editados nesta sessão: `Makefile`, `Makefile.profiling`, `README.md`, 
 | Verificação | Nível | Resultado confirmado |
 |---|---|---|
 | `check-vllm-gguf` | Ambiente real do pod | Passou |
-| `smoke-llama` | GPU real / modelo 7B | Passou: 3 aquecimentos + 3 medições curtas, aproximadamente 28,7s, ~8,3 GiB GPU; `results/20260922T113214.004425Z` |
+| `smoke-llama` | GPU real / modelo 7B | Passou: `results/20260922T151943.141369Z` |
 | `Makefile.profiling check` | Ambiente real | Passou |
 | NCU wrapper com kernel CUDA mínimo compilado por nvcc | GPU real | Falhou com `ERR_NVGPUCTRPERM`; contadores bloqueados pelo host |
 | Nsight Systems | Inventário real | `nsys` ausente |
@@ -65,10 +67,12 @@ Arquivos editados nesta sessão: `Makefile`, `Makefile.profiling`, `README.md`, 
 | Receitas smoke/bench/sweep dos três runtimes | Dry-run + `bash -n`, antes da guarda Make3.81 | 9 receitas passaram em sintaxe; isso não comprova GPU |
 | `git diff --check` e `py_compile` dos módulos modificados | Estático | Passaram |
 | `make help` no macOS 3.81 após a guarda | Execução real | Recusou versão incompatível, como esperado |
-| Smoke vLLM | GPU real, configuração diagnóstica | Interrompido por mudança de escopo após 71,6s de startup; não é falha funcional nem sucesso; artefatos parciais `results/20260922T113337.215258Z` |
-| Smoke Ollama e sweeps mínimos | GPU real | Não concluídos no momento deste plano |
+| Smoke vLLM | GPU real, configuração diagnóstica | Passou: `results/20260922T152227.971684Z` |
+| Smoke Ollama | GPU real / modelo 7B | Passou: `results/20260922T152059.788856Z` |
+| Sweeps mínimos | GPU real | Um ponto de 1024 tokens passou nos três runtimes |
+| `bench-all` reduzido | GPU real | Status `vLLM=0 llama.cpp=0 Ollama=0` |
 
-O smoke vLLM interrompido usou:
+Registro histórico: antes da rodada final, um smoke vLLM foi interrompido durante o diagnóstico e usou:
 
 ```bash
 timeout --signal=TERM --kill-after=20 300 make smoke-vllm PREPARE_OFFLINE=1 BENCH_STARTUP_TIMEOUT=180 VLLM_EXTRA_ARGS='--enforce-eager --max-model-len 2048 --gpu-memory-utilization 0.80'
@@ -90,7 +94,7 @@ Não confundir falha do sandbox de testes localhost com defeito do projeto: a pr
 | Agregação | `bench-all`, `bench` | Mock controlado para comprovar continuação após falha e status final; evitar triplicar inferências já validadas |
 | Sweep | `kv-sweep`, `kv-sweep-vllm`, `kv-sweep-llama`, `kv-sweep-ollama`, `quick-sweep-vllm`, `quick-sweep-llama`, `quick-sweep-ollama` | Um ponto por runtime, `SWEEP_MAX_CONTEXT=1024`; aliases podem ser verificados por plano/mocks |
 | Conversão | `check-tools`, `clone-llama`, `build-llama`, `install-llama-python`, `download-source`, `inspect-source`, `quantize-q8` | Inspeção/dry-run e fixtures; sem clone/build/quantização completa para esta validação rápida |
-| Publicação/cópia | `upload-hf`, `pull-results` | Não publicar. Validar composição por mocks; SCP pode não funcionar neste gateway e precisa alternativa explícita |
+| Publicação/cópia | `upload-hf`, `pull-results` | Não publicar. `pull-results` foi validado estruturalmente; neste proxy RunPod a cópia real foi feita por `runpodctl send/receive` |
 | Documentação | `docs` | Regenerar com Python do benchmark; checar fontes e links |
 | Profiling | `Makefile.profiling`: `help`, `check`, `profile-vllm-nsys`, `profile-vllm-ncu`, `profile-llama-nsys`, `profile-llama-ncu` | Mocks reais das receitas para argv/pastas; GPU profiling condicionado a ferramentas/permissões do host |
 
@@ -150,9 +154,9 @@ make prepare-vllm MODEL_SIZE=7B PREPARE_OFFLINE=1 VLLM_PYTHON=/app/.vllm_venv/bi
 
 O hash de um GGUF de 8 GB ainda lê o SSD; isso é esperado e ocorre fora da medição. `PREPARE_OFFLINE=1` não cria um ambiente ausente. Se imports falharem, reparar só o venv do cliente; jamais instalar GuideLLM dentro do venv do vLLM. Se tokenizer/config não existirem, fazer preparação explícita antes de qualquer medição.
 
-### Fase 4. Smokes reais, um runtime por vez
+### Fase 4. Smokes reais, um runtime por vez — concluída
 
-Executar somente os pendentes, preservando resultados anteriores. Retomar primeiro o comando diagnóstico vLLM já registrado acima, com limite total de 300s; depois, se passar e couber no orçamento, validar o default separadamente. Para Ollama e eventual repetição llama, envolver os comandos abaixo em `timeout --signal=INT --kill-after=30 360` para limitar cada execução a 6 minutos com margem de cleanup. Ao receber timeout, registrar incompleto, inspecionar processos próprios e não repetir indefinidamente:
+Os três smokes finais foram executados no pod, com `PREPARE_OFFLINE=1`, e terminaram com exit 0. Os comandos abaixo permanecem como reprodução documentada; não são pendências desta sessão. O vLLM usou argumentos diagnósticos para caber na RTX 3090, conforme detalhado no [relatório da rodada](resultados-pod-20260922.md):
 
 ```bash
 make smoke-vllm MODEL_SIZE=7B PREPARE_OFFLINE=1 BENCH_STARTUP_TIMEOUT=300 VLLM_PYTHON=/app/.vllm_venv/bin/python
@@ -164,9 +168,9 @@ O smoke tem 3 requisições medidas, 1 repetição e cenário short, mais primei
 
 Aceite por runtime: exit 0, manifest e relatórios completos, resposta do alias correto, GPU efetivamente usada quando exigida, resultados sem erro silencioso e processo criado encerrado. Não tratar memória zero/ausente como medição válida. Em falha, salvar trecho final do log e causa, corrigir apenas a causa demonstrada e repetir só o teste afetado.
 
-### Fase 5. Sweeps de um ponto e ramo formal reduzido
+### Fase 5. Sweeps de um ponto e ramo formal reduzido — concluída
 
-Depois dos smokes:
+Os três quick sweeps e o `bench-all` reduzido foram executados depois dos smokes. Os comandos abaixo permanecem como reprodução documentada; os artefatos e métricas efetivamente coletados estão no [relatório da rodada](resultados-pod-20260922.md).
 
 ```bash
 make quick-sweep-vllm PREPARE_OFFLINE=1 SWEEP_MAX_CONTEXT=1024 BENCH_STARTUP_TIMEOUT=300
@@ -182,7 +186,7 @@ Se for necessário validar o ramo formal alterado de vLLM, em vez de rodar a bat
 make bench-vllm PREPARE_OFFLINE=1 BENCH_SCENARIOS=short BENCH_REQUESTS=1 BENCH_REPETITIONS=1 BENCH_WARMUP=1 SWEEP_MAX_CONTEXT=1024 SWEEP_REQUESTS=1 SWEEP_REPETITIONS=1 SWEEP_WARMUP=1 BENCH_STARTUP_TIMEOUT=300
 ```
 
-Esse comando ainda inicia a base e um sweep, portanto custa mais que um smoke. Não executar se mocks e smokes já responderem à hipótese em análise. Não usar `make bench` ou `make bench-all` com defaults.
+Esse comando ainda inicia a base e um sweep, portanto custa mais que um smoke. A sessão usou uma variante reduzida em `bench-all`, com `BENCH_WARMUP=0`, um request e uma repetição; não foram executados `make bench` ou `make bench-all` com defaults.
 
 ### Fase 6. Profiling: validar o que o ambiente permite
 
@@ -191,7 +195,7 @@ Esse comando ainda inicia a base e um sweep, portanto custa mais que um smoke. N
 - Manter regressões por mocks para os quatro alvos: resolver binário, backend, argumentos, pasta de saída e código de falha.
 - Somente após o host liberar contadores ou a ferramenta estar instalada, iniciar o alvo interativo, enviar uma requisição curta e encerrar graciosamente para finalizar o relatório. Não misturar profiling com latências oficiais.
 
-### Fase 7. Documentação e entrega
+### Fase 7. Documentação e entrega — concluída
 
 ```bash
 .venv/bin/python scripts/build_code_reference.py
@@ -199,7 +203,7 @@ Esse comando ainda inicia a base e um sweep, portanto custa mais que um smoke. N
 git diff --check
 ```
 
-Conferir `docs/make-fluxo.md`, README e diagnóstico. Regenerar HTMLs a partir dos fontes atualizados, reconciliando de volta ao checkout local sem sobrescrever fontes com versões antigas. Entregar matriz final separando: GPU real, integração mock, estático, não executado e bloqueado externamente. Incluir caminhos de resultados, comandos exatos e limitações.
+Conferir `docs/make-fluxo.md`, README e diagnóstico. Regenerar HTMLs a partir dos fontes atualizados, reconciliando de volta ao checkout local sem sobrescrever fontes com versões antigas. Essa etapa foi concluída: a matriz final, os caminhos de resultados, os comandos exatos e as limitações estão no [relatório da rodada](resultados-pod-20260922.md).
 
 ## 6. Timeouts, interrupção e limpeza
 

@@ -1,5 +1,7 @@
 # Diagnóstico dos Makefiles no RunPod
 
+> Estado atualizado em 22/09/2026: a validação GPU dos três runtimes foi concluída. Veja o [relatório completo da rodada](resultados-pod-20260922.md).
+
 O projeto executável fica em `/workspace/llm_local_inference_masters` no pod e em `chatbot-runtime-bench` neste workspace. O checkout remoto estava atrás das alterações locais; a sincronização preservou um backup remoto antes de aplicar os arquivos.
 
 ## Causas confirmadas
@@ -33,14 +35,17 @@ Os smokes executam três medições do cenário curto, além da primeira requisi
 | Fluxo | Nível | Resultado |
 |---|---|---|
 | `check-vllm-gguf` | Runtime real | Passou no Python do vLLM |
-| `smoke-llama` | GPU real, 7B | Passou: 3 aquecimentos + 3 medições, 28,7s; `results/20260922T113214.004425Z` |
-| `smoke-vllm`, `smoke-ollama` | GPU real | Execuções em andamento |
+| `smoke-llama` | GPU real, 7B | Passou; resultado final em `results/20260922T151943.141369Z` |
+| `smoke-vllm` | GPU real, 7B | Passou com configuração diagnóstica; `results/20260922T152227.971684Z` |
+| `smoke-ollama` | GPU real, 7B | Passou; `results/20260922T152059.788856Z` |
+| `quick-sweep-*` | GPU real, 7B | Um ponto de 1024 tokens passou nos três runtimes |
+| `bench-all` reduzido | GPU real, 7B | `vLLM=0 llama.cpp=0 Ollama=0` |
 | Preparador Ollama | Testes locais com daemon HTTP de teste | 3 testes passaram, incluindo preservação de daemon existente |
 | `Makefile.profiling check` | Ambiente real | Passou |
 | Wrapper NCU | Kernel CUDA mínimo real | Bloqueado por `ERR_NVGPUCTRPERM`: contadores GPU exigem configuração do host RunPod |
 | Nsight Systems | Inspeção real | `nsys` não instalado na imagem |
 | Make macOS 3.81 | Execução real | Rejeitado com instrução clara; não executa receitas incompatíveis |
 
-Dry-runs e mocks verificam a orquestração; não demonstram inferência ou profiling real. O erro NCU é uma restrição de permissão do host; mudar o Makefile ou executar como root dentro do pod não habilita esses contadores.
+Dry-runs e mocks verificam a orquestração; os resultados acima demonstram inferência real. O erro NCU é uma restrição de permissão do host; mudar o Makefile ou executar como root dentro do pod não habilita esses contadores.
 
 Não executar como smoke: `upload-hf` publica externamente; `quantize-q8`/`build-llama` e a bateria completa demandam preparação/carga longa. O modelo 14B não estava presente no SSD. Nenhum peso adicional foi baixado para validar esses caminhos.

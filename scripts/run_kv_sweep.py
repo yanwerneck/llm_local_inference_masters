@@ -6,7 +6,10 @@ import argparse
 import json
 import subprocess
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
+
+from results_layout import artifact, prepare, runtime_root
 
 
 def positive(value: str) -> int:
@@ -68,7 +71,10 @@ def main() -> int:
     args.launch_extra_args.extend(extra)
     config = json.loads(Path(args.config).read_text())
     root = Path(args.results)
-    root.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
+    sweep_output = runtime_root(root, args.runtime_label, stamp,
+                                f"sweep-contextos-{args.start}-{args.max_context}-tokens")
+    prepare(sweep_output)
     manifest = {"runtime": args.runtime_label, "step": args.step, "start": args.start,
                 "max_context": args.max_context, "mode": args.mode,
                 "conversation_turns": args.conversation_turns,
@@ -96,6 +102,7 @@ def main() -> int:
                        "--repetitions", str(args.repetitions), "--warmup", str(args.warmup),
                        "--mode", args.mode, "--conversation-turns", str(args.conversation_turns),
                        "--conversation-fixture", args.conversation_fixture,
+                       "--result-name", f"contexto-{context}-tokens",
                        "--collect-kv-metrics", "--startup-timeout", str(args.startup_timeout),
                        "--results", str(root)]
             if args.launch_executable:
@@ -106,7 +113,7 @@ def main() -> int:
                   f"mode={args.mode} turns={args.conversation_turns}", flush=True)
             completed = subprocess.run(command)
             manifest["points"].append({"input_tokens": context, "returncode": completed.returncode})
-            (root / "sweep-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+            artifact(sweep_output, "sweep-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
             if completed.returncode != 0:
                 print(f"[KV-SWEEP] falha em input_tokens={context}; consulte server.log. Não classificada automaticamente como OOM.")
                 return completed.returncode

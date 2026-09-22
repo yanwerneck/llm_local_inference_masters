@@ -6,6 +6,8 @@ O lançamento é opt-in e usa argv sem shell. Só o processo criado é encerrado
 import json
 import os
 from pathlib import Path
+
+from results_layout import artifact, href
 import signal
 import socket
 import subprocess
@@ -49,7 +51,7 @@ class Launch:
         else:
             connection.close()
             raise ValueError("A porta já está em uso. Pare o seu servidor manualmente antes de usar --launch.")
-        self.log = (self.output / "server.log").open("w", encoding="utf-8")
+        self.log = artifact(self.output, "server.log").open("w", encoding="utf-8")
         self.started = time.perf_counter()
         try:
             self.process = subprocess.Popen(self.argv, stdout=self.log, stderr=subprocess.STDOUT,
@@ -120,7 +122,7 @@ def wait_models(cfg, secret, timeout, launch=None):
                       f"PID={launch.process.pid if launch else 'externo'} decorrido={elapsed:.1f}s "
                       f"limite={timeout}s; verificando GET {cfg['base_url']}/v1/models "
                       f"para modelo={cfg['model']!r}; última observação: {last}. "
-                      f"Log do servidor: {launch.output / 'server.log' if launch else 'externo'}", flush=True)
+                      f"Log do servidor: {artifact(launch.output, 'server.log') if launch else 'externo'}", flush=True)
                 next_update = time.perf_counter() + 15
             time.sleep(min(.5, max(0, timeout - elapsed)))
 
@@ -225,7 +227,7 @@ def timed_request(cfg, secret, timeout, prompt, output, process_origin=None):
 def lifecycle_report(output, lifecycle):
     import html
     output = Path(output)
-    (output / "lifecycle.json").write_text(json.dumps(lifecycle, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    artifact(output, "lifecycle.json").write_text(json.dumps(lifecycle, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     rows = []
     readiness = lifecycle.get("readiness", {})
     rows.append(("Processo → API observada (s)", readiness.get("process_to_api_observed_s")))
@@ -236,5 +238,5 @@ def lifecycle_report(output, lifecycle):
                 continue
             rows.append((phase + " · " + metric, req.get(metric)))
     table = "".join(f"<tr><th>{html.escape(label)}</th><td>{html.escape(str(value)) if value is not None else 'Não medido'}</td></tr>" for label, value in rows)
-    page = f'''<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Ciclo de vida</title><style>body{{font:17px/1.7 system-ui;background:#f6f3ec;color:#193835;margin:25px}}td,th{{padding:12px;border-bottom:1px solid #ccd6cc;text-align:left}}table{{width:100%;overflow-wrap:anywhere}}a{{color:#136d58}}</style><h1>Inicialização e primeira resposta</h1><p>Modo: {html.escape(lifecycle['mode'])}. Status: {html.escape(lifecycle['status'])}.</p><p>API disponível não implica modelo na GPU. O primeiro POST é cronometrado, sem teste de geração anterior. Processo novo não implica caches de disco/CUDA frios. A referência final repete o prompt e pode aproveitar prefix caching.</p><table>{table}</table><p><a href="summary.html">Aquecimento e blocos GuideLLM</a> · <a href="lifecycle.json">Dados do ciclo de vida</a></p></html>'''
-    (output / "lifecycle.html").write_text(page, encoding="utf-8")
+    page = f'''<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Ciclo de vida</title><style>body{{font:17px/1.7 system-ui;background:#f6f3ec;color:#193835;margin:25px}}td,th{{padding:12px;border-bottom:1px solid #ccd6cc;text-align:left}}table{{width:100%;overflow-wrap:anywhere}}a{{color:#136d58}}</style><h1>Inicialização e primeira resposta</h1><p>Modo: {html.escape(lifecycle['mode'])}. Status: {html.escape(lifecycle['status'])}.</p><p>API disponível não implica modelo na GPU. O primeiro POST é cronometrado, sem teste de geração anterior. Processo novo não implica caches de disco/CUDA frios. A referência final repete o prompt e pode aproveitar prefix caching.</p><table>{table}</table><p><a href="{href('summary.html')}">Aquecimento e blocos GuideLLM</a> · <a href="{href('lifecycle.json')}">Dados do ciclo de vida</a></p></html>'''
+    artifact(output, "lifecycle.html").write_text(page, encoding="utf-8")

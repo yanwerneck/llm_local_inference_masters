@@ -105,7 +105,7 @@ def main():
                 print(proc.stdout)
                 print(proc.stderr)
                 raise AssertionError(f"Exit code {proc.returncode}")
-            result = next((folder / "results").glob("*/summary.json"))
+            result = next((folder / "results").glob("**/json/summary.json"))
             rows = json.loads(result.read_text())
             summary = next(row for row in rows if row["phase"] == "measure")
             assert next(row for row in rows if row["phase"] == "warmup")["successful_request_count"] == 1
@@ -116,7 +116,11 @@ def main():
             assert summary["effective_output_tokens_per_second_p50"] > 0, summary
             assert (result.parent / "context-summary.json").exists()
             assert (result.parent / "gpu-summary.json").exists()
-            kv = (result.parent / "kv-cache.csv").read_text()
+            csv_dir = result.parents[1] / "csv"
+            html_dir = result.parents[1] / "html"
+            assert (html_dir / "telemetry-memory.svg").exists()
+            assert (html_dir / "telemetry-gpu-util.svg").exists()
+            kv = (csv_dir / "kv-cache.csv").read_text()
             assert "vllm:kv_cache_usage_perc" in kv, kv
             assert "vllm:gpu_cache_usage_perc" not in kv, kv
             assert state["maximum"] == 1, state
@@ -129,7 +133,7 @@ def main():
             assert lifecycle["mode"] == "existing-server-state-unknown"
             assert json.loads((result.parent / "manifest.json").read_text())["status"] == "complete"
             print("PASS: primeira resposta + 1 warmup + 3 medidas + referência final; concorrência máxima = 1.", flush=True)
-            assert (result.parent / "r1-short-measure-requests.csv").exists()
+            assert (csv_dir / "r1-short-measure-requests.csv").exists()
             for mode in ("failure", "missing_usage"):
                 state.update(mode=mode, bodies=[])
                 proc = subprocess.run([sys.executable, str(ROOT / "bench.py"), "run", "--config", str(folder / "config.json"),
@@ -138,14 +142,14 @@ def main():
                                       capture_output=True, text=True, timeout=180)
                 if mode == "missing_usage":
                     assert proc.returncode == 0, (mode, proc.stdout, proc.stderr)
-                    result = next((folder / mode).glob("*/summary.json"))
+                    result = next((folder / mode).glob("**/json/summary.json"))
                     rows = json.loads(result.read_text())
                     measure = next(row for row in rows if row["phase"] == "measure")
                     assert measure["decode_tokens_per_second_sample_count"] == 0, measure
                     assert measure["end_to_end_tokens_per_second_p50"] is None, measure
                 else:
                     assert proc.returncode != 0, (mode, proc.stdout)
-                manifest = next((folder / mode).glob("*/manifest.json"))
+                manifest = next((folder / mode).glob("**/json/manifest.json"))
                 expected_status = "complete" if mode == "missing_usage" else "failed"
                 assert json.loads(manifest.read_text())["status"] == expected_status
                 if mode == "failure":
@@ -170,7 +174,7 @@ def main():
                                    "--launch", str(folder / "launch.json"), "--smoke", "--input-tokens", "256", "--warmup", "1",
                                    "--results", str(folder / "startup")], capture_output=True, text=True, timeout=180)
             assert proc.returncode == 0, proc.stdout + proc.stderr
-            lifecycle_path = next((folder / "startup").glob("*/lifecycle.json"))
+            lifecycle_path = next((folder / "startup").glob("**/json/lifecycle.json"))
             lifecycle = json.loads(lifecycle_path.read_text())
             assert lifecycle["status"] == "complete"
             assert lifecycle["mode"] == "new-process"
