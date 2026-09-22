@@ -16,7 +16,7 @@
 </ul>
 </li>
 <li><a href="#exemplos-de-execucao-controlada">Exemplos de execução controlada</a><ul>
-<li><a href="#como-funciona-o-modo-independent">Como funciona o modo independent</a></li>
+<li><a href="#como-funciona-o-modo-replay">Como funciona o modo replay</a></li>
 </ul>
 </li>
 <li><a href="#o-que-acontece-em-uma-execucao">O que acontece em uma execução</a><ul>
@@ -125,13 +125,23 @@ bench-&lt;runtime&gt;
 </tr>
 <tr>
 <td><code>BENCH_MODE</code></td>
-<td style="text-align: right;"><code>independent</code></td>
-<td>uma mensagem de usuário, sem histórico acumulado</td>
+<td style="text-align: right;"><code>replay</code></td>
+<td>histórico determinístico com respostas fixas da fixture</td>
 </tr>
 <tr>
 <td><code>CONVERSATION_TURNS</code></td>
 <td style="text-align: right;"><code>1</code></td>
 <td>só tem efeito quando o modo conversacional é usado</td>
+</tr>
+<tr>
+<td><code>CONVERSATION_FIXTURE</code></td>
+<td style="text-align: right;"><code>qwen_chat_bench_v2.json</code></td>
+<td>50 perguntas técnicas variadas para a medição</td>
+</tr>
+<tr>
+<td><code>WARMUP_CONVERSATION_FIXTURE</code></td>
+<td style="text-align: right;"><code>qwen_chat_warmup_v1.json</code></td>
+<td>perguntas separadas, usadas somente no warmup</td>
 </tr>
 <tr>
 <td><code>BENCH_STARTUP_TIMEOUT</code></td>
@@ -195,14 +205,14 @@ bench-&lt;runtime&gt;
 </code></pre>
 <p>É por isso que o <code>bench-&lt;runtime&gt;</code> formal é longo: ele combina a bateria base com um sweep que reinicia e carrega o servidor em cada ponto. <code>bench-all</code> executa isso uma vez em cada runtime.</p>
 <h2 id="exemplo-pratico-do-corpo-http">Exemplo prático do corpo HTTP</h2>
-<p>No padrão <code>independent</code>, uma requisição enviada pelo cliente se parece com:</p>
+<p>No padrão <code>replay</code>, uma requisição enviada pelo cliente se parece com:</p>
 <pre><code class="language-json">{
   &quot;model&quot;: &quot;qwen7b-q8-gguf&quot;,
   &quot;messages&quot;: [
-    {
-      &quot;role&quot;: &quot;user&quot;,
-      &quot;content&quot;: &quot;Explique de forma objetiva este conceito para um estudante de estatística. ...&quot;
-    }
+    {&quot;role&quot;: &quot;system&quot;, &quot;content&quot;: &quot;Voce e um assistente tecnico conciso...&quot;},
+    {&quot;role&quot;: &quot;user&quot;, &quot;content&quot;: &quot;Explique a diferenca entre RAM do sistema e VRAM...&quot;},
+    {&quot;role&quot;: &quot;assistant&quot;, &quot;content&quot;: &quot;RAM atende o sistema e a movimentacao de dados...&quot;},
+    {&quot;role&quot;: &quot;user&quot;, &quot;content&quot;: &quot;Por que um modelo quantizado ainda pode usar KV-cache em FP16?&quot;}
   ],
   &quot;temperature&quot;: 0,
   &quot;top_p&quot;: 1,
@@ -211,8 +221,8 @@ bench-&lt;runtime&gt;
   &quot;stream_options&quot;: {&quot;include_usage&quot;: true}
 }
 </code></pre>
-<p>O <code>...</code> não é uma elipse enviada: é a mesma frase-base repetida e cortada pelo tokenizer no alvo de <code>short</code>, <code>medium</code> ou <code>long</code>. O <code>system</code>/<code>assistant</code> não aparece no modo <code>independent</code>. Depois que a resposta chega, ela não é inserida na próxima requisição.</p>
-<p>Para usar <code>replay</code>, o mesmo corpo passa a carregar o histórico do fixture:</p>
+<p>As 50 requisições de cada bloco percorrem os 50 turnos da fixture. A primeira carrega a primeira pergunta; a última carrega o histórico completo até a pergunta 50. As respostas <code>assistant</code> são fixas e determinísticas; a resposta nova do runtime não é inserida na próxima requisição.</p>
+<p>O warmup usa um corpo parecido, mas vem de <code>qwen_chat_warmup_v1.json</code>, com system e perguntas diferentes. Ele é marcado como <code>phase=warmup</code> e não entra nos percentis.</p>
 <pre><code class="language-json">{
   &quot;messages&quot;: [
     {&quot;role&quot;: &quot;system&quot;, &quot;content&quot;: &quot;Voce e um assistente tecnico conciso...&quot;},
@@ -271,14 +281,16 @@ ponto 3072 → prompt sintético de ~3072 tokens → servidor reinicia
   BENCH_SCENARIOS=short BENCH_REQUESTS=10 BENCH_REPETITIONS=3 BENCH_WARMUP=3
 </code></pre>
 <p>Esses overrides mudam o experimento e precisam ficar registrados no <code>manifest.json</code>; não compare o resultado reduzido com a bateria formal sem declarar a diferença.</p>
-<h3 id="como-funciona-o-modo-independent">Como funciona o modo <code>independent</code></h3>
-<p><code>independent</code> é o modo padrão da bateria base. Cada requisição contém somente uma mensagem do usuário, sem <code>system</code>/<code>assistant</code> acumulados de requisições anteriores:</p>
-<pre><code class="language-text">requisição 1: [user: prompt short]
-requisição 2: [user: prompt short]
-requisição 3: [user: prompt short]
+<h3 id="como-funciona-o-modo-replay">Como funciona o modo <code>replay</code></h3>
+<p><code>replay</code> é o modo padrão da bateria base. Cada requisição começa uma conversa determinística nova, mas seleciona um turno diferente da fixture:</p>
+<pre><code class="language-text">requisição 1: [system, user 1]
+requisição 2: [system, user 1, assistant 1, user 2]
+requisição 3: [system, user 1, assistant 1, user 2, assistant 2, user 3]
+...
+requisição 50: histórico até user 50
 </code></pre>
-<p>O cliente não coloca a resposta da requisição 1 na requisição 2 e não envia um histórico conversacional. Para cada cenário, o prompt sintético é construído uma vez a partir da frase-base e reutilizado nas requisições daquele bloco; isso mantém a carga textual controlada. <code>short</code>, <code>medium</code> e <code>long</code> usam tamanhos de entrada diferentes.</p>
-<p>Isso é independência <strong>da conversa</strong>, não garantia de estado frio. O servidor continua vivo durante warmup e measure e pode manter pesos na GPU, caches de prefixo, alocadores e estruturas internas. Assim, <code>independent</code> responde “quanto custa servir mensagens isoladas em um processo aquecido?”, não “quanto custa iniciar um runtime frio a cada requisição?”. Para cold starts, o processo precisa ser reiniciado entre execuções, como no sweep ou em chamadas separadas com <code>--launch</code>.</p>
+<p>O cliente não coloca a resposta produzida pelo runtime na requisição seguinte: usa somente o <code>assistant</code> fixo da fixture. Isso mantém a carga textual controlada e reproduzível, mas permite observar históricos crescentes. <code>independent</code> continua disponível para medir mensagens isoladas; não é o padrão.</p>
+<p>Isso é independência <strong>da conversa</strong>, não garantia de estado frio. O servidor continua vivo durante warmup e measure e pode manter pesos na GPU, caches de prefixo, alocadores e estruturas internas. Assim, <code>replay</code> responde “quanto custa servir históricos controlados em um processo aquecido?”, não “quanto custa iniciar um runtime frio a cada requisição?”. Para cold starts, o processo precisa ser reiniciado entre execuções, como no sweep ou em chamadas separadas com <code>--launch</code>.</p>
 <p>No <code>independent</code>, a resposta nunca altera a próxima entrada. No <code>replay</code>, o fixture fornece o histórico e respostas <code>assistant</code> fixas; no <code>closed-loop</code>, as respostas reais entram no turno seguinte. Essa é a diferença operacional entre os três modos.</p>
 <h2 id="o-que-acontece-em-uma-execucao">O que acontece em uma execução</h2>
 <h3 id="1-preparacao-fora-do-relogio">1. Preparação — fora do relógio</h3>
@@ -299,14 +311,14 @@ requisição 3: [user: prompt short]
 </ul>
 <p>Essa é uma <strong>sonda de primeira resposta</strong>, registrada em <code>first-request.json</code> e no lifecycle. Ela não é misturada ao p50 da fase <code>measure</code>.</p>
 <h3 id="4-warmup">4. Warmup</h3>
-<p>O warmup envia requisições reais antes da medição formal. Elas podem aquecer compilação, buffers, alocadores, HTTP/SSE, tokenizer, prefixos e estruturas KV. Por padrão são três por cenário e repetição.</p>
+<p>O warmup envia requisições reais antes da medição formal, usando <code>WARMUP_CONVERSATION_FIXTURE</code>, uma fixture separada da medição. Elas podem aquecer compilação, buffers, alocadores, HTTP/SSE, tokenizer, prefixos e estruturas KV. Por padrão são três por cenário e repetição.</p>
 <p>Warmup não é TTFT:</p>
 <pre><code class="language-text">TTFT  = uma métrica: POST → primeiro conteúdo daquela requisição
 warmup = uma fase: requisições usadas para preparar o estado do processo
 </code></pre>
 <p>O warmup não limpa caches, não prova estabilidade e não entra na fase <code>measure</code>. Seus dados ficam registrados como <code>phase=warmup</code> para investigar tendência. Com <code>BENCH_WARMUP=0</code>, a execução fica mais barata, mas mais dependente do estado inicial.</p>
 <h3 id="5-medicao-oficial">5. Medição oficial</h3>
-<p>Na fase <code>measure</code>, o cliente envia uma requisição por vez. Para cada resposta bem-sucedida calcula TTFT, intervalo entre tokens, tokens/s de decode, tokens/s efetivos e latência total. A bateria formal padrão usa 50 requisições, três repetições e três warmups por cenário.</p>
+<p>Na fase <code>measure</code>, o cliente envia uma requisição por vez. Para cada resposta bem-sucedida calcula TTFT, intervalo entre tokens, tokens/s de decode, tokens/s efetivos e latência total. A bateria formal padrão usa 50 perguntas variadas em <code>replay</code>, uma repetição e três warmups com fixture separada por cenário.</p>
 <p><code>short</code>, <code>medium</code> e <code>long</code> representam aproximadamente 256, 2048 e 8192 tokens de entrada, com teto de 128 tokens de saída. O servidor informa os comprimentos reais; esses valores devem ser conferidos antes da comparação.</p>
 <h3 id="6-referencia-final-e-cleanup">6. Referência final e cleanup</h3>
 <p>O prompt inicial é repetido no final como referência aquecida. Depois, o launcher encerra somente o processo criado pelo benchmark e fecha os coletores. A referência ajuda a comparar o primeiro acesso com um estado posterior, mas pode aproveitar cache de prefixo; não isola sozinha um único custo.</p>

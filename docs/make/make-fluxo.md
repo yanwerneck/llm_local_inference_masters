@@ -88,9 +88,9 @@ Cada alvo individual:
 8. encerra somente o grupo de processos criado;
 9. executa o sweep de contexto/KV.
 
-São 50 requisições por cenário, 1 repetição e 3 aquecimentos. O perfil é síncrono, portanto não é um benchmark de concorrência.
+São 50 requisições por cenário, 1 repetição e 3 aquecimentos. A bateria base usa `BENCH_MODE=replay`: as 50 requisições percorrem as 50 perguntas de `qwen_chat_bench_v2.json`, com histórico e respostas `assistant` fixos. Os três warmups usam `qwen_chat_warmup_v1.json`, que não é reutilizado na medição. O perfil é síncrono, portanto não é um benchmark de concorrência.
 
-Por padrão, `BENCH_MODE=independent` mantém uma requisição isolada por amostra, sem histórico conversacional. Para medir crescimento de histórico, use `BENCH_MODE=closed-loop` ou `BENCH_MODE=replay` com `CONVERSATION_TURNS` e `CONVERSATION_FIXTURE`. O fixture padrão é `workloads/conversations/qwen_chat_v1.json`; ele contém `system` e uma lista de `turns` com `user`. No modo `closed-loop`, a resposta real de cada turno entra no histórico seguinte. No modo `replay`, entram as respostas `assistant` fixas do fixture, por isso todos os turnos usados precisam desse campo. Os blocos conversacionais gravam `*-turns.json` e `*-conversation.json` além dos brutos e CSVs.
+Por padrão, `BENCH_MODE=replay` percorre `workloads/conversations/qwen_chat_bench_v2.json`, com 50 perguntas e respostas `assistant` fixas. Cada request seleciona um turno distinto e envia o histórico até ele. O warmup usa `qwen_chat_warmup_v1.json`, separado da medição. `closed-loop` continua disponível para colocar respostas reais no histórico; `independent` deve ser solicitado explicitamente quando a intenção for medir mensagens isoladas. Os blocos conversacionais gravam `*-turns.json` e `*-conversation.json` além dos brutos e CSVs.
 
 A espera de startup não aceita apenas um HTTP 200: o alias configurado precisa aparecer em `GET /v1/models`. Enquanto aguarda, o log periódico identifica o endpoint consultado, o modelo esperado e a última observação ou erro. Isso torna distinguível uma API inacessível de um servidor vivo que expõe o alias errado.
 

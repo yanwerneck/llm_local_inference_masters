@@ -252,7 +252,7 @@ Durante uma inicialização demorada, o progresso informa o endpoint `GET /v1/mo
 
 ## O que o benchmark mede
 
-Por runtime e cenário, são executadas 50 requisições de medição, 1 repetição e 3 aquecimentos. A execução é síncrona: uma requisição ativa por vez. A repetição única é deliberada nesta rodada; percentis descrevem a distribuição das requisições, não a variância entre réplicas independentes.
+Por runtime e cenário, são executadas 50 requisições de medição, 1 repetição e 3 aquecimentos. A bateria base usa `replay`: as 50 chamadas percorrem 50 perguntas técnicas distintas da fixture versionada, com histórico determinístico. O warmup usa outra fixture e nunca reutiliza os prompts medidos. A execução é síncrona: uma requisição ativa por vez.
 
 | Cenário | Entrada aproximada | Saída máxima |
 |---|---:|---:|
@@ -303,11 +303,11 @@ HF_GGUF_REPO / HF_GGUF_FILENAME
 HF_TOKENIZER_MODEL
 VLLM_EXTRA_ARGS / LLAMA_EXTRA_ARGS / OLLAMA_EXTRA_ARGS
 BENCH_REQUESTS / BENCH_REPETITIONS / BENCH_WARMUP
-BENCH_MODE=independent|closed-loop|replay
-CONVERSATION_TURNS / CONVERSATION_FIXTURE
+BENCH_MODE=replay|closed-loop|independent
+CONVERSATION_TURNS / CONVERSATION_FIXTURE / WARMUP_CONVERSATION_FIXTURE
 ```
 
-`independent` preserva a carga histórica de uma requisição isolada por cenário. `closed-loop` usa o fixture em `CONVERSATION_FIXTURE`, envia o histórico completo a cada turno e acrescenta ao próximo turno a resposta real gerada pelo runtime. `replay` também envia o histórico completo, mas acrescenta as respostas `assistant` fixas do fixture. O fixture é JSON com `system` textual e `turns`; cada turno tem `user`, e os turnos usados em `replay` também precisam de `assistant`.
+`replay` é o padrão da bateria base: envia histórico determinístico e respostas `assistant` fixas, percorrendo os turnos da fixture em vez de repetir sempre a primeira pergunta. `closed-loop` usa o histórico, mas coloca a resposta real do runtime no turno seguinte. `independent` envia uma mensagem isolada e fica disponível apenas para comparações explicitamente solicitadas. A medição usa `CONVERSATION_FIXTURE` (`qwen_chat_bench_v2.json`, 50 turnos); o warmup usa `WARMUP_CONVERSATION_FIXTURE` (`qwen_chat_warmup_v1.json`), que é deliberadamente diferente. Ambos são JSON com `system` e `turns`; replay exige `assistant` fixo nos turnos usados.
 
 ## Telemetria e resultados
 

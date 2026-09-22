@@ -63,9 +63,10 @@ def main() -> int:
     parser.add_argument("--requests", type=positive, default=50)
     parser.add_argument("--repetitions", type=positive, default=1)
     parser.add_argument("--warmup", type=nonnegative, default=3)
-    parser.add_argument("--mode", choices=["independent", "closed-loop", "replay"], default="independent")
+    parser.add_argument("--mode", choices=["independent", "closed-loop", "replay"], default="replay")
     parser.add_argument("--conversation-turns", type=positive, default=1)
-    parser.add_argument("--conversation-fixture", default="workloads/conversations/qwen_chat_v1.json")
+    parser.add_argument("--conversation-fixture", default="workloads/conversations/qwen_chat_bench_v2.json")
+    parser.add_argument("--warmup-conversation-fixture", default="workloads/conversations/qwen_chat_warmup_v1.json")
     parser.add_argument("--startup-timeout", type=positive, default=1800)
     parser.add_argument("--results", default="results/kv-sweep")
     parser.add_argument("--runtime-label", default="runtime")
@@ -117,6 +118,7 @@ def main() -> int:
                        "--repetitions", str(args.repetitions), "--warmup", str(args.warmup),
                        "--mode", args.mode, "--conversation-turns", str(args.conversation_turns),
                        "--conversation-fixture", args.conversation_fixture,
+                       "--warmup-conversation-fixture", args.warmup_conversation_fixture,
                        "--result-name", f"contexto-{context}-tokens-step-{args.memory_step_mb}MB",
                        "--collect-kv-metrics", "--startup-timeout", str(args.startup_timeout),
                        "--results", str(root)]

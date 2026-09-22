@@ -92,9 +92,10 @@ BENCH_SCENARIOS ?= short medium long
 BENCH_REQUESTS ?= 50
 BENCH_REPETITIONS ?= 1
 BENCH_WARMUP ?= 3
-BENCH_MODE ?= independent
+BENCH_MODE ?= replay
 CONVERSATION_TURNS ?= 1
-CONVERSATION_FIXTURE ?= workloads/conversations/qwen_chat_v1.json
+CONVERSATION_FIXTURE ?= workloads/conversations/qwen_chat_bench_v2.json
+WARMUP_CONVERSATION_FIXTURE ?= workloads/conversations/qwen_chat_warmup_v1.json
 BENCH_STARTUP_TIMEOUT ?= 1800
 # Reutiliza dependências e pesos já preparados, sem pip/downloads.
 PREPARE_OFFLINE ?= 0
@@ -161,7 +162,7 @@ help:
 		'  PREPARE_OFFLINE=1 reutiliza cliente/modelos locais; BENCH_STARTUP_TIMEOUT limita startup' \
 		'  VLLM_EXTRA_ARGS, LLAMA_EXTRA_ARGS, OLLAMA_EXTRA_ARGS (sintaxe shell, convertida com shlex)' \
 		'  VLLM_PYTHON, LLAMA_BACKEND_PATH, REQUIRE_GPU=1|0' \
-		'  BENCH_MODE=independent|closed-loop|replay, CONVERSATION_TURNS, CONVERSATION_FIXTURE' \
+		'  BENCH_MODE=replay|closed-loop|independent, CONVERSATION_TURNS, CONVERSATION_FIXTURE, WARMUP_CONVERSATION_FIXTURE' \
 		'  SWEEP_START, SWEEP_MEMORY_STEP_MB, SWEEP_MAX_CONTEXT, SWEEP_REQUESTS, SWEEP_REPETITIONS, SWEEP_WARMUP, SWEEP_MODE, SWEEP_CONVERSATION_TURNS, SWEEP_CONVERSATION_FIXTURE' \
 		'  LLAMA_CPP_DIR, HF_MODEL_DIR, GGUF_OUTPUT_DIR, QUANTIZE_THREADS' \
 		'  VLLM_MODEL_DIR, VLLM_CONFIG, VLLM_LAUNCH' \
@@ -375,7 +376,7 @@ bench-vllm: prepare-vllm
 		--repetitions "$(BENCH_REPETITIONS)" \
 		--warmup "$(BENCH_WARMUP)" \
 		--mode "$(BENCH_MODE)" --conversation-turns "$(CONVERSATION_TURNS)" \
-		--conversation-fixture "$(CONVERSATION_FIXTURE)" \
+		--conversation-fixture "$(CONVERSATION_FIXTURE)" --warmup-conversation-fixture "$(WARMUP_CONVERSATION_FIXTURE)" \
 		--collect-kv-metrics \
 		--startup-timeout "$(BENCH_STARTUP_TIMEOUT)"
 	@echo '[BENCH vLLM] bateria base concluída; iniciando sweep KV em passos de $(SWEEP_MEMORY_STEP_MB) MB'
@@ -389,7 +390,7 @@ bench-vllm: prepare-vllm
 		--kv-bytes-per-token "$(KV_BYTES_PER_TOKEN)" \
 		--requests "$(SWEEP_REQUESTS)" --repetitions "$(SWEEP_REPETITIONS)" \
 		--warmup "$(SWEEP_WARMUP)" --mode "$(SWEEP_MODE)" --conversation-turns "$(SWEEP_CONVERSATION_TURNS)" \
-		--conversation-fixture "$(SWEEP_CONVERSATION_FIXTURE)" \
+		--conversation-fixture "$(SWEEP_CONVERSATION_FIXTURE)" --warmup-conversation-fixture "$(WARMUP_CONVERSATION_FIXTURE)" \
 		--startup-timeout "$(BENCH_STARTUP_TIMEOUT)" \
 		--results results
 
@@ -404,7 +405,7 @@ bench-llama: prepare-llama
 		--scenarios $(BENCH_SCENARIOS) --requests "$(BENCH_REQUESTS)" \
 		--repetitions "$(BENCH_REPETITIONS)" --warmup "$(BENCH_WARMUP)" \
 		--mode "$(BENCH_MODE)" --conversation-turns "$(CONVERSATION_TURNS)" \
-		--conversation-fixture "$(CONVERSATION_FIXTURE)" \
+		--conversation-fixture "$(CONVERSATION_FIXTURE)" --warmup-conversation-fixture "$(WARMUP_CONVERSATION_FIXTURE)" \
 		--collect-kv-metrics --startup-timeout "$(BENCH_STARTUP_TIMEOUT)"
 	@echo '[BENCH llama.cpp] bateria base concluída; iniciando sweep KV em passos de $(SWEEP_MEMORY_STEP_MB) MB'
 	backend='$(LLAMA_BACKEND_PATH)'; if test -n "$$backend"; then export GGML_BACKEND_PATH="$$backend"; export LD_LIBRARY_PATH="$$(dirname "$$backend"):$${LD_LIBRARY_PATH:-}"; fi
@@ -419,7 +420,7 @@ bench-llama: prepare-llama
 		--kv-bytes-per-token "$(KV_BYTES_PER_TOKEN)" \
 		--requests "$(SWEEP_REQUESTS)" --repetitions "$(SWEEP_REPETITIONS)" \
 		--warmup "$(SWEEP_WARMUP)" --mode "$(SWEEP_MODE)" --conversation-turns "$(SWEEP_CONVERSATION_TURNS)" \
-		--conversation-fixture "$(SWEEP_CONVERSATION_FIXTURE)" \
+		--conversation-fixture "$(SWEEP_CONVERSATION_FIXTURE)" --warmup-conversation-fixture "$(WARMUP_CONVERSATION_FIXTURE)" \
 		--startup-timeout "$(BENCH_STARTUP_TIMEOUT)" \
 		--results results
 
@@ -434,7 +435,7 @@ bench-ollama: prepare-ollama
 		--scenarios $(BENCH_SCENARIOS) --requests "$(BENCH_REQUESTS)" \
 		--repetitions "$(BENCH_REPETITIONS)" --warmup "$(BENCH_WARMUP)" \
 		--mode "$(BENCH_MODE)" --conversation-turns "$(CONVERSATION_TURNS)" \
-		--conversation-fixture "$(CONVERSATION_FIXTURE)" \
+		--conversation-fixture "$(CONVERSATION_FIXTURE)" --warmup-conversation-fixture "$(WARMUP_CONVERSATION_FIXTURE)" \
 		--collect-kv-metrics --startup-timeout "$(BENCH_STARTUP_TIMEOUT)"
 	@echo '[BENCH Ollama] bateria base concluída; iniciando sweep KV em passos de $(SWEEP_MEMORY_STEP_MB) MB'
 	HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_HUB_ENABLE_HF_TRANSFER=0 \
@@ -448,7 +449,7 @@ bench-ollama: prepare-ollama
 		--kv-bytes-per-token "$(KV_BYTES_PER_TOKEN)" \
 		--requests "$(SWEEP_REQUESTS)" --repetitions "$(SWEEP_REPETITIONS)" \
 		--warmup "$(SWEEP_WARMUP)" --mode "$(SWEEP_MODE)" --conversation-turns "$(SWEEP_CONVERSATION_TURNS)" \
-		--conversation-fixture "$(SWEEP_CONVERSATION_FIXTURE)" \
+		--conversation-fixture "$(SWEEP_CONVERSATION_FIXTURE)" --warmup-conversation-fixture "$(WARMUP_CONVERSATION_FIXTURE)" \
 		--startup-timeout "$(BENCH_STARTUP_TIMEOUT)" \
 		--results results
 
@@ -478,7 +479,7 @@ kv-sweep-vllm: prepare-vllm
 		--kv-bytes-per-token "$(KV_BYTES_PER_TOKEN)" \
 		--requests "$(SWEEP_REQUESTS)" --repetitions "$(SWEEP_REPETITIONS)" \
 		--warmup "$(SWEEP_WARMUP)" --mode "$(SWEEP_MODE)" --conversation-turns "$(SWEEP_CONVERSATION_TURNS)" \
-		--conversation-fixture "$(SWEEP_CONVERSATION_FIXTURE)" \
+		--conversation-fixture "$(SWEEP_CONVERSATION_FIXTURE)" --warmup-conversation-fixture "$(WARMUP_CONVERSATION_FIXTURE)" \
 		--startup-timeout "$(BENCH_STARTUP_TIMEOUT)" --results results
 
 kv-sweep-llama: prepare-llama
@@ -491,7 +492,7 @@ kv-sweep-llama: prepare-llama
 		--kv-bytes-per-token "$(KV_BYTES_PER_TOKEN)" \
 		--requests "$(SWEEP_REQUESTS)" --repetitions "$(SWEEP_REPETITIONS)" \
 		--warmup "$(SWEEP_WARMUP)" --mode "$(SWEEP_MODE)" --conversation-turns "$(SWEEP_CONVERSATION_TURNS)" \
-		--conversation-fixture "$(SWEEP_CONVERSATION_FIXTURE)" \
+		--conversation-fixture "$(SWEEP_CONVERSATION_FIXTURE)" --warmup-conversation-fixture "$(WARMUP_CONVERSATION_FIXTURE)" \
 		--startup-timeout "$(BENCH_STARTUP_TIMEOUT)" --results results
 
 kv-sweep-ollama: prepare-ollama
@@ -503,7 +504,7 @@ kv-sweep-ollama: prepare-ollama
 		--kv-bytes-per-token "$(KV_BYTES_PER_TOKEN)" \
 		--requests "$(SWEEP_REQUESTS)" --repetitions "$(SWEEP_REPETITIONS)" \
 		--warmup "$(SWEEP_WARMUP)" --mode "$(SWEEP_MODE)" --conversation-turns "$(SWEEP_CONVERSATION_TURNS)" \
-		--conversation-fixture "$(SWEEP_CONVERSATION_FIXTURE)" \
+		--conversation-fixture "$(SWEEP_CONVERSATION_FIXTURE)" --warmup-conversation-fixture "$(WARMUP_CONVERSATION_FIXTURE)" \
 		--startup-timeout "$(BENCH_STARTUP_TIMEOUT)" --results results
 
 quick-sweep-vllm: SWEEP_REQUESTS=1

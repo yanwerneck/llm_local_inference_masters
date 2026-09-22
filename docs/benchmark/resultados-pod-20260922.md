@@ -2,7 +2,7 @@
 
 ## Escopo
 
-Rodada de integração no RunPod `m87zg5huybxfa7`, com uma RTX 3090 de 24 GB, usando o GGUF local `Qwen2.5-7B-Instruct-Q8_0.gguf`, tokenizer local e modo `independent`. O objetivo foi validar o fluxo do Makefile e a execução real dos três runtimes; não é uma bateria estatística.
+Rodada histórica de integração no RunPod `m87zg5huybxfa7`, com uma RTX 3090 de 24 GB, usando o GGUF local `Qwen2.5-7B-Instruct-Q8_0.gguf`, tokenizer local e modo `independent`. O objetivo foi validar o fluxo anterior do Makefile e a execução real dos três runtimes; não é uma bateria estatística nem representa o protocolo replay atual. Uma nova rodada Pod deve ser registrada separadamente após esta alteração de fixture e warmup.
 
 O comando agregado reduzido foi:
 

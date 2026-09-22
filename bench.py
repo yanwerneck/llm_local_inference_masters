@@ -27,12 +27,13 @@ VERSION = "0.4.0"
 GUIDELLM_VERSION = "0.7.4"
 WORKLOADS = {"short": 256, "medium": 2048, "long": 8192}
 OUTPUT_TOKENS = 128
-DEFAULT_CONVERSATION_FIXTURE = ROOT / "workloads" / "conversations" / "qwen_chat_v1.json"
+DEFAULT_CONVERSATION_FIXTURE = ROOT / "workloads" / "conversations" / "qwen_chat_bench_v2.json"
+DEFAULT_WARMUP_CONVERSATION_FIXTURE = ROOT / "workloads" / "conversations" / "qwen_chat_warmup_v1.json"
 
 
-def _synthetic_prompt(tokenizer, target_tokens: int) -> str:
+def _synthetic_prompt(tokenizer, target_tokens: int, seed: str | None = None) -> str:
     """Cria texto localmente; nenhuma chamada de servidor participa do relógio."""
-    seed = "Explique de forma objetiva este conceito para um estudante de estatística. "
+    seed = seed or "Explique de forma objetiva este conceito para um estudante de estatística. "
     text = seed
     while len(tokenizer.encode(text, add_special_tokens=False)) < target_tokens:
         text += seed
@@ -131,8 +132,10 @@ def stream_metrics(request_start_time, first_token_time, last_token_time, reques
             "output_tokens": completion, "decode_tokens_s": decode, "effective_tokens_s": effective}
 
 
-def run_stream_batch(cfg, tokenizer, scenario, count, timeout, secret=""):
-    prompt = _synthetic_prompt(tokenizer, WORKLOADS[scenario])
+def run_stream_batch(cfg, tokenizer, scenario, count, timeout, secret="", warmup=False):
+    seed = ("Esta é uma requisição descartável de aquecimento. Explique de forma objetiva "
+            "um conceito operacional de inferência local. ") if warmup else None
+    prompt = _synthetic_prompt(tokenizer, WORKLOADS[scenario], seed)
     successful, errored = [], []
     for index in range(count):
         try:
@@ -164,7 +167,7 @@ def load_conversation_fixture(path):
 
 def validate_conversation_fixture_for_mode(fixture, loop_mode, turns):
     if loop_mode == "replay":
-        missing = [index for index, turn in enumerate(fixture["data"]["turns"][:turns], 1)
+        missing = [index for index, turn in enumerate(fixture["data"]["turns"], 1)
                    if "assistant" not in turn]
         if missing:
             raise ValueError(f"--mode replay exige assistant fixo em cada turno usado do fixture; ausente em: {missing}.")
@@ -195,9 +198,14 @@ def run_conversational_batch(cfg, tokenizer, scenario, conversations, turns, tim
     validate_conversation_fixture_for_mode(fixture, loop_mode, turns)
     target = WORKLOADS[scenario]
     successful, errored = [], []
+    available_turns = max(1, len(fixture["data"]["turns"]) - turns + 1)
     for conversation_index in range(1, conversations + 1):
         assistant_outputs = []
-        for turn_index in range(1, turns + 1):
+        # Com turns=1, percorremos a fixture em vez de repetir sempre a primeira
+        # pergunta. Cada request continua sendo uma conversa nova e determinística,
+        # mas pode carregar um histórico de tamanho diferente.
+        final_turn = (((conversation_index - 1) % available_turns) + turns) if turns == 1 else turns
+        for turn_index in range(final_turn - turns + 1, final_turn + 1):
             messages = fixture_messages_for_turn(fixture, turn_index, assistant_outputs, loop_mode)
             estimate = estimate_messages_tokens(tokenizer, messages)
             metadata = {"mode": loop_mode, "conversation_index": conversation_index,
@@ -706,6 +714,7 @@ def run(args):
     if not conversation_mode and args.conversation_turns != 1:
         raise ValueError("--conversation-turns só pode ser maior que 1 com --mode closed-loop ou --mode replay.")
     conversation_fixture = load_conversation_fixture(args.conversation_fixture) if conversation_mode else None
+    warmup_conversation_fixture = load_conversation_fixture(args.warmup_conversation_fixture) if conversation_mode else None
     if conversation_fixture:
         validate_conversation_fixture_for_mode(conversation_fixture, args.mode, args.conversation_turns)
     base = Path(args.results)
@@ -730,6 +739,10 @@ def run(args):
                     "conversation_fixture": {"path": conversation_fixture["path"], "sha256": conversation_fixture["sha256"],
                                              "name": conversation_fixture["data"].get("name"),
                                              "version": conversation_fixture["data"].get("version")} if conversation_fixture else None,
+                    "warmup_conversation_fixture": {"path": warmup_conversation_fixture["path"],
+                                                     "sha256": warmup_conversation_fixture["sha256"],
+                                                     "name": warmup_conversation_fixture["data"].get("name"),
+                                                     "version": warmup_conversation_fixture["data"].get("version")} if warmup_conversation_fixture else None,
                     "conversation_first_request": "first-request.json is a separate single-turn lifecycle probe; closed-loop/replay measured histories start empty per conversation and per block",
                     "blocks": [],
                     "model_availability": availability,
@@ -779,19 +792,21 @@ def run(args):
                         monitor.set_phase(prefix)
                         config = scenario_config(cfg, name, n, seed, secret, args.timeout)
                         config["mode"] = args.mode
+                        active_fixture = warmup_conversation_fixture if phase == "warmup" else conversation_fixture
                         if conversation_mode:
                             config["conversation_turns"] = args.conversation_turns
-                            config["conversation_fixture_sha256"] = conversation_fixture["sha256"]
-                            config["spec_note"] = "GuideLLM synthetic data spec is retained for independent baseline context only; measured conversational requests are generated from the fixed fixture with accumulated chat history."
+                            config["conversation_fixture_sha256"] = active_fixture["sha256"]
+                            config["spec_note"] = "Warmup usa fixture separada; medição usa fixture replay versionada com perguntas variadas e histórico determinístico."
                         write_json(artifact(output, f"{prefix}-config.json"), redact(config, secret))
                         expected = n * args.conversation_turns if conversation_mode else n
                         unit = "conversas" if conversation_mode else "requisições"
                         print(f"{prefix}: {n} {unit}, uma chamada por vez", flush=True)
                         if conversation_mode:
                             report = run_conversational_batch(cfg, measurement_tokenizer, name, n, args.conversation_turns,
-                                                              args.timeout, secret, conversation_fixture, args.mode)
+                                                              args.timeout, secret, active_fixture, args.mode)
                         else:
-                            report = run_stream_batch(cfg, measurement_tokenizer, name, n, args.timeout, secret)
+                            report = run_stream_batch(cfg, measurement_tokenizer, name, n, args.timeout, secret,
+                                                      warmup=phase == "warmup")
                         raw = redact(report, secret)
                         write_json(artifact(output, f"{prefix}.json"), raw)
                         turns = turn_manifest(raw) if conversation_mode else []
@@ -902,15 +917,17 @@ def main():
     cmd.add_argument("--kv-bytes-per-token", type=positive, help="Opcional: bytes de KV lógico por token, calculados para arquitetura/dtype reais. Estimativa, não VRAM medida.")
     cmd.add_argument("--input-tokens", nargs="+", type=positive, help="Substitui --scenarios por uma grade de comprimentos sintéticos, ex.: 256 512 1024 2048 3072.")
     cmd.add_argument("--scenarios", nargs="+", choices=list(WORKLOADS), default=["short", "medium", "long"])
-    cmd.add_argument("--requests", type=positive, default=50, help="Requisições de medição por cenário e repetição; 50×3 dá 150 sucessos para percentis.")
-    cmd.add_argument("--repetitions", type=positive, default=3)
+    cmd.add_argument("--requests", type=positive, default=50, help="Requisições de medição por cenário e repetição; replay percorre perguntas distintas da fixture.")
+    cmd.add_argument("--repetitions", type=positive, default=1)
     cmd.add_argument("--warmup", type=nonnegative, default=3)
-    cmd.add_argument("--mode", choices=["independent", "closed-loop", "replay"], default="independent",
+    cmd.add_argument("--mode", choices=["independent", "closed-loop", "replay"], default="replay",
                      help="independent preserva uma requisição sem histórico; closed-loop acumula respostas reais; replay usa assistant fixo do fixture.")
     cmd.add_argument("--conversation-turns", type=positive, default=1,
                      help="Turnos por conversa em --mode closed-loop ou replay; cada turno envia o histórico completo.")
     cmd.add_argument("--conversation-fixture", default=str(DEFAULT_CONVERSATION_FIXTURE),
                      help="Fixture JSON versionado com system e lista fixa de user turns; replay tambem exige assistant nos turnos anteriores.")
+    cmd.add_argument("--warmup-conversation-fixture", default=str(DEFAULT_WARMUP_CONVERSATION_FIXTURE),
+                     help="Fixture separada para warmup; nunca é usada na medição formal.")
     cmd.add_argument("--seed", type=positive, default=42)
     cmd.add_argument("--timeout", type=positive, default=300)
     cmd.add_argument("--results", default="results")
