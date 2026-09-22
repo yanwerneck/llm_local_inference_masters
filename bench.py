@@ -221,7 +221,7 @@ class Monitor:
              (self.output / "system.csv").open("w", newline="", encoding="utf-8") as system_handle:
             writer = csv.writer(handle)
             writer.writerow(["utc", "phase", "index", "name", "used_mib", "total_mib", "used_gib", "total_gib",
-                             "gpu_util_pct", "memory_util_pct", "temperature_c", "power_w"])
+                             "vram_used_pct", "gpu_util_pct", "memory_util_pct", "temperature_c", "power_w"])
             system_writer = csv.writer(system_handle)
             system_writer.writerow(["utc", "phase", "cpu_util_pct", "ram_used_mib", "ram_available_mib", "ram_total_mib",
                                     "load1", "root_disk_used_mib", "root_disk_free_mib", "disk_read_bytes", "disk_write_bytes"])
@@ -240,11 +240,13 @@ class Monitor:
                     gpu_rows = list(csv.reader(result["stdout"].splitlines(), skipinitialspace=True))
                     for row in gpu_rows:
                         used_mib, total_mib = float(row[2]), float(row[3])
+                        vram_pct = (100 * used_mib / total_mib) if total_mib else None
                         writer.writerow([utc, phase, row[0], row[1], row[2], row[3],
-                                         used_mib / 1024, total_mib / 1024, *row[4:]])
+                                         used_mib / 1024, total_mib / 1024, vram_pct, *row[4:]])
                     if sample_number == 1 or sample_number % 10 == 0:
                         compact = "; ".join(f"GPU{row[0]} VRAM={float(row[2]) / 1024:.2f}/{float(row[3]) / 1024:.2f} GiB "
-                                             f"uso_gpu={row[4]}% uso_memoria={row[5]}%" for row in gpu_rows)
+                                             f"ocupada={100 * float(row[2]) / float(row[3]):.1f}% "
+                                             f"uso_gpu={row[4]}% banda_memoria={row[5]}%" for row in gpu_rows)
                         print(f"[telemetria] fase={phase} {compact or 'GPU sem amostra'}", flush=True)
                 handle.flush()
                 if psutil:
@@ -283,13 +285,15 @@ class Monitor:
         for phase in phases:
             entry = {"gpu_samples": 0, "system_samples": 0, "kv_samples": 0}
             grows = [r for r in sources["gpu"] if r.get("phase") == phase]
-            for key in ("used_mib", "total_mib", "used_gib", "total_gib", "gpu_util_pct", "memory_util_pct", "temperature_c", "power_w"):
+            for key in ("used_mib", "total_mib", "used_gib", "total_gib", "vram_used_pct", "gpu_util_pct", "memory_util_pct", "temperature_c", "power_w"):
                 vals = []
                 for r in grows:
                     try: vals.append(float(r[key]))
                     except (ValueError, TypeError, KeyError): pass
                 entry[f"gpu_{key}_mean"] = sum(vals) / len(vals) if vals else None
                 entry[f"gpu_{key}_max"] = max(vals) if vals else None
+                if key in {"used_mib", "used_gib", "vram_used_pct"}:
+                    entry[f"gpu_{key}_min"] = min(vals) if vals else None
             entry["gpu_samples"] = len(grows)
             srows = [r for r in sources["system"] if r.get("phase") == phase]
             for key in ("cpu_util_pct", "ram_used_mib", "ram_available_mib", "root_disk_used_mib", "root_disk_free_mib"):
