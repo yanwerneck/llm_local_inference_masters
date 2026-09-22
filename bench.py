@@ -43,7 +43,14 @@ def _synthetic_prompt(tokenizer, target_tokens: int, seed: str | None = None) ->
 
 def estimate_messages_tokens(tokenizer, messages) -> int:
     try:
-        return len(tokenizer.apply_chat_template(messages, tokenize=True, add_generation_prompt=True))
+        encoded = tokenizer.apply_chat_template(messages, tokenize=True, add_generation_prompt=True)
+        if hasattr(encoded, "input_ids"):
+            encoded = encoded.input_ids
+        elif isinstance(encoded, dict):
+            encoded = encoded["input_ids"]
+        if encoded and isinstance(encoded[0], (list, tuple)):
+            encoded = encoded[0]
+        return len(encoded)
     except Exception:
         return sum(len(tokenizer.encode(m.get("content", ""), add_special_tokens=False)) for m in messages)
 
@@ -199,12 +206,26 @@ def run_conversational_batch(cfg, tokenizer, scenario, conversations, turns, tim
     target = WORKLOADS[scenario]
     successful, errored = [], []
     available_turns = max(1, len(fixture["data"]["turns"]) - turns + 1)
+    if turns == 1 and scenario.startswith("ctx"):
+        fitting_turns = []
+        for candidate in range(1, available_turns + 1):
+            candidate_messages = fixture_messages_for_turn(fixture, candidate, [], loop_mode)
+            if estimate_messages_tokens(tokenizer, candidate_messages) <= target:
+                fitting_turns.append(candidate)
+        if not fitting_turns:
+            raise ValueError(f"Nenhum turno da fixture cabe em ctx{target} tokens.")
+        available_turns = len(fitting_turns)
+    else:
+        fitting_turns = list(range(1, available_turns + 1))
     for conversation_index in range(1, conversations + 1):
         assistant_outputs = []
         # Com turns=1, percorremos a fixture em vez de repetir sempre a primeira
         # pergunta. Cada request continua sendo uma conversa nova e determinística,
         # mas pode carregar um histórico de tamanho diferente.
-        final_turn = (((conversation_index - 1) % available_turns) + turns) if turns == 1 else turns
+        if turns == 1:
+            final_turn = fitting_turns[(conversation_index - 1) % available_turns]
+        else:
+            final_turn = turns
         for turn_index in range(final_turn - turns + 1, final_turn + 1):
             messages = fixture_messages_for_turn(fixture, turn_index, assistant_outputs, loop_mode)
             estimate = estimate_messages_tokens(tokenizer, messages)

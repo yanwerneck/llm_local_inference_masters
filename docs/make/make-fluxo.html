@@ -106,7 +106,7 @@ make quick-sweep-ollama MODEL_SIZE=7B
 </code></pre>
 <p>Esses argumentos aparecem no <code>lifecycle.json</code>. Se o runtime rejeitar a combinação, a execução falha e o <code>server.log</code> é a evidência.</p>
 <h2 id="7-sweep-de-kv">7. Sweep de KV</h2>
-<p>Depois da bateria base, <code>run_kv_sweep.py</code> copia o launcher para uma pasta temporária, ajusta o limite de contexto e chama <code>bench.py</code> novamente. O padrão começa em 1024 tokens e soma 256 MB de KV lógico por ponto; no Qwen2.5 7B isso produz aproximadamente 1024, 5489, 9954 e 14419 tokens. Cada ponto tem seu próprio servidor e diretório de resultado.</p>
+<p>Depois da bateria base, <code>run_kv_sweep.py</code> copia o launcher para uma pasta temporária, ajusta o limite de contexto e chama <code>bench.py</code> novamente. O padrão começa em 1024 tokens e soma 256 MB de KV lógico por ponto; no Qwen2.5 7B isso produz aproximadamente 1024, 5489, 9954 e 14419 tokens. Em modo <code>replay</code>, cada ponto seleciona e cicla apenas os históricos da fixture que cabem no limite <code>ctx&lt;N&gt;</code>; não envia silenciosamente a conversa completa para um ponto menor.</p>
 <p>O sweep repassa <code>SWEEP_MODE</code>, <code>SWEEP_CONVERSATION_TURNS</code> e <code>SWEEP_CONVERSATION_FIXTURE</code> para <code>bench.py</code>, permitindo varrer contexto com a mesma política conversacional da bateria base ou com uma política própria do sweep. O passo formal é <code>SWEEP_MEMORY_STEP_MB=256</code>: o script converte esse orçamento de memória em tokens com <code>KV_BYTES_PER_TOKEN</code> (57.344 bytes/token no Qwen2.5 7B em KV FP16; 196.608 no 14B) e registra os dois valores no manifesto.</p>
 <ul>
 <li>vLLM: altera <code>--max-model-len</code>;</li>

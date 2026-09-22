@@ -13,6 +13,13 @@ from results_layout import prepare
 
 
 class UnitTests(unittest.TestCase):
+    def test_estimate_messages_tokens_counts_ids_not_batch_encoding_keys(self):
+        class FakeTokenizer:
+            def apply_chat_template(self, messages, tokenize, add_generation_prompt):
+                return {"input_ids": [[11, 12, 13, 14]], "attention_mask": [[1, 1, 1, 1]]}
+
+        self.assertEqual(bench.estimate_messages_tokens(FakeTokenizer(), [{"role": "user", "content": "x"}]), 4)
+
     def test_percentiles(self):
         self.assertEqual(bench.percentile([1, 2, 3], .5), 2)
         self.assertAlmostEqual(bench.percentile([1, 2, 3], .95), 2.9)

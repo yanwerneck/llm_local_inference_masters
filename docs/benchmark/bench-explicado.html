@@ -367,7 +367,7 @@ contexto 5489  → ~256 MB adicionais de KV → inicia servidor → executa benc
 contexto 9954  → ~512 MB adicionais de KV → inicia servidor → executa bench.py → encerra
 contexto 14419 → ~768 MB adicionais de KV → inicia servidor → executa bench.py → encerra
 </code></pre>
-<p>Cada ponto tem startup, primeira resposta, warmup, medição, telemetria e diretório próprio. Por isso o sweep é mais lento: o custo dominante é reiniciar e carregar o runtime repetidamente, não apenas aumentar o orçamento de KV em 256 MB.</p>
+<p>Cada ponto tem startup, primeira resposta, warmup, medição, telemetria e diretório próprio. Nos pontos <code>ctx&lt;N&gt;</code>, o replay seleciona e cicla somente os turnos cujo histórico real cabe em <code>N</code> tokens; isso evita enviar um histórico maior que o <code>max_model_len</code> daquele ponto. Por isso o sweep é mais lento: o custo dominante é reiniciar e carregar o runtime repetidamente, não apenas aumentar o orçamento de KV em 256 MB.</p>
 <p>Para exploração rápida:</p>
 <pre><code class="language-bash">make quick-sweep-vllm MODEL_SIZE=7B SWEEP_MAX_CONTEXT=1024
 </code></pre>
