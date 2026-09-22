@@ -5,6 +5,8 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
+import signal
 import subprocess
 import tempfile
 from datetime import datetime, timezone
@@ -18,6 +20,22 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from results_layout import artifact, prepare, runtime_root
+
+
+def stop_process_group(process: subprocess.Popen, timeout: float = 20) -> None:
+    """Encerra o ponto do sweep e todos os descendentes que ele criou."""
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    try:
+        process.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        process.wait(timeout=5)
 
 
 def positive(value: str) -> int:
@@ -134,12 +152,23 @@ def main() -> int:
                   f"server_max_model_len={server_context} "
                   f"requests={args.requests} repetitions={args.repetitions} "
                   f"mode={args.mode} turns={args.conversation_turns}", flush=True)
-            completed = subprocess.run(command)
-            manifest["points"].append({"input_tokens": context, "returncode": completed.returncode})
+            child = subprocess.Popen(command, start_new_session=True)
+            try:
+                returncode = child.wait()
+            except BaseException:
+                # Ctrl-C/SIGTERM no make não pode deixar vLLM, workers ou
+                # o bench vivos no Pod. O filho inteiro recebe o sinal.
+                stop_process_group(child)
+                raise
+            finally:
+                # Também limpa descendentes caso o bench tenha falhado antes
+                # de executar seu próprio finally.
+                stop_process_group(child)
+            manifest["points"].append({"input_tokens": context, "returncode": returncode})
             artifact(sweep_output, "sweep-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
-            if completed.returncode != 0:
+            if returncode != 0:
                 print(f"[KV-SWEEP] falha em input_tokens={context}; consulte server.log. Não classificada automaticamente como OOM.")
-                return completed.returncode
+                return returncode
     print("Varredura concluída; consulte cada diretório e sweep-manifest.json.")
     return 0
 

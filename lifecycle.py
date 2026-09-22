@@ -64,7 +64,7 @@ class Launch:
 
     def close(self):
         """Encerra exclusivamente o grupo criado por este objeto, inclusive filhos."""
-        if self.process is not None:
+        if self.process is not None and self.process.poll() is None:
             try:
                 os.killpg(self.process.pid, signal.SIGTERM)
             except ProcessLookupError:
@@ -79,8 +79,17 @@ class Launch:
                 os.killpg(self.process.pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
+        elif self.process is not None:
+            # O líder pode ter falhado, mas workers/servidor podem ainda
+            # estar no mesmo grupo. Tenta limpar o grupo sem falhar se ele já
+            # tiver desaparecido.
+            try:
+                os.killpg(self.process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
         if self.log is not None:
             self.log.close()
+            self.log = None
 
 
 def wait_models(cfg, secret, timeout, launch=None):
