@@ -29,7 +29,7 @@ git status
 
 `clone` baixa código e histórico para uma pasta nova. `status` mostra a situação local; não envia nada à internet. Use uma pasta persistente do pod, mas confirme as regras de retenção e cobrança do volume: código e resultados podem desaparecer ao encerrar um pod sem armazenamento persistente.
 
-Você **não precisa configurar nome/e-mail para apenas baixar e executar**. Agora siga a instalação do [README](../README.md), criando um venv separado.
+Você **não precisa configurar nome/e-mail para apenas baixar e executar**. Agora siga a instalação do [README](../../README.md), criando um venv separado.
 
 ## 3. Atualizar depois
 

@@ -6,7 +6,7 @@ Escopo: validação local curta do plano de Makefiles. Nenhum runtime GPU foi in
 
 - `git status --short` e `git diff --stat` foram registrados antes dos testes.
 - O checkout já continha alterações rastreadas e arquivos novos; não houve `reset`, `checkout`, `clean` ou descarte de mudanças.
-- `scripts/build_code_reference.py` foi executado com sucesso e regenerou `docs/codigo-fontes.md` a partir dos módulos atuais.
+- `scripts/build_code_reference.py` foi executado com sucesso e regenerou `docs/engenharia/codigo-fontes.md` a partir dos módulos atuais.
 
 ## Passou
 

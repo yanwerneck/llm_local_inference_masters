@@ -18,5 +18,5 @@ for name in ("bench.py", "lifecycle.py", "reporting.py", "guidellm_compat.py"):
     parts.append("\n```text\n")
     parts.extend(f"{i:04d} | {line}".rstrip() + "\n" for i, line in enumerate(source.splitlines(), 1))
     parts.append("```\n")
-(ROOT / "docs/codigo-fontes.md").write_text("".join(parts), encoding="utf-8")
-print("docs/codigo-fontes.md atualizado")
+(ROOT / "docs/engenharia/codigo-fontes.md").write_text("".join(parts), encoding="utf-8")
+print("docs/engenharia/codigo-fontes.md atualizado")

@@ -4,7 +4,7 @@ Benchmark acadêmico de inferência local para comparar **vLLM, llama.cpp e Olla
 
 O fluxo oficial é baseado no `Makefile`. O benchmark não baixa modelos, não troca artefatos automaticamente e não faz fallback quando um runtime falha. Download, criação de diretórios e instalação são preparação; não entram nos tempos medidos.
 
-Documentação detalhada: [bench explicado](docs/bench-explicado.html) · [fluxo completo do Make](docs/make-fluxo.md) · [metodologia](docs/metodologia.html) · [código explicado](docs/codigo-explicado.html) · [resultados reais do Pod de 22/09/2026](docs/resultados-pod-20260922.md).
+Documentação detalhada: [índice de documentação](docs/README.md) · [bench explicado](docs/benchmark/bench-explicado.html) · [fluxo completo do Make](docs/make/make-fluxo.md) · [metodologia](docs/benchmark/metodologia.html) · [código explicado](docs/engenharia/codigo-explicado.html) · [resultados reais do Pod de 22/09/2026](docs/benchmark/resultados-pod-20260922.md).
 
 ## Preparar um pod novo
 
@@ -224,7 +224,7 @@ make smoke-all MODEL_SIZE=7B
 
 Os três smokes usam poucas requisições e somente `short`; servem para diagnosticar instalação, porta, tokenizer, readiness, telemetria e carregamento. Não são resultados finais nem substituem `bench-all`.
 
-Com o ambiente e os pesos já preparados no SSD, acrescente `PREPARE_OFFLINE=1` para evitar instalações/downloads repetidos e `BENCH_STARTUP_TIMEOUT=300` para limitar a espera de startup. Os Makefiles exigem GNU Make com `.ONESHELL` (3.82+); o Make 3.81 padrão do macOS é recusado. Consulte o [diagnóstico no RunPod](docs/diagnostico-makefiles.md) para causas, comandos e cobertura dos testes.
+Com o ambiente e os pesos já preparados no SSD, acrescente `PREPARE_OFFLINE=1` para evitar instalações/downloads repetidos e `BENCH_STARTUP_TIMEOUT=300` para limitar a espera de startup. Os Makefiles exigem GNU Make com `.ONESHELL` (3.82+); o Make 3.81 padrão do macOS é recusado. Consulte o [diagnóstico no RunPod](docs/make/diagnostico-makefiles.md) para causas, comandos e cobertura dos testes.
 
 ### Sweep rápido de integração
 
@@ -244,7 +244,7 @@ A integração foi validada ao vivo em 22/09/2026 no RunPod, com o mesmo GGUF 7B
 [BENCH ALL] status: vLLM=0 llama.cpp=0 Ollama=0
 ```
 
-Os três smokes, os três quick sweeps de 1024 tokens, as preparações offline e a bateria agregada reduzida passaram. O relatório completo, com métricas, comandos e caminhos dos artefatos, está em [docs/resultados-pod-20260922.md](docs/resultados-pod-20260922.md).
+Os três smokes, os três quick sweeps de 1024 tokens, as preparações offline e a bateria agregada reduzida passaram. O relatório completo, com métricas, comandos e caminhos dos artefatos, está em [docs/benchmark/resultados-pod-20260922.md](docs/benchmark/resultados-pod-20260922.md).
 
 O vLLM precisou da configuração diagnóstica `--enforce-eager --max-model-len 2048 --gpu-memory-utilization 0.80`; o startup levou aproximadamente 96 segundos. O `EngineDeadError` registrado no encerramento do sweep ocorreu depois de respostas HTTP 200 e do SIGTERM intencional de shutdown; o alvo terminou com código zero. Isso não foi classificado como OOM ou falha de inferência.
 
@@ -361,7 +361,7 @@ tar -xzf llm-local-inference-results.tar.gz \
   -C llm_local_inference_masters-results --strip-components=1
 ```
 
-O `runpodctl send/receive` funciona por código de transferência e não depende de uma sessão SCP tradicional. Consulte o [relatório da rodada](docs/resultados-pod-20260922.md) para o pacote já transferido desta execução.
+O `runpodctl send/receive` funciona por código de transferência e não depende de uma sessão SCP tradicional. Consulte o [relatório da rodada](docs/benchmark/resultados-pod-20260922.md) para o pacote já transferido desta execução.
 
 ### Profiling para memory-bound/compute-bound
 

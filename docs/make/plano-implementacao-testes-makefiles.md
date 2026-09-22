@@ -6,7 +6,7 @@
 
 ## Objetivo e estado do handoff
 
-> **Estado final — 22/09/2026:** este plano foi executado no pod. A preparação offline, os três smokes, os três quick sweeps e o `bench-all` reduzido passaram. O agregado terminou com `vLLM=0 llama.cpp=0 Ollama=0`. Os resultados e limitações estão em [resultados-pod-20260922.md](resultados-pod-20260922.md).
+> **Estado final — 22/09/2026:** este plano foi executado no pod. A preparação offline, os três smokes, os três quick sweeps e o `bench-all` reduzido passaram. O agregado terminou com `vLLM=0 llama.cpp=0 Ollama=0`. Os resultados e limitações estão em [resultados-pod-20260922.md](../benchmark/resultados-pod-20260922.md).
 
 Concluir o diagnóstico e a correção dos Makefiles do benchmark no RunPod, usando testes rápidos e preservando as alterações existentes. A execução prevista neste documento foi concluída no pod; os itens que permanecem são operações externas ou experimentos deliberadamente não executados, como upload, build/quantização e profiling bloqueado pelo host.
 
@@ -29,8 +29,8 @@ Ler `AGENTS.md` do workspace e do repositório antes de continuar. O usuário pr
 1. Executar `git status --short` e `git diff --stat` localmente e no pod.
 2. Conferir os arquivos presentes no pod contra os locais e os backups da sessão. Backup remoto disponível em `/tmp/codex-make-backup` (Makefiles, módulos, scripts e configs originais). O pod estava limpo no commit `d5494a3` antes da sincronização, enquanto o checkout local já tinha alterações não commitadas do usuário.
 3. Nunca usar `git reset --hard`, `git checkout -- .`, `git clean` ou sincronização com exclusão. Aplicar diferenças incrementais; preservar arquivos de evidência.
-4. Os arquivos previamente alterados incluíam `Makefile`, `README.md`, `bench.py`, `lifecycle.py`, `scripts/run_kv_sweep.py`, configs de vLLM/llama.cpp, `docs/make-fluxo.md` e `tests/test_lifecycle.py`; `scripts/prepare_ollama.py` e `tests/test_prepare_ollama.py` já existiam como não rastreados. **Não atribuir todo o diff desta sessão ao agente.**
-5. Durante a execução inicial, `Makefile`, `Makefile.profiling`, módulos/configs necessários e `docs/make-fluxo.md` foram sincronizados ao pod antes dos demais documentos. Essa reconciliação foi concluída depois da validação; README, referências de código, diagnóstico, plano e testes locais foram atualizados no checkout local e estão refletidos neste handoff.
+4. Os arquivos previamente alterados incluíam `Makefile`, `README.md`, `bench.py`, `lifecycle.py`, `scripts/run_kv_sweep.py`, configs de vLLM/llama.cpp, `docs/make/make-fluxo.md` e `tests/test_lifecycle.py`; `scripts/prepare_ollama.py` e `tests/test_prepare_ollama.py` já existiam como não rastreados. **Não atribuir todo o diff desta sessão ao agente.**
+5. Durante a execução inicial, `Makefile`, `Makefile.profiling`, módulos/configs necessários e `docs/make/make-fluxo.md` foram sincronizados ao pod antes dos demais documentos. Essa reconciliação foi concluída depois da validação; README, referências de código, diagnóstico, plano e testes locais foram atualizados no checkout local e estão refletidos neste handoff.
 6. Se um patch desta sessão causar regressão, reverter apenas seus trechos após comparar baseline, backup remoto e arquivo atual. Não restaurar cegamente o backup remoto inteiro: isso também retiraria as alterações anteriores do usuário que foram sincronizadas.
 
 Critério: possuir uma lista explícita do que diverge, com backup dos arquivos que serão substituídos, sem apagar alterações ou resultados.
@@ -49,7 +49,7 @@ Critério: possuir uma lista explícita do que diverge, com backup dos arquivos 
 | Profiling chamava llama-server inexistente no PATH | Usa descoberta de binários e backend como o Makefile principal |
 | GNU Make 3.81 do macOS ignorava `.ONESHELL`, perdendo variáveis de shell | Ambos Makefiles agora recusam versão sem feature `oneshell`; evita relatórios incorretos em `/trace` ou `/roofline` |
 
-Arquivos editados nesta sessão: `Makefile`, `Makefile.profiling`, `README.md`, `docs/make-fluxo.md`; documentos novos `docs/diagnostico-makefiles.md` e este plano; teste novo `tests/test_makefiles.py`. `docs/codigo-fontes.md` foi regenerado a partir dos módulos locais, incluindo mudanças anteriores do usuário. HTMLs ainda precisam ser reconciliados/regenerados.
+Arquivos editados nesta sessão: `Makefile`, `Makefile.profiling`, `README.md`, `docs/make/make-fluxo.md`; documentos novos `docs/make/diagnostico-makefiles.md` e este plano; teste novo `tests/test_makefiles.py`. `docs/engenharia/codigo-fontes.md` foi regenerado a partir dos módulos locais, incluindo mudanças anteriores do usuário. HTMLs são gerados por `scripts/build_docs.py`.
 
 ## 3. Evidências existentes e limites
 
@@ -156,7 +156,7 @@ O hash de um GGUF de 8 GB ainda lê o SSD; isso é esperado e ocorre fora da med
 
 ### Fase 4. Smokes reais, um runtime por vez — concluída
 
-Os três smokes finais foram executados no pod, com `PREPARE_OFFLINE=1`, e terminaram com exit 0. Os comandos abaixo permanecem como reprodução documentada; não são pendências desta sessão. O vLLM usou argumentos diagnósticos para caber na RTX 3090, conforme detalhado no [relatório da rodada](resultados-pod-20260922.md):
+Os três smokes finais foram executados no pod, com `PREPARE_OFFLINE=1`, e terminaram com exit 0. Os comandos abaixo permanecem como reprodução documentada; não são pendências desta sessão. O vLLM usou argumentos diagnósticos para caber na RTX 3090, conforme detalhado no [relatório da rodada](../benchmark/resultados-pod-20260922.md):
 
 ```bash
 make smoke-vllm MODEL_SIZE=7B PREPARE_OFFLINE=1 BENCH_STARTUP_TIMEOUT=300 VLLM_PYTHON=/app/.vllm_venv/bin/python
@@ -170,7 +170,7 @@ Aceite por runtime: exit 0, manifest e relatórios completos, resposta do alias 
 
 ### Fase 5. Sweeps de um ponto e ramo formal reduzido — concluída
 
-Os três quick sweeps e o `bench-all` reduzido foram executados depois dos smokes. Os comandos abaixo permanecem como reprodução documentada; os artefatos e métricas efetivamente coletados estão no [relatório da rodada](resultados-pod-20260922.md).
+Os três quick sweeps e o `bench-all` reduzido foram executados depois dos smokes. Os comandos abaixo permanecem como reprodução documentada; os artefatos e métricas efetivamente coletados estão no [relatório da rodada](../benchmark/resultados-pod-20260922.md).
 
 ```bash
 make quick-sweep-vllm PREPARE_OFFLINE=1 SWEEP_MAX_CONTEXT=1024 BENCH_STARTUP_TIMEOUT=300
@@ -203,7 +203,7 @@ Esse comando ainda inicia a base e um sweep, portanto custa mais que um smoke. A
 git diff --check
 ```
 
-Conferir `docs/make-fluxo.md`, README e diagnóstico. Regenerar HTMLs a partir dos fontes atualizados, reconciliando de volta ao checkout local sem sobrescrever fontes com versões antigas. Essa etapa foi concluída: a matriz final, os caminhos de resultados, os comandos exatos e as limitações estão no [relatório da rodada](resultados-pod-20260922.md).
+Conferir `docs/make/make-fluxo.md`, README e diagnóstico. Regenerar HTMLs a partir dos fontes atualizados, reconciliando de volta ao checkout local sem sobrescrever fontes com versões antigas. Essa etapa foi concluída: a matriz final, os caminhos de resultados, os comandos exatos e as limitações estão no [relatório da rodada](../benchmark/resultados-pod-20260922.md).
 
 ## 6. Timeouts, interrupção e limpeza
 
