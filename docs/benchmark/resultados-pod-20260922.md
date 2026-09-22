@@ -2,7 +2,46 @@
 
 ## Escopo
 
-Rodada histórica de integração no RunPod `m87zg5huybxfa7`, com uma RTX 3090 de 24 GB, usando o GGUF local `Qwen2.5-7B-Instruct-Q8_0.gguf`, tokenizer local e modo `independent`. O objetivo foi validar o fluxo anterior do Makefile e a execução real dos três runtimes; não é uma bateria estatística nem representa o protocolo replay atual. Uma nova rodada Pod deve ser registrada separadamente após esta alteração de fixture e warmup.
+Rodada histórica de integração no RunPod `m87zg5huybxfa7`, com uma RTX 3090 de 24 GB, usando o GGUF local `Qwen2.5-7B-Instruct-Q8_0.gguf`, tokenizer local e modo `independent`. O objetivo foi validar o fluxo anterior do Makefile e a execução real dos três runtimes; não é uma bateria estatística nem representa o protocolo replay atual.
+
+## Rodada atual após replay e warmup separado
+
+Em 22/09/2026, a implementação atual foi validada no mesmo Pod, já no commit `f9ff2ad`. Primeiro passaram os testes unitários (`17/17`) e a integração mock usando `/workspace/llm_local_inference_masters/.venv/bin/python`. Depois passaram os três smokes reais e uma bateria reduzida:
+
+```bash
+make bench-all MODEL_SIZE=7B PREPARE_OFFLINE=1 \
+  BENCH_MODE=replay BENCH_SCENARIOS=short BENCH_REQUESTS=5 \
+  BENCH_REPETITIONS=1 BENCH_WARMUP=2 \
+  SWEEP_MODE=replay SWEEP_START=1024 SWEEP_MAX_CONTEXT=1024 \
+  SWEEP_REQUESTS=1 SWEEP_REPETITIONS=1 SWEEP_WARMUP=0
+```
+
+Resultado real:
+
+```text
+[BENCH ALL] status: vLLM=0 llama.cpp=0 Ollama=0
+```
+
+Os artefatos confirmaram, nos três runtimes:
+
+- `manifest.json` com `mode=replay`;
+- hash da fixture de medição diferente do hash da fixture de warmup;
+- 5 requests de medição distintos e sem interseção com os 2 warmups;
+- sweep com `memory_step_mb=256`, `token_step=4465` e ponto `input_tokens=1024`;
+- HTML, JSON, CSV, logs, gráfico de memória e gráfico de GPU-util preservados.
+
+Diretórios principais no Pod:
+
+```text
+results/vllm/20260922T175441.343339Z/benchmark-short/
+results/vllm/20260922T175637.324381Z/contexto-1024-tokens-step-256mb/
+results/llama.cpp/20260922T175837.984919Z/benchmark-short/
+results/llama.cpp/20260922T175910.471376Z/contexto-1024-tokens-step-256mb/
+results/ollama/20260922T175950.513323Z/benchmark-short/
+results/ollama/20260922T180043.241969Z/contexto-1024-tokens-step-256mb/
+```
+
+Essa foi uma validação funcional reduzida, não a bateria formal de 50 requests por cenário e quatro pontos de sweep. A bateria formal permanece disponível para execução posterior no Pod.
 
 O comando agregado reduzido foi:
 
@@ -66,7 +105,7 @@ O `EngineDeadError` observado no `server.log` do sweep vLLM ocorre depois de `PO
 
 ## Validação do Makefile
 
-Passaram no pod: `help`, `clean-info`, `check-runtimes`, `check-vllm-gguf`, `check-profilers`, `make -f Makefile.profiling check`, preparação offline dos três runtimes, os três smokes, os três `quick-sweep-*`, `bench-all` reduzido, testes automatizados (34 testes, 1 skip esperado), integração mock, `make docs`, `git diff --check` e o dry-run dos grupos de alvos.
+Passaram no Pod nesta atualização: `python3 -m unittest tests/test_bench.py` (`17/17`), integração mock com `.venv/bin/python`, preparação offline dos três runtimes, os três smokes reais, `bench-all` reduzido em replay, validação dos manifests/fixtures e dry-run dos grupos de alvos. O `python3` do sistema não possui `guidellm`; a integração foi executada com o `.venv` oficial do benchmark.
 
 `nsys` não está instalado no pod. O `ncu` existe, mas os contadores estão bloqueados pelo host (`ERR_NVGPUCTRPERM`); profiling real continua uma limitação externa.
 
