@@ -250,7 +250,7 @@ upload-hf: verify-gguf
 		$(HF) upload "$(HF_REPO_ID)" "$(GGUF_FILE)" "$(HF_UPLOAD_FILENAME)" \
 			--repo-type model --commit-message "Add llama.cpp Q8_0 GGUF"
 
-smoke-vllm: verify-gguf
+smoke-vllm: prepare-vllm
 	HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_HUB_ENABLE_HF_TRANSFER=0 \
 		$(PYTHON) bench.py run \
 		--config "$(VLLM_CONFIG)" \
