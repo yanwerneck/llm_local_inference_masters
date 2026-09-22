@@ -4,7 +4,9 @@ SHELL := /usr/bin/env bash
 
 # Caminhos podem ser sobrescritos na chamada:
 # make quantize-q8 LLAMA_CPP_DIR=/mnt/llama.cpp HF_MODEL_DIR=/mnt/qwen
-PYTHON ?= python3
+BENCH_VENV ?= /workspace/chatbot-runtime-bench/.venv
+SYSTEM_PYTHON ?= python3
+PYTHON ?= $(BENCH_VENV)/bin/python
 HF ?= hf
 LLAMA_CPP_DIR ?= /workspace/llama.cpp
 LLAMA_CPP_BUILD_DIR ?= $(LLAMA_CPP_DIR)/build
@@ -73,7 +75,7 @@ QUANTIZE_SCRIPT := scripts/quantize_hf_to_gguf_q8_0.sh
 
 .PHONY: help check-tools clone-llama build-llama install-llama-python \
         download-source inspect-source quantize-q8 verify-gguf upload-hf \
-        download-model download-tokenizer prepare-benchmark prepare-ollama smoke-vllm bench-vllm bench-llama bench-ollama bench-all bench kv-sweep docs clean-info
+        install-benchmark download-model download-tokenizer prepare-benchmark prepare-ollama smoke-vllm bench-vllm bench-llama bench-ollama bench-all bench kv-sweep docs clean-info
 
 help:
 	@printf '%s\n' \
@@ -87,6 +89,7 @@ help:
 		'  make quantize-q8          gera GGUF F16 e depois GGUF Q8_0' \
 		'  make verify-gguf          confirma assinatura, tamanho e SHA-256' \
 		'  make upload-hf            publica somente o GGUF no Hugging Face' \
+		'  make install-benchmark    cria o venv do cliente e instala requirements.txt' \
 		'  make download-model       baixa o GGUF selecionado para o SSD' \
 		'  make download-tokenizer   baixa somente os arquivos do tokenizer' \
 		'  make prepare-benchmark    instala cliente, cria pastas e valida modelo/configs/runtimes' \
@@ -150,6 +153,12 @@ verify-gguf:
 	$(PYTHON) -c 'import sys; from pathlib import Path; p=Path(sys.argv[1]); data=p.read_bytes(); sys.exit("assinatura GGUF inválida") if data[:4] != b"GGUF" else print("assinatura GGUF válida")' "$(GGUF_FILE)"
 	sha256sum "$(GGUF_FILE)"
 
+install-benchmark:
+	@echo '[PREPARE] criando/validando venv do cliente: $(BENCH_VENV)'
+	@test -x "$(PYTHON)" || "$(SYSTEM_PYTHON)" -m venv "$(BENCH_VENV)"
+	"$(PYTHON)" -m pip install --upgrade pip
+	"$(PYTHON)" -m pip install -r requirements.txt
+
 download-model:
 	@echo '[PREPARE] baixando GGUF $(MODEL_SIZE): $(HF_GGUF_REPO)'
 	mkdir -p "$(dir $(GGUF_FILE))"
@@ -166,11 +175,9 @@ download-tokenizer:
 		--include 'config.json' 'tokenizer*' 'special_tokens_map.json' 'chat_template.jinja' \
 		--local-dir "$(TOKENIZER_DIR)"
 
-prepare-benchmark: download-model download-tokenizer verify-gguf
+prepare-benchmark: install-benchmark download-model download-tokenizer verify-gguf
 	@echo '[PREPARE] criando diretório de resultados'
 	mkdir -p results
-	@echo '[PREPARE] instalando dependências somente no Python indicado por PYTHON=$(PYTHON)'
-	$(PYTHON) -m pip install -r requirements.txt
 	@echo '[PREPARE] validando imports do cliente'
 	$(PYTHON) -c 'import guidellm, httpx, psutil, transformers; print("guidellm", guidellm.__version__, "httpx", httpx.__version__, "psutil", psutil.__version__, "transformers", transformers.__version__)'
 	@echo '[PREPARE] validando tokenizer e JSONs'

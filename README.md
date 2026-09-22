@@ -1,729 +1,84 @@
-# Chatbot Runtime Bench · um usuário
+# Chatbot Runtime Bench
 
-Repositório `yanwerneck/llm_local_inference_masters`: código do benchmark e materiais de estudo de inferência local. Abra [index.html](index.html) no navegador para navegar pelos guias offline.
+Benchmark acadêmico de inferência local para comparar **vLLM, llama.cpp e Ollama** usando o mesmo modelo GGUF, uma requisição por vez e uma carga de chatbot reproduzível.
 
-## Materiais incluídos
+O fluxo oficial é baseado no `Makefile`. O benchmark não baixa modelos, não troca artefatos automaticamente e não faz fallback quando um runtime falha. Download, criação de diretórios e instalação são preparação; não entram nos tempos medidos.
 
-- [Método do benchmark, incluindo inicialização e primeira resposta](docs/metodologia.html).
-- [Git no RunPod](docs/git-runpod.html).
-- [Guia de RunPod e vLLM](materiais/runpod-vllm-lab/index.html).
-- [Arquitetura, gargalos e parâmetros de inferência](materiais/runpod-vllm-lab/estudo.html).
-- [DDR, GDDR6X e HBM](materiais/runpod-vllm-lab/memorias.html).
-- [Interface simples de chatbot em Python](materiais/runpod-vllm-lab/chat.html).
-- [Revisão de privacidade antes da publicação](docs/seguranca-publicacao.md).
-- [Diagnóstico detalhado do Qwen2.5-14B no vLLM](docs/diagnostico-qwen14b-vllm.md).
+Documentação detalhada: [fluxo completo do Make](docs/make-fluxo.md) · [metodologia](docs/metodologia.html) · [código explicado](docs/codigo-explicado.html).
 
-Os guias anteriores estão em `materiais/`, com seus fontes e scripts de geração. Suas instruções de instalação referem-se aos ambientes do servidor e do chat; **não misture essas dependências com o venv do benchmark**. Os HTMLs são arquivos estáticos: baixe/clonar e abra localmente; visualizar um arquivo no GitHub não ativa GitHub Pages.
-
-Benchmark de latência HTTP com streaming para **vLLM, Ollama e llama-server**, usando **GuideLLM 0.7.4** nos blocos sequenciais e um observador HTTP simples para a inicialização e a primeira resposta. A versão 0.4 cobre início, aquecimento, **Time To First Token**, **Tokens/s**, short/medium/long, varredura de KV em passos de 1024, telemetria contínua de GPU/CPU/RAM/SSD e correlação por fase.
-
-**Na versão 0.4, pesos já disponíveis no SSD são pré-requisito; download não faz parte do benchmark.** Não instala o runtime. Com `--launch`, inicia o comando fornecido em modo Hugging Face offline e encerra somente esse processo ao final. Não faz teste de concorrência, qualidade ou perplexidade. Veja a [explicação detalhada do código](docs/codigo-explicado.md).
-
-Todo `run` exige `--local-model-path`: pasta com pesos HF, arquivo GGUF ou blob local de pesos do Ollama. Verificamos presença/tamanho e shards declarados antes do relógio, sem ler integralmente os pesos. Isso não prova o SSD físico, integridade ou vínculo com um servidor preexistente. Configure o runtime para o mesmo artefato local. Não use wrappers que baixem arquivos: variáveis offline de HF não são um firewall universal. Execução com download é inválida; não subtraímos tempos de internet.
-
-Comece por [Como funciona o benchmark (HTML)](docs/metodologia.html). O tutorial de Git está separado: [HTML](docs/git-runpod.html) · [Markdown](docs/git-runpod.md).
-
-## 1. Preparar o pod
-
-Para testar um servidor existente, deixe-o funcionando em outro terminal. Para medir desde a partida, use `--launch`, explicado abaixo, com o servidor parado. Execute o cliente no mesmo pod para reduzir interferência da rede externa. Não rode outros servidores ou notebooks usando a GPU ao mesmo tempo.
-
-Em uma imagem Ubuntu/Debian do RunPod, como root:
+## Fluxo mínimo no RunPod
 
 ```bash
-mkdir -p /workspace /workspace/models
-apt-get update
-apt-get install -y git python3-venv
-cd /workspace
-git clone https://github.com/yanwerneck/llm_local_inference_masters.git chatbot-runtime-bench
-cd chatbot-runtime-bench
-```
-
-`apt-get update` atualiza o catálogo de pacotes; `install` instala Git e suporte a ambientes Python; `clone` baixa o código para a pasta local `chatbot-runtime-bench`, independentemente do nome do repositório remoto. Leia o tutorial separado para detalhes.
-
-Use Python 3.12 no pod, de preferência. O cliente foi testado localmente com Python 3.14; os testes de integração não dependem de CUDA.
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
-python -m pip install -r requirements.txt
-python -m pip check
-```
-
-O primeiro comando cria um ambiente **separado do vLLM**; `source` o ativa só neste terminal. O pip instala dependências dentro dele. O PyTorch CPU é usado pelo carregador de dados do GuideLLM, não para executar o modelo; instalá-lo antes evita baixar bibliotecas CUDA desnecessárias no Linux. `pip check` procura incompatibilidades entre pacotes instalados.
-
-As dependências diretas centrais estão fixadas. Isso não é um lockfile completo e multiplataforma: cada execução salva todas as versões realmente instaladas em `client-packages.json`. Compare esse arquivo entre integrantes. Não atualize pacotes no meio da bateria experimental.
-
-## 2. Baixar o GGUF e o tokenizer para o SSD
-
-Modelo desta rodada: `arthuravianna/Qwen2.5-14B-Instruct-Q8_0.gguf`. O GGUF contém apenas os pesos; use o tokenizer do modelo base Qwen2.5. O vLLM GGUF requer `vllm-gguf-plugin` e é experimental. Se não carregar, preserve o `server.log`, marque a execução como falha e investigue a incompatibilidade; não troque silenciosamente a representação.
-
-```bash
-source .venv/bin/activate
-python -m pip install --upgrade huggingface_hub
-mkdir -p /workspace/models /workspace/models/Qwen2.5-14B-tokenizer
-hf download arthuravianna/Qwen2.5-14B-Instruct-Q8_0.gguf \
-  Qwen2.5-14B-Instruct-Q8_0.gguf \
-  --revision main \
-  --local-dir /workspace/models
-hf download Qwen/Qwen2.5-14B-Instruct \
-  config.json tokenizer.json tokenizer_config.json merges.txt vocab.json \
-  --revision main \
-  --local-dir /workspace/models/Qwen2.5-14B-tokenizer
-ls -lh /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf
-sha256sum /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf
-python -c 'import json; print("tokenizer model_type:", json.load(open("/workspace/models/Qwen2.5-14B-tokenizer/config.json"))["model_type"])'
-```
-
-`huggingface_hub` instala o comando `hf`; o primeiro `hf download` baixa somente o arquivo GGUF para o volume persistente, e o segundo lista explicitamente os arquivos do tokenizer e o `config.json` exigido pelo vLLM, incluindo `model_type: qwen2`. Não use `--include` neste comando: a versão da CLI instalada no Pod pode tratá-lo como seleção de nomes e ignorar o filtro. Nenhum servidor deve ser iniciado durante essa etapa. `ls` confirma o tamanho no SSD, `sha256sum` produz a impressão digital que deve ser registrada em `configs/*.json` e o último comando confirma que o vLLM conseguirá reconhecer a arquitetura do tokenizer.
-
-Não é necessário executar `prepare-tokenizer` nem preencher nenhum `SHA_REGISTRADO_NO_SOURCE_JSON`: o comando `hf download` acima já colocou o tokenizer no caminho usado pelos três runtimes. O hash que precisamos controlar nesta rodada é o SHA-256 do GGUF. Compartilhe **a mesma pasta** de tokenizer entre os integrantes. O servidor também aplica seu chat template; compare os templates e as contagens reais retornadas, não só os nomes dos modelos.
-
-### Artefato alternativo: safetensors quantizado em 8 bits
-
-Existe um experimento separado para o repositório [`arthuravianna/Qwen2.5-14B-Instruct-GGUF-8bit`](https://huggingface.co/arthuravianna/Qwen2.5-14B-Instruct-GGUF-8bit/tree/main). Apesar do nome conter `GGUF`, ele não contém um arquivo `.gguf`: são cinco shards `.safetensors`, com tensores `qweight` em `uint8`, cerca de 17 GB no total e metadados que declaram `quant_method: gguf`. Portanto, ele **não é o mesmo artefato** do `Q8_0.gguf` e seus resultados não entram na tabela de comparação justa dos três runtimes.
-
-Baixe-o antes de iniciar o benchmark:
-
-```bash
-mkdir -p /workspace/models/Qwen2.5-14B-Instruct-GGUF-8bit
-hf download arthuravianna/Qwen2.5-14B-Instruct-GGUF-8bit \
-  --revision main \
-  --local-dir /workspace/models/Qwen2.5-14B-Instruct-GGUF-8bit
-du -sh /workspace/models/Qwen2.5-14B-Instruct-GGUF-8bit
-ls -lh /workspace/models/Qwen2.5-14B-Instruct-GGUF-8bit/model-*.safetensors
-```
-
-O tokenizer está na própria pasta. Para testar vLLM desde a criação do processo, use os arquivos de configuração já incluídos:
-
-```bash
-unset HF_DEBUG VLLM_VENV
-export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
-nvidia-smi
-python bench.py run \
-  --config configs/vllm-8bit-safetensors.json \
-  --local-model-path /workspace/models/Qwen2.5-14B-Instruct-GGUF-8bit \
-  --launch configs/launch-vllm-8bit-safetensors.example.json \
-  --smoke --scenarios short --startup-timeout 1800
-```
-
-O `--gpu-memory-utilization 0.90` deixa uma margem explícita para buffers e evita ocupar toda a placa; registre-o como parte da configuração. Para a bateria completa, substitua o final por `--scenarios short medium long --repetitions 3`. Se o processo falhar, examine `results/<timestamp>/server.log` e mantenha a falha: não troque automaticamente para o GGUF nem para o checkpoint BF16. Esse repositório pode ser incompatível com o loader GGUF do vLLM mesmo estando armazenado em safetensors; essa incompatibilidade é precisamente o resultado a diagnosticar.
-
-Os erros observados estão consolidados em [docs/relatorio-falhas.md](docs/relatorio-falhas.md). O safetensors de 14B falhou por incompatibilidade entre `lm_head.weight` fornecido pelo checkpoint e `lm_head.qweight` esperado pelo loader. O GGUF verdadeiro de 14B falhou por OOM durante a materialização dos pesos, antes de uma reserva observável de KV cache. Em ambos os casos, a execução é uma falha de inicialização e não produz métricas de geração.
-
-### Próximo artefato: Qwen2.5-7B-Instruct-GGUF-8bit
-
-A próxima tentativa usa um artefato diferente e deve começar por uma inspeção, sem pressupor que o nome do repositório indique o formato físico:
-
-```bash
-mkdir -p /workspace/models/Qwen2.5-7B-Instruct-GGUF-8bit
-hf download arthuravianna/Qwen2.5-7B-Instruct-GGUF-8bit \
-  --revision main \
-  --local-dir /workspace/models/Qwen2.5-7B-Instruct-GGUF-8bit
-du -sh /workspace/models/Qwen2.5-7B-Instruct-GGUF-8bit
-find /workspace/models/Qwen2.5-7B-Instruct-GGUF-8bit -maxdepth 1 -type f -printf '%f\n' | sort
-```
-
-Antes de iniciar o vLLM, registre o formato e os metadados:
-
-```bash
-python - <<'PY'
-import json
-from pathlib import Path
-
-p = Path('/workspace/models/Qwen2.5-7B-Instruct-GGUF-8bit')
-config = json.loads((p / 'config.json').read_text())
-print('arquitetura:', config.get('architectures'))
-print('model_type:', config.get('model_type'))
-print('quantization_config:', config.get('quantization_config'))
-print('safetensors:', sorted(x.name for x in p.glob('*.safetensors')))
-print('gguf:', sorted(x.name for x in p.glob('*.gguf')))
-PY
-```
-
-Se o diretório contiver shards safetensors, use `configs/vllm-7b-8bit-safetensors.json` e `configs/launch-vllm-7b-8bit-safetensors.example.json`. Se contiver um arquivo `.gguf`, não reutilize esses arquivos: crie um perfil GGUF específico e registre o nome exato do arquivo. O primeiro teste deve ser:
-
-```bash
-unset HF_DEBUG VLLM_VENV
-export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
-nvidia-smi
-python bench.py run \
-  --config configs/vllm-7b-8bit-safetensors.json \
-  --local-model-path /workspace/models/Qwen2.5-7B-Instruct-GGUF-8bit \
-  --launch configs/launch-vllm-7b-8bit-safetensors.example.json \
-  --smoke --scenarios short --startup-timeout 1800
-```
-
-Os resultados do 7B ficam em uma execução própria. Só depois de o servidor iniciar e o smoke passar devemos executar `short medium long` com as repetições definidas; não misture esses números com o 14B, mesmo que a família Qwen seja a mesma.
-
-### Gerar um GGUF Q8_0 verdadeiro com llama.cpp
-
-O checkpoint `Qwen2.5-7B-Instruct-GGUF-8bit` não deve ser convertido diretamente: ele já é um safetensors quantizado e declara `quant_method: gguf`, justamente o layout que apresentou a incompatibilidade da `lm_head` no vLLM. Para gerar um GGUF verdadeiro, use o checkpoint Hugging Face original BF16/FP16 (`Qwen/Qwen2.5-7B-Instruct`) e faça a conversão em duas etapas:
-
-```bash
-cd /workspace
-git clone https://github.com/ggml-org/llama.cpp.git llama.cpp
-cmake -S /workspace/llama.cpp -B /workspace/llama.cpp/build -DGGML_CUDA=ON
-cmake --build /workspace/llama.cpp/build --target llama-quantize -j"$(nproc)"
-python -m pip install -r /workspace/llama.cpp/requirements.txt
-
-mkdir -p /workspace/models/Qwen2.5-7B-Instruct-original
-hf download Qwen/Qwen2.5-7B-Instruct \
-  --revision main \
-  --local-dir /workspace/models/Qwen2.5-7B-Instruct-original
-```
-
-O script do repositório verifica que a fonte não declara `quantization_config`, converte os pesos originais para um GGUF F16 e então chama `llama-quantize` com `Q8_0`:
-
-```bash
-cd /workspace/chatbot-runtime-bench
-chmod +x scripts/quantize_hf_to_gguf_q8_0.sh
-scripts/quantize_hf_to_gguf_q8_0.sh \
-  --llama-cpp-dir /workspace/llama.cpp \
-  --hf-model-dir /workspace/models/Qwen2.5-7B-Instruct-original \
-  --output-dir /workspace/models/Qwen2.5-7B-Instruct-GGUF-Q8_0
-```
-
-O resultado esperado é um arquivo como:
-
-```text
-/workspace/models/Qwen2.5-7B-Instruct-GGUF-Q8_0/Qwen2.5-7B-Instruct-original-Q8_0.gguf
-```
-
-O script imprime o tamanho, a assinatura `G G U F` e o SHA-256. O arquivo F16 intermediário pode ocupar aproximadamente 14 GB; confirme espaço livre no SSD antes de começar. O `Q8_0` final usa blocos de quantização do llama.cpp, não é o mesmo esquema `q_0` do checkpoint safetensors do Arthur. [Conversor oficial HF→GGUF](https://github.com/ggml-org/llama.cpp/blob/master/convert_hf_to_gguf.py) · [quantização Q8_0 no llama.cpp](https://github.com/ggml-org/llama.cpp/blob/master/tools/quantize/README.md)
-
-#### Atalhos pelo Makefile
-
-O `Makefile` reúne as etapas sem esconder downloads: `quantize-q8` depende apenas do checkpoint que você já baixou em `HF_MODEL_DIR`; o download só acontece quando você chama `download-source` explicitamente.
-
-As dependências Python do conversor llama.cpp são instaladas em `/workspace/llama-cpp-venv`, separado tanto do `.venv` do benchmark quanto do ambiente `/workspace/vllm-runtime/.venv`. Nunca execute `pip install -r /workspace/llama.cpp/requirements.txt` com o venv do vLLM ativado: esse arquivo pode trocar `torch`, `transformers`, `protobuf` e `huggingface_hub` e invalidar o runtime CUDA.
-
-```bash
-cd /workspace/chatbot-runtime-bench
-make help
-make download-source
-make inspect-source
-make quantize-q8
-make verify-gguf
-```
-
-Com `HF_TOKEN` já exportado, publique apenas o GGUF final:
-
-```bash
-make upload-hf \
-  HF_REPO_ID=yanwerneck/Qwen2.5-7B-Instruct-GGUF-Q8_0 \
-  HF_UPLOAD_FILENAME=Qwen2.5-7B-Instruct-Q8_0.gguf
-```
-
-O alvo cria o repositório se necessário, valida a assinatura e o SHA-256 e envia somente o arquivo GGUF. Não publica ambientes, logs, resultados ou o GGUF F16 intermediário.
-
-Depois de validar o arquivo, aponte o perfil de benchmark para o diretório que contém o GGUF e rode:
-
-```bash
-make smoke-vllm \
-  VLLM_MODEL_DIR=/workspace/models/Qwen2.5-7B-Instruct-GGUF-Q8_0 \
-  VLLM_CONFIG=configs/vllm-7b-gguf.json \
-  VLLM_LAUNCH=configs/launch-vllm-7b-gguf.example.json
-```
-
-Para usar outros volumes ou mais threads, sobrescreva variáveis sem editar o Makefile:
-
-```bash
-make quantize-q8 \
-  LLAMA_CPP_DIR=/workspace/llama.cpp \
-  HF_MODEL_DIR=/workspace/models/Qwen2.5-7B-Instruct-original \
-  GGUF_OUTPUT_DIR=/workspace/models/Qwen2.5-7B-Instruct-GGUF-Q8_0 \
-  QUANTIZE_THREADS=8
-```
-
-## 3. Preparar a configuração do benchmark
-
-Neste ponto ainda não existe servidor. Não execute `curl` agora: primeiro escolha um runtime e siga a seção correspondente em **4. Smoke test**, que mostra o comando exato para iniciar o servidor. Depois que o processo estiver em foreground e o log indicar que a API está disponível, o `curl` de cada runtime confirma o ID servido.
-
-Edite o JSON com seu editor ou com `nano configs/vllm.json` (instale `nano` se não estiver disponível). Cada campo tem uma finalidade:
-
-| Campo | O que registrar |
-|---|---|
-| `base_url` | Raiz HTTP do servidor; não coloque `/chat/completions`. |
-| `model` | ID exatamente como aparece em `/v1/models`; os exemplos usam `qwen14b-q8-gguf`. |
-| `tokenizer` | Pasta local; caminhos relativos são relativos ao diretório em que você executa o comando. |
-| `context_window` | Limite realmente configurado no runtime. Mudar este JSON **não** reconfigura o servidor. |
-| `cache_policy` | Política de reutilização entre requisições, após verificá-la. Ex.: `disabled-confirmed` ou `enabled-recorded: detalhes`. |
-| `runtime_version` | Versão do vLLM/Ollama ou commit do llama.cpp. |
-| `model_artifact` | Revisão do checkpoint ou SHA-256 do GGUF e tipo exato de quantização. |
-| `server_command` | Comando/configuração de inicialização, **sem chaves ou senhas**. |
-| `notes` | Alteração experimental, chat template, defaults de geração relevantes, particularidades do pod. |
-
-Se a API exige autenticação, leia a chave sem gravá-la no histórico do shell Bash:
-
-```bash
-read -rs -p 'Chave da API: ' BENCH_API_KEY
-export BENCH_API_KEY
-```
-
-A tecla Enter encerra a leitura. O Python obtém o valor do ambiente e o remove dos arquivos de configuração/resultado que grava. Não coloque segredos em `notes` ou `server_command`. Os resultados contêm prompts, respostas e detalhes do ambiente; revise antes de compartilhar.
-
-## 4. Smoke test: provar que o caminho funciona
-
-### O carregamento do modelo entra onde?
-
-Há duas modalidades. Sem `--launch`, o benchmark conecta a um servidor já existente: **não mede a criação do processo nem pode afirmar quando os pesos foram carregados**. Ele mede apenas a primeira requisição observada por este cliente. Com `--launch`, o próprio benchmark inicia o comando em foreground e mede:
-
-1. `process_to_api_observed_s`: criação do processo até `/v1/models` listar o alias. Isso mede prontidão HTTP, mas não prova que os pesos já estão residentes.
-2. `process_to_first_content_s`: criação do processo até o primeiro conteúdo da primeira geração. Este é o indicador principal do custo de carregamento tardio, pois inclui leitura dos pesos locais, alocação, inicialização de kernels e compilação que ocorram antes/durante a primeira geração.
-3. `process_to_response_end_s`: criação do processo até o fim da primeira resposta; inclui também o decode dessa resposta.
-
-Para os três runtimes, execute o processo real do servidor via um arquivo `--launch` diferente, sempre parado antes do teste:
-
-| Runtime | Comando foreground a colocar no arquivo `--launch` | Marco de carregamento |
-|---|---|---|
-| vLLM | `vllm serve ...` com o caminho local do GGUF e tokenizer correspondente | processo → primeiro conteúdo; `/v1/models` pode anteceder a carga completa |
-| llama.cpp | `llama-server -m /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf ...` | processo → primeiro conteúdo; o servidor normalmente carrega o GGUF no startup |
-| Ollama | `ollama serve` | processo → primeiro conteúdo, porque `ollama serve` pode ficar pronto antes de `ollama run` carregar o modelo |
-
-O arquivo deve conter apenas um array JSON de argumentos, sem `source`, `&`, `docker -d`, pipes ou redirecionamentos. Para Ollama, o benchmark precisa conseguir alcançar `/v1/models` e `/v1/chat/completions`; se `ollama serve` não resolver o modelo sozinho, use um wrapper foreground documentado que mantenha o processo e faça o preload local sem baixar arquivos. O wrapper deve receber as variáveis offline apropriadas e ser validado no `server.log`.
-
-O download do modelo continua fora do benchmark: prepare os arquivos/blob no SSD antes de iniciar. Se o runtime baixar depois da criação do processo, a execução não é comparável entre integrantes e deve ser marcada como inválida, não “corrigida” subtraindo uma estimativa de internet.
-
-### Protocolo por runtime: comandos exatos
-
-Os três procedimentos abaixo usam o mesmo arquivo local:
-
-```text
-/workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf
-```
-
-O diretório `/workspace/models` precisa existir e o arquivo precisa estar lá **antes** da medição. Rode `sha256sum /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf` e registre o resultado em `model_artifact` nas configurações. Não há troca automática de formato: se um runtime falhar ao carregar esse GGUF, preserve o erro e trate a execução como falha diagnóstica.
-
-Em todos os casos, use dois terminais: o primeiro mantém o servidor em foreground; o segundo verifica a API e executa o benchmark. O benchmark deve ser executado com o servidor parado quando usar `--launch`.
-
-#### A. vLLM
-
-**Preparação (uma vez no pod):** o vLLM deve estar instalado no ambiente próprio do runtime. O cliente do benchmark fica em outro `.venv`.
-
-```bash
-mkdir -p /workspace/vllm-runtime
-# Se o ambiente ainda não existir:
-python3 -m venv /workspace/vllm-runtime/.venv
-source /workspace/vllm-runtime/.venv/bin/activate
-unset VLLM_VENV
-python -m pip install -U vllm vllm-gguf-plugin
-python -c 'import vllm; print(vllm.__version__)'
-nvidia-smi
-vllm serve --help > /workspace/vllm-runtime/vllm-serve-help.txt
-```
-
-O `vllm-gguf-plugin` é necessário para o caminho GGUF em versões que o exigem. O último comando salva a interface efetivamente instalada; se a importação falhar por incompatibilidade CUDA, não mascare o erro instalando outro modelo.
-
-**Servidor exato (Terminal 1):**
-
-```bash
-source /workspace/vllm-runtime/.venv/bin/activate
-vllm serve /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf \
-  --tokenizer /workspace/models/Qwen2.5-14B-tokenizer \
-  --served-model-name qwen14b-q8-gguf \
-  --host 127.0.0.1 \
-  --port 8000 \
-  --max-model-len 4096
-```
-
-`serve` cria o processo; o caminho após `serve` é o GGUF; `--tokenizer` aponta para o tokenizer local; `--served-model-name` define o ID que aparecerá na API; `--host`/`--port` definem a API; `--max-model-len` fixa o contexto usado nesta rodada. O processo fica em foreground para que `server.log` preserve o carregamento, a alocação e qualquer erro.
-
-**Verificação e benchmark (Terminal 2):**
-
-```bash
-curl http://127.0.0.1:8000/v1/models
-curl http://127.0.0.1:8000/metrics | head
-source .venv/bin/activate
-python bench.py run \
-  --config configs/vllm.json \
-  --local-model-path /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf \
-  --smoke --scenarios short
-```
-
-O primeiro `curl` confirma o ID `qwen14b-q8-gguf`; o segundo confirma se há métricas Prometheus. Sem `--launch`, esse smoke mede um servidor já iniciado. Para medir também a partida, pare o servidor e use o arquivo `configs/launch-vllm.example.json`, que contém exatamente o mesmo comando acima:
-
-```bash
-source .venv/bin/activate
-python bench.py run \
-  --config configs/vllm.json \
-  --local-model-path /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf \
-  --launch configs/launch-vllm.example.json \
-  --smoke --scenarios short --startup-timeout 1800
-```
-
-Nesse modo, `process_to_api_observed_s` é o processo até a API responder, enquanto `process_to_first_content_s` inclui o custo observado até o primeiro token: leitura do GGUF, alocação, kernels e eventuais compilações tardias. A API pronta não prova, sozinha, que os pesos já estão residentes.
-
-#### B. llama.cpp (`llama-server`)
-
-**Compilar (uma vez no pod):**
-
-```bash
-cd /workspace
-git clone https://github.com/ggml-org/llama.cpp.git
-cmake -S /workspace/llama.cpp -B /workspace/llama.cpp/build \
-  -DGGML_CUDA=ON -DCMAKE_BUILD_TYPE=Release
-cmake --build /workspace/llama.cpp/build --config Release -j "$(nproc)"
-/workspace/llama.cpp/build/bin/llama-server --help > /workspace/llama-server-help.txt
-```
-
-`GGML_CUDA=ON` compila os kernels CUDA; `cmake --build` gera o executável; `llama-server --help` registra as opções da versão usada. Registre também o commit: `git -C /workspace/llama.cpp rev-parse HEAD`.
-
-**Servidor exato (Terminal 1):**
-
-```bash
-/workspace/llama.cpp/build/bin/llama-server \
-  -m /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf \
-  --alias qwen14b-q8-gguf \
-  --host 127.0.0.1 \
-  --port 8080 \
-  -c 4096 \
-  -ngl 99 \
-  --parallel 1 \
-  --metrics
-```
-
-`-m` seleciona o GGUF local; `--alias` define o ID da API; `-c` fixa o contexto; `-ngl 99` solicita que todas as camadas possíveis sejam descarregadas na GPU; `--parallel 1` mantém uma requisição simultânea; `--metrics` habilita métricas do servidor quando suportado. Se a versão compilada rejeitar uma flag, preserve a saída de erro e a versão em vez de trocar silenciosamente o comando.
-
-**Verificação e benchmark (Terminal 2):**
-
-```bash
-curl http://127.0.0.1:8080/v1/models
-source .venv/bin/activate
-python bench.py run \
-  --config configs/llamacpp.json \
-  --local-model-path /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf \
-  --smoke --scenarios short
-```
-
-O `curl` confirma que o alias servido corresponde ao campo `model` de `configs/llamacpp.json`. Para medir a partida, pare o `llama-server` e crie `configs/launch-llamacpp.json` com este array JSON (cada item é um argumento separado):
-
-```json
-[
-  "/workspace/llama.cpp/build/bin/llama-server",
-  "-m", "/workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf",
-  "--alias", "qwen14b-q8-gguf",
-  "--host", "127.0.0.1",
-  "--port", "8080",
-  "-c", "4096",
-  "-ngl", "99",
-  "--parallel", "1",
-  "--metrics"
-]
-```
-
-Execute o ciclo de vida com:
-
-```bash
-source .venv/bin/activate
-python bench.py run \
-  --config configs/llamacpp.json \
-  --local-model-path /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf \
-  --launch configs/launch-llamacpp.json \
-  --smoke --scenarios short --startup-timeout 1800
-```
-
-Aqui o tempo processo → primeiro conteúdo inclui o carregamento do GGUF e a preparação da GPU feita no início pelo `llama-server`. O arquivo `server.log` é a evidência para saber se todas as camadas foram para a GPU, se houve offload parcial ou se o processo falhou.
-
-#### C. Ollama
-
-**Importar o mesmo GGUF local (uma vez no pod):** crie um `Modelfile` sem URL e sem `ollama pull`:
-
-```bash
-cat > /workspace/Modelfile-qwen14b <<'EOF'
-FROM /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf
-PARAMETER num_ctx 4096
-EOF
-ollama create qwen14b-q8-gguf -f /workspace/Modelfile-qwen14b
-ollama show qwen14b-q8-gguf
-ollama list
-```
-
-`FROM` importa o arquivo que já está no SSD; `num_ctx` fixa o contexto do modelo; `ollama create` prepara o blob local antes do relógio. `ollama show` e `ollama list` confirmam o nome e a origem. Se o Ollama não aceitar o GGUF, preserve a saída e marque a execução como falha.
-
-**Servidor exato (Terminal 1):**
-
-```bash
-OLLAMA_HOST=127.0.0.1:11434 ollama serve
-```
-
-`ollama serve` fica em foreground e expõe a API em `127.0.0.1:11434`. Ele pode responder à saúde antes de carregar o modelo; por isso o benchmark mede também o primeiro conteúdo, quando o custo de carregamento tardio aparece. Não execute `ollama pull` durante o benchmark.
-
-**Verificação e benchmark (Terminal 2):**
-
-```bash
-curl http://127.0.0.1:11434/api/tags
-curl http://127.0.0.1:11434/v1/models
-source .venv/bin/activate
-python bench.py run \
-  --config configs/ollama.json \
-  --local-model-path /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf \
-  --smoke --scenarios short
-```
-
-O primeiro `curl` verifica o catálogo nativo; o segundo verifica a compatibilidade OpenAI usada pelo cliente. Preencha `configs/ollama.json` com `model: qwen14b-q8-gguf` e `base_url: http://127.0.0.1:11434`. Para medir a partida, pare o serviço e crie `configs/launch-ollama.json`:
-
-```json
-["ollama", "serve"]
-```
-
-O array não contém `export`, `&` ou redirecionamentos: o benchmark inicia somente esse processo em foreground. Como `OLLAMA_HOST` já foi exportada no Terminal 1, o processo lançado herda a porta 11434. Se quiser que o próprio benchmark seja o primeiro processo Ollama, exporte `OLLAMA_HOST=127.0.0.1:11434` no Terminal 2 antes do `bench.py` e mantenha a porta livre.
-
-Rode:
-
-```bash
-source .venv/bin/activate
-python bench.py run \
-  --config configs/ollama.json \
-  --local-model-path /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf \
-  --launch configs/launch-ollama.json \
-  --smoke --scenarios short --startup-timeout 1800
-```
-
-O `ollama create` fica fora da medição; o `--launch` mede apenas o processo `ollama serve` e o carregamento tardio provocado pela primeira requisição. Registre `load_duration` retornado pelo Ollama quando disponível. Se o servidor ficar pronto, mas a primeira geração falhar ou o modelo for descarregado, a execução é falha, não um resultado válido.
-
-#### Comparação justa dos três comandos
-
-Para cada runtime, mantenha o mesmo GGUF, a mesma revisão do tokenizer quando aplicável, contexto 4096, uma requisição em andamento e prompts idênticos. Use os três comandos com `--launch` para comparar inicialização, e os três sem `--launch` somente para comparar operação contra servidores já aquecidos. Salve a versão (`vllm --version`, commit do llama.cpp, `ollama version`), o comando, o SHA-256 e os logs. Não combine resultados se um runtime tiver falhado, feito download durante a execução ou usado outro artefato.
-
-Execute o mesmo smoke, trocando apenas a configuração e o arquivo `--launch`:
-
-```bash
-# vLLM
-python bench.py run --config configs/vllm.json --local-model-path /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf --launch configs/launch-vllm.example.json --smoke --scenarios short
-
-# llama.cpp
-python bench.py run --config configs/llamacpp.json --local-model-path /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf --launch configs/launch-llamacpp.json --smoke --scenarios short
-
-# Ollama
-python bench.py run --config configs/ollama.json --local-model-path /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf --launch configs/launch-ollama.json --smoke --scenarios short
-```
-
-Faz GET de disponibilidade (sem gerar texto), **uma primeira requisição já cronometrada**, três requisições de aquecimento, três medições GuideLLM e uma referência final com o mesmo prompt inicial. Sempre uma de cada vez. A primeira requisição também verifica SSE/usage; não há um POST oculto de preflight antes dela. O aquecimento agora aparece no resumo, identificado por `phase=warmup`.
-
-O smoke aceita metadados ainda marcados como `PREENCHER`; **não é um resultado final**. Falhas de protocolo ou requisições incompletas geram saída diferente de zero e ficam registradas. Interromper com Ctrl+C preserva fases já concluídas.
-
-Uma execução só pode ser analisada como válida se cada bloco terminar com a quantidade esperada de sucessos. Se o GuideLLM registrar, por exemplo, 2 de 3 requisições, trate o bloco como falho/incompleto e não como “validação real aprovada”; consulte o JSON bruto e o erro antes de repetir. Os testes simulados e um smoke concluído verificam o caminho do instrumento, mas não comprovam que cada runtime/modelo real está validado no pod.
-
-Esse caso de amostra faltante continua sendo um diagnóstico do caminho GuideLLM/servidor, não uma correção já demonstrada para todos os runtimes. Até haver evidência reproduzível de execução completa, mantenha a bateria marcada como falha.
-
-O cliente inclui uma compatibilidade estreita para o GuideLLM 0.7.4: após o encerramento sinalizado, ela drena por até cinco segundos uma atualização terminal real que tenha chegado atrasada à fila. Não repete requisições nem cria métricas e não substitui a guarda de contagem; se a atualização não chegar, o bloco continua falhando.
-
-### 4.1. Medir desde a partida de qualquer runtime
-
-Pare manualmente o servidor que você iniciou. O benchmark **não mata um servidor existente**: se a porta já estiver ocupada, recusa o lançamento. Use o arquivo `launch` correspondente ao runtime (`configs/launch-vllm.example.json`, `configs/launch-llamacpp.json` ou `configs/launch-ollama.json`) e mantenha nele apenas argumentos JSON, sem `source`, `&`, redirecionamentos ou comandos de shell.
-
-Os exemplos contêm caminhos do pod e contexto 4096, mas não são tuning universal. O comando escrito em `server_command` continua sendo metadado: **só o arquivo passado com `--launch` é executado**. Não ponha segredos nesses arquivos; use variáveis de ambiente apropriadas ao runtime.
-
-```bash
-# vLLM
-python bench.py run --config configs/vllm.json --local-model-path /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf --launch configs/launch-vllm.example.json --smoke --scenarios short --startup-timeout 1800 --initial-state 'GGUF no SSD; caches não limpos'
-
-# llama.cpp
-python bench.py run --config configs/llamacpp.json --local-model-path /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf --launch configs/launch-llamacpp.json --smoke --scenarios short --startup-timeout 1800 --initial-state 'GGUF no SSD; caches não limpos'
-
-# Ollama
-python bench.py run --config configs/ollama.json --local-model-path /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf --launch configs/launch-ollama.json --smoke --scenarios short --startup-timeout 1800 --initial-state 'GGUF no SSD; caches não limpos'
-```
-
-Esse comando:
-
-1. Inicia a amostragem da GPU e lança seu runtime em primeiro plano, sem shell.
-2. Cronometra desde a criação do processo até `/v1/models` listar o modelo.
-3. Envia o primeiro POST de inferência e mede TTFT, resposta total e tempo desde a partida até o primeiro conteúdo e fim da resposta.
-4. Mede aquecimento e blocos GuideLLM, depois repete o prompt inicial como referência aquecida.
-5. Salva os relatórios e encerra **somente o grupo do processo que criou**, inclusive se o benchmark falhar.
-
-`--startup-timeout` limita a espera pela API. `--timeout` é o limite de espera de leitura HTTP, não um prazo total rígido da bateria. Durante a inicialização, veja `results/DATA/server.log`; os logs do runtime podem conter informações sensíveis e não recebem filtragem completa. Revise antes de compartilhar.
-
-Só são aceitos destinos locais no modo `--launch`. Use executáveis diretos/foreground, não serviços já em execução, `docker -d` ou wrappers que se desconectam do processo. Para Ollama e llama.cpp, crie arrays equivalentes com o comando correto do seu ambiente. Um Ollama novo pode carregar o modelo somente na primeira geração; a métrica processo → primeiro conteúdo captura esse custo, enquanto processo → API não prova residência dos pesos.
-
-**Uma execução produz uma amostra de inicialização.** `--repetitions 3` repete blocos GuideLLM sem reiniciar o servidor. Para três partidas, execute o comando com `--launch` três vezes, preferindo `--repetitions 1`; cada chamada gera outra pasta e encerra seu próprio servidor. Não tire um p95 de cold start de uma única partida.
-
-### 4.2. O que significa “frio”?
-
-Um processo novo não garante cache de disco ou compilação CUDA frios. `--initial-state` registra as condições, **não apaga caches**. Sem `--launch`, medimos a primeira requisição deste cliente, mas não sabemos se o servidor já foi aquecido por alguém.
-
-Downloads, provisionamento e instalação ficam na preparação, fora do experimento. Carregamento dos pesos locais, inicialização de kernels e compilação continuam dentro da medição. Separar SSD, PCIe e compilação exige logs/profiling; este cliente não inventa essa decomposição.
-
-O prompt inicial padrão é uma pergunta em português sobre RAM/VRAM com limite de 128 tokens de saída. Para usar seu próprio caso de chatbot:
-
-```bash
-python bench.py run --config configs/vllm.json --local-model-path /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf --launch configs/launch-vllm.example.json --first-prompt-file pergunta.txt --scenarios short --requests 30 --repetitions 1
-```
-
-Para repetir a mesma pergunta nos outros runtimes:
-
-```bash
-python bench.py run --config configs/llamacpp.json --local-model-path /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf --launch configs/launch-llamacpp.json --first-prompt-file pergunta.txt --scenarios short --requests 30 --repetitions 1
-python bench.py run --config configs/ollama.json --local-model-path /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf --launch configs/launch-ollama.json --first-prompt-file pergunta.txt --scenarios short --requests 30 --repetitions 1
-```
-
-Crie `pergunta.txt` em UTF-8 com seu editor e use o mesmo conteúdo nos três runtimes. Esse arquivo não passa por truncamento automático; confirme que cabe no contexto. A referência final repete exatamente esse prompt e pode se beneficiar de cache de prefixo: documente a política ao comparar frio/quente.
-
-### 4.3. Como ler as velocidades
-
-`TTFT` é o tempo do envio até o primeiro conteúdo não vazio observado. `decode_tokens_s` é a velocidade média depois desse primeiro conteúdo (`1000 / mean_itl_ms`), usando o intervalo entre o primeiro e o último token; não inclui o tempo inicial. `effective_tokens_s` é a saída dividida pela duração total da requisição e inclui TTFT. Portanto uma resposta pode ter decode rápido e velocidade efetiva menor por causa do prefill/espera inicial. Nenhuma dessas colunas é throughput agregado de vários usuários.
-
-As faixas de contexto e `--kv-bytes-per-token` são um proxy lógico da carga: estimam bytes por token a partir da arquitetura e do dtype informados, não medem bytes físicos alocados. Já `--collect-kv-metrics` registra, quando o servidor expõe o gauge, a fração ocupada do pool KV; isso também não é percentual de VRAM. `nvidia-smi` mostra memória total usada na GPU, sem atribuí-la exclusivamente ao KV ou ao runtime.
-
-## 5. Primeira bateria: curta e média
-
-Depois de preencher os metadados e confirmar o smoke de cada runtime, rode a bateria curta/média. Pare os três servidores manuais antes de usar `--launch`.
-
-```bash
-python bench.py run --config configs/vllm.json --local-model-path /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf --scenarios short medium --requests 30 --repetitions 3
-```
-
-Repita exatamente a mesma bateria para os outros runtimes:
-
-```bash
-python bench.py run --config configs/llamacpp.json --local-model-path /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf --scenarios short medium --requests 30 --repetitions 3
-python bench.py run --config configs/ollama.json --local-model-path /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf --scenarios short medium --requests 30 --repetitions 3
-```
-
-Isso faz 30 medições por cenário por repetição: **180 requisições na fase measure**, mais aquecimento medido, primeira resposta e referência final. Há apenas **uma requisição em andamento**, não 30 usuários. As três repetições ajudam a observar variação entre blocos; não são três réplicas independentes de hardware nem três partidas.
-
-As sementes variam por cenário/repetição e são iguais entre runtimes quando os argumentos são iguais. O aquecimento usa sementes diferentes. A ordem dos cenários gira entre repetições para reduzir, sem eliminar, efeitos de posição e aquecimento térmico.
-
-## 6. Cenário longo, só depois
-
-```bash
-python bench.py run --config configs/vllm.json --local-model-path /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf --scenarios short medium long --requests 100 --repetitions 3
-```
-
-Para llama.cpp e Ollama, use os mesmos argumentos e apenas troque a configuração:
-
-```bash
-python bench.py run --config configs/llamacpp.json --local-model-path /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf --scenarios short medium long --requests 100 --repetitions 3
-python bench.py run --config configs/ollama.json --local-model-path /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf --scenarios short medium long --requests 100 --repetitions 3
-```
-
-São **900 medições**; isso pode levar bastante tempo e consumir horas cobradas no RunPod. Primeiro valide os cenários menores. O longo usa aproximadamente 8192 tokens de conteúdo e teto de 128 tokens de saída. O guard exige `context_window >= 8576`, reservando 256 tokens para template; essa margem não comprova que o modelo cabe na VRAM. Configure e valide o servidor, por exemplo com contexto de 9216 ou maior se houver memória, antes de mudar o JSON.
-
-Não suponha que a RTX 3090 comporte qualquer contexto com um modelo de 14B em 8 bits. Reduza o escopo se faltar memória e registre o cenário como não suportado; não o omita silenciosamente da comparação.
-
-## 7. Ollama e llama.cpp
-
-### Grade de contexto/KV (inclusive no vLLM)
-
-```bash
-python bench.py run --config configs/vllm.json \
-  --local-model-path /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf \
-  --input-tokens 256 512 1024 2048 3072 \
-  --collect-kv-metrics --requests 30 --repetitions 3
-```
-
-Rode a mesma grade para cada runtime, mantendo o servidor correspondente iniciado e a porta/configuração corretas:
-
-```bash
-python bench.py run --config configs/llamacpp.json \
-  --local-model-path /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf \
-  --input-tokens 256 512 1024 2048 3072 \
-  --requests 30 --repetitions 3
-
-python bench.py run --config configs/ollama.json \
-  --local-model-path /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf \
-  --input-tokens 256 512 1024 2048 3072 \
-  --requests 30 --repetitions 3
-```
-
-`--input-tokens` substitui os cenários fixos. O template soma tokens; as faixas no HTML usam a entrada real. `--collect-kv-metrics` coleta ocupação real do pool KV em `/metrics`, quando disponível no vLLM; não é percentual da VRAM. Mantenha a coleta igual entre execuções, pois tem custo.
-
-O parâmetro `--collect-kv-metrics` só produz dados quando o runtime expõe o gauge esperado; mantenha-o no vLLM e registre a ausência nos outros dois. A grade de `--input-tokens`, TTFT, tokens/s, tokens reais, erros e GPU continua comparável entre os três.
-
-Para adicionar MiB de KV lógico **estimado**, use `--kv-bytes-per-token N`: `N = 2 × camadas × cabeças KV × dimensão da cabeça × bytes por elemento`, para uma sequência e atenção completa. Use arquitetura e dtype real do cache, não os bits dos pesos. Sem o coeficiente, não inventamos MiB; reserva, blocos e arquiteturas diferentes não são cobertos pela estimativa.
-
-Use os mesmos comandos com `--config configs/ollama.json` ou `--config configs/llamacpp.json`. Preencha o ID real do modelo, a versão e o artefato. O servidor deve expor `/v1/models` e `/v1/chat/completions` com streaming e usage.
-
-- Ollama: configure o contexto no modelo/servidor e mantenha o modelo carregado durante a bateria. Não assuma que o JSON deste cliente muda `num_ctx`.
-- llama.cpp: execute `llama-server`, não o CLI interativo; confira o alias do modelo e o chat template.
-- vLLM: use o servidor que você já instalou. Não instale o runtime no venv do benchmark.
-
-Use o mesmo caminho/hash do GGUF nas três configurações. Se isso não for possível, não combine as tabelas nem atribua a diferença exclusivamente ao runtime.
-
-## 8. Onde estão os resultados?
-
-Cada execução cria `results/DATA_UTC/`, sem sobrescrever execuções anteriores:
-
-| Arquivo | Conteúdo |
-|---|---|
-| `lifecycle.html` / `lifecycle.json` | Inicialização, primeira resposta, referência final e estado observado. |
-| `first-request.json` / `warm-reference.json` | Tempos, prompt, resposta e offsets de eventos SSE dessas requisições. Preserva tempos parciais se falharem. |
-| `server.log` | stdout/stderr do runtime, somente com `--launch`; examine antes de compartilhar. |
-| `summary.html` | Relatório integrado: partida, TTFT, tokens/s, faixas de contexto/KV e GPU por fase. |
-| `context-summary.json` | Velocidades por faixa real de entrada; MiB lógicos estimados quando configurados. |
-| `gpu-summary.json` | Memória, utilização, temperatura e potência por GPU/fase. |
-| `kv-cache.csv` | Ocupação do pool KV via `/metrics`, se solicitada. |
-| `system.csv` | CPU, RAM, espaço e contadores host-wide de I/O amostrados durante a execução. |
-| `events.csv` | Mudanças de fase com timestamp para correlacionar telemetria e ocorrências. |
-| `telemetry-summary.json` | Médias/máximos de GPU, CPU, RAM e KV por fase. |
-| `summary.csv` / `summary.json` | Uma linha por fase, cenário e repetição; filtre `phase` na análise. |
-| `r1-short-measure.json` | Relatório bruto GuideLLM, requisições, tempos, textos e contagens. |
-| `*-requests.csv` | Uma linha por requisição, incluindo status, para análise no R/Python. |
-| `r1-short-warmup.json` | Aquecimento, separado. |
-| `*-config.json` | Argumentos da fase, com perfil síncrono e sementes. |
-| `manifest.json` | Configuração, status final, hash do tokenizer e ambiente. |
-| `client-packages.json` | Versões reais do cliente. Não confundir com versões do runtime em outro venv. |
-| `gpu.csv` | Amostras locais de memória, utilização, temperatura e potência, aproximadamente a cada segundo. |
-| `gpu-before.json` / `gpu-after.json` | Snapshots de `nvidia-smi`; ausência de GPU não impede testar o cliente. |
-
-Baixe a pasta de resultados para o computador e abra `summary.html`. Não precisa servir a página publicamente. O monitor coleta **todas as GPUs visíveis** e não identifica processos; o máximo observado não é um pico exato nem memória exclusivamente atribuível ao runtime. Se usar servidor remoto, esse monitor mede o host do cliente, não o servidor.
-
-Para comparar: confira `status=complete`, ausência de erros, hashes iguais de tokenizer e de requisições (`requests_sha256`), tamanhos reais semelhantes de saída, mesma GPU e política de cache documentada. Não compare diretamente linhas com saídas de comprimentos muito diferentes.
-
-## 9. Testes do projeto
-
-```bash
-python -m unittest discover -s tests -v
-python tests/integration_mock.py
-```
-
-O primeiro testa validação, estatísticas, lançamento seguro e cronometria inicial com servidor simulado. O segundo usa o **GuideLLM instalado**, um tokenizer local de teste e HTTP/SSE; verifica concorrência máxima 1, primeira resposta e aquecimento identificado no resumo. Não mede desempenho de GPU, não valida os três runtimes reais e não substitui o smoke no RunPod.
-
-## Referências
-
-- [GuideLLM: código e releases](https://github.com/vllm-project/guidellm) — ferramenta aberta do ecossistema vLLM, não uma certificação ou padrão universal de benchmark.
-- [Perfil synchronous e execução](https://vllm-project.github.io/guidellm/0.7.0/getting-started/benchmark/) — explicitamos o perfil; o default sweep não é adequado a este trabalho.
-
-## 8. Protocolo atual: métricas canônicas, telemetria e KV sweep
-
-### Preparação reproduzível antes do benchmark
-
-O modelo da rodada é selecionado sem editar os comandos. O 7B oficial desta rodada é [`arthuravianna/Qwen2.5-7B-Instruct-Q8_0.gguf`](https://huggingface.co/arthuravianna/Qwen2.5-7B-Instruct-Q8_0.gguf):
-
-```bash
-# Qwen 7B GGUF Q8_0 (padrão)
+git clone git@github.com:yanwerneck/llm_local_inference_masters.git
+cd llm_local_inference_masters/chatbot-runtime-bench
 make prepare-benchmark MODEL_SIZE=7B
+make prepare-ollama MODEL_SIZE=7B
+make bench MODEL_SIZE=7B
+```
 
-# Qwen 14B GGUF Q8_0
+O alvo `bench` é um alias de `bench-all`.
+
+## Modelo usado
+
+O modelo 7B oficial desta rodada é [`arthuravianna/Qwen2.5-7B-Instruct-Q8_0.gguf`](https://huggingface.co/arthuravianna/Qwen2.5-7B-Instruct-Q8_0.gguf). O `make prepare-benchmark MODEL_SIZE=7B` baixa esse GGUF e o tokenizer base para o SSD. O tokenizer não é o peso: ele é necessário para construir prompts e contar tokens comparavelmente.
+
+Para a rodada 14B:
+
+```bash
+make prepare-benchmark MODEL_SIZE=14B
+make prepare-ollama MODEL_SIZE=14B
+make bench MODEL_SIZE=14B
+```
+
+Se o arquivo estiver em outro caminho:
+
+```bash
 make prepare-benchmark MODEL_SIZE=14B \
   MODEL_14B_GGUF=/workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf
 ```
 
-O comando equivalente, sem Make, para baixar o 7B é:
+O 14B pode exceder a VRAM da RTX 3090. Isso é uma falha experimental válida: preserve o log, sem substituir automaticamente pelo 7B.
+
+## O que cada alvo faz
+
+### `make prepare-benchmark`
+
+Executa a preparação completa, nesta ordem:
+
+1. baixa o GGUF selecionado para o SSD;
+2. cria as pastas necessárias;
+3. baixa `config.json`, `tokenizer_config.json`, tokenizer e arquivos especiais;
+4. verifica assinatura `GGUF`, tamanho e SHA-256;
+5. cria `results/`;
+6. instala `requirements.txt` no Python indicado por `PYTHON`;
+7. valida imports do cliente (`guidellm`, `httpx`, `psutil`, `transformers`);
+8. valida os JSONs do modelo selecionado;
+9. verifica os executáveis de vLLM, llama-server e Ollama.
+
+Não inicia servidores e não mede desempenho.
 
 ```bash
-mkdir -p /workspace/models/Qwen2.5-7B-Instruct-Q8_0
-hf download arthuravianna/Qwen2.5-7B-Instruct-Q8_0.gguf \
-  Qwen2.5-7B-Instruct-Q8_0.gguf \
-  --revision main \
-  --local-dir /workspace/models/Qwen2.5-7B-Instruct-Q8_0
+make prepare-benchmark MODEL_SIZE=7B
+make prepare-benchmark MODEL_SIZE=14B
 ```
 
-Os perfis e launchers são escolhidos automaticamente para o tamanho. Se o GGUF estiver em outra pasta, sobrescreva `MODEL_7B_GGUF` ou `MODEL_14B_GGUF`; o arquivo de launch correspondente também pode ser substituído com `VLLM_LAUNCH`, `LLAMA_LAUNCH` ou `OLLAMA_LAUNCH`.
-
-No pod, execute a preparação completa. Ela cria as pastas, baixa o GGUF selecionado e baixa somente os arquivos do tokenizer para o SSD:
+O cliente usa por padrão `/workspace/chatbot-runtime-bench/.venv`. A criação e instalação podem ser executadas isoladamente:
 
 ```bash
-make prepare-benchmark
-make prepare-ollama
+make install-benchmark
 ```
 
-`prepare-benchmark` cria `results/`, baixa o GGUF do repositório configurado em `HF_GGUF_REPO`, baixa o tokenizer base em `HF_TOKENIZER_MODEL`, instala as dependências no Python apontado por `PYTHON`, valida JSONs, assinatura do GGUF, imports do cliente e executáveis de vLLM, llama-server e Ollama. Não inicia servidores e não mede nenhum tempo. Se algum caminho ou repositório for diferente no pod, sobrescreva `MODEL_7B_GGUF`, `MODEL_14B_GGUF`, `HF_GGUF_REPO`, `HF_GGUF_FILENAME`, `HF_TOKENIZER_MODEL`, `VLLM_BIN` ou `LLAMA_SERVER_BIN`.
+Para usar outro local ou Python:
 
-Se quiser executar apenas partes da preparação:
+```bash
+make install-benchmark \
+  BENCH_VENV=/workspace/meu-bench/.venv \
+  PYTHON=/workspace/meu-bench/.venv/bin/python
+```
+
+Não instale `requirements.txt` no venv do vLLM: ele pode trocar `torch`, `transformers` e dependências CUDA do runtime.
+
+Para executar partes isoladas:
 
 ```bash
 make download-model MODEL_SIZE=7B
@@ -731,30 +86,56 @@ make download-tokenizer MODEL_SIZE=7B
 make verify-gguf MODEL_SIZE=7B
 ```
 
-`prepare-ollama` cria o alias `qwen7b-q8-gguf` a partir do GGUF local usando um `Modelfile` temporário. Ele requer o daemon Ollama disponível e nunca executa `ollama pull`.
+### `make prepare-ollama`
 
-O alvo formal é `make bench-vllm` (ou o mesmo comando trocando os três perfis de runtime). Ele executa automaticamente **short, medium e long**, com 50 requisições de medição por cenário, 3 repetições e 3 aquecimentos por cenário. Isso produz até 150 sucessos por combinação, quantidade suficiente para que p99 deixe de ser apenas uma fotografia de três observações. Uma requisição por vez continua sendo intencional: este trabalho não mede concorrência.
+Cria o alias `qwen7b-q8-gguf` ou `qwen14b-q8-gguf` a partir do GGUF local usando um `Modelfile` temporário. Não executa `ollama pull`.
 
-As duas métricas que devem aparecer na comparação são:
-
-- **Time To First Token (ms)**: um valor por requisição, do envio do POST até o primeiro conteúdo/token observado. O `p50/p95/p99` é a distribuição desses valores entre requisições repetidas; não significa que uma única requisição tenha três TTFTs.
-- **Tokens/s**: velocidade durante o decode, calculada por requisição a partir dos tokens de saída e dos intervalos entre o primeiro e o último token. Não inclui TTFT. `effective_tokens_s` continua disponível como métrica complementar que inclui toda a duração.
-
-Os aliases estáveis no `summary.json` são `time_to_first_token_milliseconds_p50/p95/p99` e `tokens_per_second_p50/p95/p99`; os nomes históricos longos permanecem para compatibilidade. O HTML mostra os nomes legíveis.
-
-Durante toda a execução, `gpu.csv` e `system.csv` são amostrados aproximadamente uma vez por segundo. O primeiro contém memória usada/total, utilização, temperatura e potência de cada GPU visível. O segundo contém CPU, RAM, espaço usado/livre no filesystem do resultado e contadores host-wide de leitura/escrita de disco. `events.csv` marca `process_startup`, `first_request`, cada warmup/measure, `warm_reference` e `server_shutdown`; `telemetry-summary.json` agrega médias e máximos por fase para relacionar picos a ocorrências. A coleta é observacional e não atribui memória a um processo específico.
-
-Não há como inferir o **tempo exato de uma transferência CPU↔GPU ou RAM↔VRAM** apenas com `nvidia-smi` e contadores do sistema. O benchmark registra os intervalos de fases, os contadores de I/O e os sinais de PCIe disponíveis no host; para bytes e tempos por cópia seria necessária instrumentação CUDA/Nsight. Portanto não chamamos RAM usada ou VRAM usada de “tempo de transferência”.
-
-O crescimento de KV já faz parte de cada alvo formal. `make bench-vllm`, `make bench-llama` e `make bench-ollama` executam a bateria short/medium/long e, em seguida, reiniciam o respectivo runtime em 1024, 2048, 3072, … tokens, ajustam `--max-model-len` e param na primeira falha de inicialização/memória, preservando o log e o diretório daquele ponto. Cada ponto recebe as mesmas 50×3 requisições. `make kv-sweep` permanece como atalho compatível somente para repetir o sweep do vLLM.
-
-Para executar tudo:
+### Benchmarks individuais e agregado
 
 ```bash
-make bench-all
+make bench-vllm MODEL_SIZE=7B
+make bench-llama MODEL_SIZE=7B
+make bench-ollama MODEL_SIZE=7B
+make bench MODEL_SIZE=7B
 ```
 
-Parâmetros experimentais dos runtimes podem ser acrescentados sem editar JSON. Eles são anexados ao `argv` e aparecem no `lifecycle.json`:
+`bench` é um alias de `bench-all`. Cada alvo individual executa a bateria base e, imediatamente depois, o sweep de KV. O agregador tenta os três runtimes, continua se um falhar e retorna erro ao final se houver falha.
+
+### Smoke test
+
+```bash
+make smoke-vllm MODEL_SIZE=7B
+```
+
+O smoke usa poucas requisições e somente `short`; serve para diagnosticar instalação, porta, tokenizer e carregamento. Não é resultado final.
+
+## O que o benchmark mede
+
+Por runtime, cenário e repetição, são executadas 50 requisições de medição, 3 repetições e 3 aquecimentos. A execução é síncrona: uma requisição ativa por vez.
+
+| Cenário | Entrada aproximada | Saída máxima |
+|---|---:|---:|
+| `short` | 256 tokens | 128 tokens |
+| `medium` | 2048 tokens | 128 tokens |
+| `long` | 8192 tokens | 128 tokens |
+
+Métricas principais:
+
+- **Time To First Token (ms)**: do POST até o primeiro conteúdo/token observado; p50, p95 e p99 resumem requisições diferentes.
+- **Tokens/s**: velocidade durante o decode, calculada pelos intervalos entre tokens; não inclui TTFT.
+- **Effective tokens/s**: tokens de saída divididos pela duração total, incluindo TTFT.
+
+Warmup, primeira resposta, medição formal e encerramento são fases distintas. Falhas e incompletas não entram nas velocidades válidas.
+
+## Sweep de KV cache
+
+O sweep faz parte de `bench-vllm`, `bench-llama` e `bench-ollama`. Para cada runtime, o servidor é reiniciado com contexto de 1024, 2048, 3072 tokens e assim por diante, até a primeira falha de inicialização ou memória.
+
+No vLLM também é coletado o gauge de ocupação do pool KV em `/metrics`. Esse percentual não é percentual de VRAM nem bytes físicos; a VRAM é observada separadamente pelo `nvidia-smi`.
+
+## Parâmetros dos runtimes
+
+Argumentos extras são anexados ao `argv` e registrados no `lifecycle.json`:
 
 ```bash
 make bench-vllm MODEL_SIZE=7B \
@@ -763,30 +144,60 @@ make bench-vllm MODEL_SIZE=7B \
 make bench-llama MODEL_SIZE=7B \
   LLAMA_EXTRA_ARGS='--flash-attn auto --threads 8'
 
-make bench-ollama MODEL_SIZE=7B \
-  OLLAMA_EXTRA_ARGS=''
+make bench-ollama MODEL_SIZE=7B OLLAMA_EXTRA_ARGS=''
 ```
 
-Use os nomes suportados pela versão instalada. O Make não corrige, remove ou substitui argumentos inválidos: se o runtime falhar, o log deve ser preservado. Para mudar os três ao mesmo tempo, use `VLLM_EXTRA_ARGS`, `LLAMA_EXTRA_ARGS` e `OLLAMA_EXTRA_ARGS` na mesma chamada.
+O Make não corrige flags inválidas. A falha deve aparecer no `server.log`.
 
-O agregador tenta os três runtimes, imprime um status separado para cada um e retorna erro ao final se algum falhar. Ele não troca modelo, não faz fallback e não esconde falhas. Antes de `make bench-ollama`, crie localmente o alias `qwen7b-q8-gguf` com um `Modelfile` que aponte para o GGUF do SSD; o alvo apenas executa `ollama serve` e nunca faz `ollama pull`:
+Variáveis principais:
+
+```text
+MODEL_SIZE=7B|14B
+MODEL_7B_GGUF / MODEL_14B_GGUF
+HF_GGUF_REPO / HF_GGUF_FILENAME
+HF_TOKENIZER_MODEL
+VLLM_EXTRA_ARGS / LLAMA_EXTRA_ARGS / OLLAMA_EXTRA_ARGS
+BENCH_REQUESTS / BENCH_REPETITIONS / BENCH_WARMUP
+```
+
+## Telemetria e resultados
+
+Cada execução cria `results/<timestamp>/` com:
+
+- `summary.json`, `summary.csv`, `summary.html`: resultados por fase, cenário e repetição;
+- JSONs brutos e CSVs por requisição;
+- `gpu.csv`: VRAM, utilização, temperatura e potência aproximadamente a cada segundo;
+- `system.csv`: CPU, RAM, espaço e I/O host-wide;
+- `events.csv`: timestamps das fases;
+- `telemetry-summary.json`: médias e máximos por fase;
+- `kv-cache.csv`: ocupação KV quando o endpoint existe;
+- `server.log`: stdout/stderr do processo iniciado;
+- `manifest.json` e `lifecycle.json`: versões, argumentos, modelo e falhas.
+
+Os eventos relacionam picos de VRAM/CPU a startup, primeira requisição, aquecimento, medição ou encerramento. O instrumento não mede diretamente o tempo de cada transferência PCIe/RAM↔VRAM; isso exige Nsight/CUDA instrumentation.
+
+## Regras de validade
+
+- mesmo GGUF, tokenizer, prompt, temperatura e limite de saída nos três runtimes;
+- uma GPU limpa e nenhum servidor concorrente;
+- nenhum download durante `bench`;
+- smoke não é comparável à bateria formal;
+- OOM, erro de loader, API ou tokenizer são preservados como falhas;
+- comparação somente entre cenário, repetição e fase equivalentes.
+
+## Diagnóstico rápido
 
 ```bash
-cat > /tmp/Modelfile.qwen7b <<'EOF'
-FROM /workspace/models/Qwen2.5-7B-Instruct-Q8_0/Qwen2.5-7B-Instruct-Q8_0.gguf
-PARAMETER num_ctx 16384
-EOF
-ollama create qwen7b-q8-gguf -f /tmp/Modelfile.qwen7b
-ollama list
+make prepare-benchmark MODEL_SIZE=7B
+make smoke-vllm MODEL_SIZE=7B
 ```
 
-Para o sweep do Ollama, ajuste `OLLAMA_CONTEXT_LENGTH` conforme a política da versão instalada antes de executar o alvo. O script não injeta uma flag inexistente nem transforma o limite do servidor em um número fictício.
+Se o servidor encerrar:
 
-Arquivos novos por execução: `events.csv`, `system.csv` e `telemetry-summary.json`. Para instalar o coletor no venv do benchmark, rode `pip install -r requirements.txt` (ele adiciona `psutil`); não instale esse arquivo no venv do vLLM.
-- [Backends HTTP](https://vllm-project.github.io/guidellm/0.7.0/guides/backends/) e [datasets](https://vllm-project.github.io/guidellm/0.7.0/guides/datasets/).
-- [Compatibilidade OpenAI do Ollama](https://docs.ollama.com/api/openai-compatibility).
-- [Código das métricas, versão 0.7.4](https://github.com/vllm-project/guidellm/blob/v0.7.4/src/guidellm/schemas/request_stats.py).
+```bash
+cat results/<timestamp>/server.log
+cat results/<timestamp>/lifecycle.json
+nvidia-smi
+```
 
-## Limites da validação
-
-Este repositório inclui testes locais, mas não contém resultados reais da RTX 3090 e não afirma que os três servidores já foram validados no seu pod. Faça o smoke em cada um. Consulte [metodologia](docs/metodologia.html) antes de interpretar as tabelas.
+Uma falha é diagnóstico, não desempenho. Corrija a causa e repita o mesmo protocolo.
