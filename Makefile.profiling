@@ -10,8 +10,10 @@ PROFILE_RESULTS_DIR ?= $(ROOT)/results/profiling
 STARTUP_TIMEOUT ?= 1800
 ifeq ($(MODEL_SIZE),7B)
 MODEL_PATH ?= /workspace/models/Qwen2.5-7B-Instruct-Q8_0/Qwen2.5-7B-Instruct-Q8_0.gguf
+TOKENIZER_PATH ?= /workspace/models/Qwen2.5-7B-Instruct-original
 else ifeq ($(MODEL_SIZE),14B)
 MODEL_PATH ?= /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf
+TOKENIZER_PATH ?= /workspace/models/Qwen2.5-14B-tokenizer
 else
 $(error MODEL_SIZE deve ser 7B ou 14B)
 endif
@@ -34,7 +36,7 @@ profile-vllm-nsys: check
 	@mkdir -p "$(PROFILE_RESULTS_DIR)"
 	stamp=$$(date -u +%Y%m%dT%H%M%SZ); out="$(PROFILE_RESULTS_DIR)/$${stamp}-vllm-nsys"
 	PROFILE_OUTPUT="$${out}/trace" "$(ROOT)scripts/nsys-wrapper.sh" \
-		vllm serve "$(MODEL_PATH)" \
+		vllm serve "$(MODEL_PATH)" --load-format gguf --quantization gguf --tokenizer "$(TOKENIZER_PATH)" \
 		--host 127.0.0.1 --port 8000 --max-model-len 4096 --max-num-seqs 1
 
 profile-vllm-ncu: check
@@ -43,7 +45,7 @@ profile-vllm-ncu: check
 	@mkdir -p "$(PROFILE_RESULTS_DIR)"
 	stamp=$$(date -u +%Y%m%dT%H%M%SZ); out="$(PROFILE_RESULTS_DIR)/$${stamp}-vllm-ncu"
 	PROFILE_OUTPUT="$${out}/roofline" "$(ROOT)scripts/ncu-wrapper.sh" \
-		vllm serve "$(MODEL_PATH)" \
+		vllm serve "$(MODEL_PATH)" --load-format gguf --quantization gguf --tokenizer "$(TOKENIZER_PATH)" \
 		--host 127.0.0.1 --port 8000 --max-model-len 4096 --max-num-seqs 1
 
 profile-llama-nsys: check
