@@ -18,16 +18,40 @@ git --version
 python3 --version
 mkdir -p /workspace
 cd /workspace
-git clone git@github.com:yanwerneck/llm_local_inference_masters.git
+git clone https://github.com/yanwerneck/llm_local_inference_masters.git
 cd /workspace/llm_local_inference_masters/chatbot-runtime-bench
 ```
 
-Se SSH não estiver configurado, use `git clone https://github.com/yanwerneck/llm_local_inference_masters.git`. O `hf` é instalado dentro do venv pelo `make install-benchmark`; não é necessário instalar um `hf` separado no sistema. Depois da instalação, verifique com `/workspace/chatbot-runtime-bench/.venv/bin/hf --help` ou deixe o Make chamá-lo automaticamente.
+O repositório é público, portanto HTTPS é o caminho mais simples para clonar no Pod e não exige chave SSH. O `hf` é instalado dentro do venv pelo `make install-benchmark`; não é necessário instalar um `hf` separado no sistema. Depois da instalação, verifique com `/workspace/chatbot-runtime-bench/.venv/bin/hf --help` ou deixe o Make chamá-lo automaticamente.
+
+### SSH no Pod (somente se precisar fazer push)
+
+O erro `Permission denied (publickey)` significa que o Pod não tem uma chave SSH autorizada na sua conta GitHub. Para configurar uma chave própria no Pod:
+
+```bash
+ssh-keygen -t ed25519 -C "43014591+yanwerneck@users.noreply.github.com"
+cat ~/.ssh/id_ed25519.pub
+```
+
+Adicione o conteúdo exibido em **GitHub → Settings → SSH and GPG keys → New SSH key**. Depois valide:
+
+```bash
+ssh -T git@github.com
+```
+
+Se o repositório já foi clonado por HTTPS e você quer fazer push por SSH:
+
+```bash
+cd /workspace/llm_local_inference_masters
+git remote set-url origin git@github.com:yanwerneck/llm_local_inference_masters.git
+```
+
+Não copie a chave privada do seu computador pessoal para um Pod descartável. Ao terminar, remova a chave do Pod ou revogue-a no GitHub.
 
 ## Fluxo mínimo no RunPod
 
 ```bash
-git clone git@github.com:yanwerneck/llm_local_inference_masters.git
+git clone https://github.com/yanwerneck/llm_local_inference_masters.git
 cd llm_local_inference_masters/chatbot-runtime-bench
 make prepare-benchmark MODEL_SIZE=7B
 make prepare-ollama MODEL_SIZE=7B
