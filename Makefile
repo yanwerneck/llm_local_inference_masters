@@ -157,8 +157,9 @@ verify-gguf:
 install-benchmark:
 	@echo '[PREPARE] criando/validando venv do cliente: $(BENCH_VENV)'
 	@test -x "$(PYTHON)" || "$(SYSTEM_PYTHON)" -m venv "$(BENCH_VENV)"
-	"$(PYTHON)" -m pip install --upgrade pip
-	"$(PYTHON)" -m pip install -r requirements.txt
+	"$(PYTHON)" -m pip install --disable-pip-version-check --upgrade pip
+	"$(PYTHON)" -m pip install --disable-pip-version-check -r requirements.txt
+	"$(PYTHON)" -m pip check
 
 download-model:
 	@echo '[PREPARE] baixando GGUF $(MODEL_SIZE): $(HF_GGUF_REPO)'
@@ -180,7 +181,7 @@ prepare-benchmark: install-benchmark download-model download-tokenizer verify-gg
 	@echo '[PREPARE] criando diretório de resultados'
 	mkdir -p results
 	@echo '[PREPARE] validando imports do cliente'
-	$(PYTHON) -c 'import guidellm, httpx, psutil, transformers; print("guidellm", guidellm.__version__, "httpx", httpx.__version__, "psutil", psutil.__version__, "transformers", transformers.__version__)'
+	$(PYTHON) -c 'from importlib.metadata import version; import guidellm, httpx, psutil, transformers, huggingface_hub; print("guidellm", version("guidellm"), "httpx", version("httpx"), "psutil", version("psutil"), "transformers", version("transformers"), "huggingface_hub", version("huggingface_hub"))'
 	@echo '[PREPARE] validando tokenizer e JSONs'
 	test -f "$(TOKENIZER_DIR)/tokenizer_config.json"
 	$(PYTHON) -m json.tool "$(VLLM_CONFIG)" >/dev/null
