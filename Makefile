@@ -111,7 +111,7 @@ QUANTIZE_SCRIPT := scripts/quantize_hf_to_gguf_q8_0.sh
 
 .PHONY: help check-tools clone-llama build-llama install-llama-python \
         download-source inspect-source quantize-q8 verify-gguf upload-hf \
-        install-benchmark download-model download-tokenizer check-runtimes check-vllm-gguf prepare-benchmark prepare-vllm prepare-llama prepare-ollama smoke-vllm smoke-llama smoke-ollama bench-vllm bench-llama bench-ollama bench-all bench kv-sweep kv-sweep-vllm kv-sweep-llama kv-sweep-ollama quick-sweep-vllm quick-sweep-llama quick-sweep-ollama pull-results check-profilers docs clean-info
+        install-benchmark download-model download-tokenizer check-runtimes check-vllm-gguf prepare-benchmark prepare-vllm prepare-llama prepare-ollama prepare-all smoke-vllm smoke-llama smoke-ollama smoke-all bench-vllm bench-llama bench-ollama bench-all bench kv-sweep kv-sweep-vllm kv-sweep-llama kv-sweep-ollama quick-sweep-vllm quick-sweep-llama quick-sweep-ollama pull-results check-profilers docs clean-info
 
 help:
 	@printf '%s\n' \
@@ -131,13 +131,15 @@ help:
 		'  make prepare-vllm         prepara cliente/modelo e valida somente vLLM' \
 		'  make prepare-llama        prepara cliente/modelo e valida somente llama-server' \
 		'  make prepare-ollama       prepara cliente/modelo e importa o GGUF no Ollama' \
+		'  make prepare-all          prepara os três runtimes em sequência' \
 		'  make download-model       baixa o GGUF selecionado para o SSD' \
 		'  make download-tokenizer   baixa somente os arquivos do tokenizer' \
-		'  make prepare-benchmark    instala cliente, cria pastas e valida modelo/configs/runtimes' \
+		'  make prepare-benchmark    etapa comum interna: cliente, modelo, tokenizer e configs' \
 		'  make prepare-ollama      cria o alias Ollama a partir do GGUF local, sem download' \
 		'  make smoke-vllm           executa smoke do benchmark com GGUF local' \
 		'  make smoke-llama          executa smoke equivalente com llama.cpp' \
 		'  make smoke-ollama         executa smoke equivalente com Ollama' \
+		'  make smoke-all            executa os três smokes e resume falhas' \
 		'  make bench-vllm            bateria formal: short/medium/long, 50x3, com telemetria' \
 		'  make bench-llama           mesma bateria usando llama-server' \
 		'  make bench-ollama          mesma bateria usando Ollama (modelo já criado localmente)' \
@@ -308,6 +310,9 @@ prepare-ollama: prepare-benchmark
 		--gguf "$(GGUF_FILE)" --context 16384 --base-url "$$("$(PYTHON)" -c 'import json,sys; print(json.load(open(sys.argv[1]))["base_url"])' "$(OLLAMA_CONFIG)")"
 	@echo '[PREPARE Ollama] alias $(OLLAMA_MODEL_NAME) disponível'
 
+prepare-all: prepare-vllm prepare-llama prepare-ollama
+	@echo '[PREPARE ALL] vLLM, llama.cpp e Ollama preparados'
+
 upload-hf: verify-gguf
 	@test -n "$${HF_TOKEN:-}" || { echo 'HF_TOKEN não está definido; exporte-o sem colar o valor no repositório.' >&2; exit 1; }
 	HF_HUB_OFFLINE=0 TRANSFORMERS_OFFLINE=0 HF_HUB_ENABLE_HF_TRANSFER="$(HF_HUB_ENABLE_HF_TRANSFER)" \
@@ -340,6 +345,14 @@ smoke-ollama: prepare-ollama
 		--launch "$(OLLAMA_LAUNCH)" --launch-executable "$(OLLAMA_BIN)" \
 		--launch-extra-args-json "$$($(SYSTEM_PYTHON) -c 'import json,os,shlex; print(json.dumps(shlex.split(os.environ.get("OLLAMA_EXTRA_ARGS", ""))))')" \
 		--smoke --scenarios short --startup-timeout "$(BENCH_STARTUP_TIMEOUT)"
+
+smoke-all:
+	@set +e
+	@echo '[SMOKE ALL] 1/3 vLLM'; $(MAKE) --no-print-directory smoke-vllm; vllm_status=$$?
+	@echo '[SMOKE ALL] 2/3 llama.cpp'; $(MAKE) --no-print-directory smoke-llama; llama_status=$$?
+	@echo '[SMOKE ALL] 3/3 Ollama'; $(MAKE) --no-print-directory smoke-ollama; ollama_status=$$?
+	@echo "[SMOKE ALL] status: vLLM=$$vllm_status llama.cpp=$$llama_status Ollama=$$ollama_status"
+	@test "$$vllm_status" -eq 0 -a "$$llama_status" -eq 0 -a "$$ollama_status" -eq 0
 
 bench-vllm: prepare-vllm
 	@echo '[BENCH vLLM] início: short/medium/long + telemetria + KV sweep embutido'

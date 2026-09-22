@@ -34,19 +34,24 @@
 <h2 id="1-selecao-do-experimento">1. Seleção do experimento</h2>
 <p><code>MODEL_SIZE</code> aceita <code>7B</code> ou <code>14B</code>. O Make deriva o GGUF, tokenizer, config JSON e launch JSON correspondentes. O padrão é <code>7B</code>, usando o artefato <code>arthuravianna/Qwen2.5-7B-Instruct-Q8_0.gguf</code>.</p>
 <p>Os launch/configs do vLLM usam por padrão <code>--gpu-memory-utilization 0.95</code>, deixando 5% de margem na VRAM. É um orçamento de memória, não um teto de 95% para utilização computacional da GPU. No Pod observado, <code>1.0</code> falhou porque havia 23,30 GiB livres de 23,56 GiB, menos que o orçamento integral solicitado.</p>
-<pre><code class="language-bash">make prepare-benchmark MODEL_SIZE=7B
-make prepare-benchmark MODEL_SIZE=14B
+<pre><code class="language-bash">make prepare-vllm MODEL_SIZE=7B
+make prepare-llama MODEL_SIZE=7B
+make prepare-ollama MODEL_SIZE=7B
+</code></pre>
+<p>Para preparar todos os runtimes em sequência:</p>
+<pre><code class="language-bash">make prepare-all MODEL_SIZE=7B
 </code></pre>
 <p>Os caminhos podem ser sobrescritos:</p>
-<pre><code class="language-bash">make prepare-benchmark MODEL_SIZE=7B \
+<pre><code class="language-bash">make prepare-all MODEL_SIZE=7B \
   MODEL_7B_GGUF=/workspace/models/arthur/qwen7b.gguf \
   MODEL_7B_TOKENIZER=/workspace/models/qwen7b-tokenizer
 </code></pre>
 <h2 id="2-preparacao">2. Preparação</h2>
-<p><code>prepare-benchmark</code> depende de <code>install-benchmark</code>, <code>download-model</code>, <code>download-tokenizer</code> e <code>verify-gguf</code>. Depois da primeira preparação, use <code>PREPARE_OFFLINE=1</code> para reutilizar o ambiente e os arquivos locais sem pip nem downloads. As verificações de GGUF, imports, tokenizer e JSONs continuam obrigatórias; dependências ausentes causam falha.</p>
+<p>Cada alvo <code>prepare-&lt;runtime&gt;</code> depende de <code>prepare-benchmark</code>, que é a etapa comum de <code>install-benchmark</code>, <code>download-model</code>, <code>download-tokenizer</code> e <code>verify-gguf</code>. Depois da primeira preparação, use <code>PREPARE_OFFLINE=1</code> para reutilizar o ambiente e os arquivos locais sem pip nem downloads. <code>prepare-all</code> encadeia os três runtimes. As verificações de GGUF, imports, tokenizer e JSONs continuam obrigatórias; dependências ausentes causam falha.</p>
 <pre><code class="language-bash">make smoke-vllm PREPARE_OFFLINE=1 BENCH_STARTUP_TIMEOUT=300
 make smoke-llama PREPARE_OFFLINE=1 BENCH_STARTUP_TIMEOUT=300
 make smoke-ollama PREPARE_OFFLINE=1 BENCH_STARTUP_TIMEOUT=300
+make smoke-all PREPARE_OFFLINE=1 BENCH_STARTUP_TIMEOUT=300
 </code></pre>
 <p><code>BENCH_STARTUP_TIMEOUT</code> vale para os três smokes. <code>VLLM_EXTRA_ARGS</code> é repassado tanto à bateria base quanto ao sweep.</p>
 <h3 id="install-benchmark"><code>install-benchmark</code></h3>
@@ -86,6 +91,7 @@ Os três templates seguem esse mesmo contrato: chamam <code>vllm</code>, <code>l
 <pre><code class="language-bash">make smoke-vllm MODEL_SIZE=7B
 make smoke-llama MODEL_SIZE=7B
 make smoke-ollama MODEL_SIZE=7B
+make smoke-all MODEL_SIZE=7B
 </code></pre>
 <p>Para exercitar também a variação de contexto sem aguardar a bateria formal:</p>
 <pre><code class="language-bash">make quick-sweep-vllm MODEL_SIZE=7B
@@ -177,8 +183,7 @@ make quick-sweep-ollama MODEL_SIZE=7B
 <p>A integração foi validada ao vivo em 22/09/2026 no RunPod com uma RTX 3090 e o GGUF 7B. Preparação offline, três smokes, três quick sweeps e <code>bench-all</code> reduzido passaram; o agregado terminou com <code>vLLM=0 llama.cpp=0 Ollama=0</code>. As métricas e os caminhos dos artefatos estão em <a href="resultados-pod-20260922.md">resultados-pod-20260922.md</a>.</p>
 <p>O vLLM foi executado com <code>--enforce-eager --max-model-len 2048 --gpu-memory-utilization 0.80</code>. O <code>EngineDeadError</code> visto no encerramento do sweep ocorre após respostas HTTP 200 e o SIGTERM intencional do harness; não foi OOM e o alvo retornou zero.</p>
 <h2 id="11-sequencia-recomendada">11. Sequência recomendada</h2>
-<pre><code class="language-bash">make prepare-benchmark MODEL_SIZE=7B
-make prepare-ollama MODEL_SIZE=7B
+<pre><code class="language-bash">make prepare-all MODEL_SIZE=7B
 make smoke-vllm MODEL_SIZE=7B
 make smoke-llama MODEL_SIZE=7B
 make smoke-ollama MODEL_SIZE=7B

@@ -53,16 +53,15 @@ Não copie a chave privada do seu computador pessoal para um Pod descartável. A
 ```bash
 git clone https://github.com/yanwerneck/llm_local_inference_masters.git
 cd llm_local_inference_masters
-make prepare-benchmark MODEL_SIZE=7B
-make prepare-ollama MODEL_SIZE=7B
-make bench MODEL_SIZE=7B
+make prepare-all MODEL_SIZE=7B
+make bench-all MODEL_SIZE=7B
 ```
 
-O alvo `bench` é um alias de `bench-all`.
+Para preparar ou medir somente um runtime, use `prepare-vllm`, `prepare-llama`, `prepare-ollama`, `bench-vllm`, `bench-llama` ou `bench-ollama`. Os alvos por runtime já dependem da preparação comum; não é necessário chamar `prepare-benchmark` antes. `prepare-all` prepara os três, `smoke-all` testa os três rapidamente e `bench-all` executa as baterias completas. O alvo `bench` é um alias de `bench-all`.
 
 ## Modelo usado
 
-O modelo 7B oficial desta rodada é [`arthuravianna/Qwen2.5-7B-Instruct-Q8_0.gguf`](https://huggingface.co/arthuravianna/Qwen2.5-7B-Instruct-Q8_0.gguf). O `make prepare-benchmark MODEL_SIZE=7B` baixa esse GGUF e o tokenizer base para o SSD. O tokenizer não é o peso: ele é necessário para construir prompts e contar tokens comparavelmente.
+O modelo 7B oficial desta rodada é [`arthuravianna/Qwen2.5-7B-Instruct-Q8_0.gguf`](https://huggingface.co/arthuravianna/Qwen2.5-7B-Instruct-Q8_0.gguf). O `make prepare-all MODEL_SIZE=7B` baixa esse GGUF e o tokenizer base para o SSD e prepara os três runtimes. O tokenizer não é o peso: ele é necessário para construir prompts e contar tokens comparavelmente.
 
 O download do tokenizer é feito pelo `huggingface_hub.snapshot_download` com filtros explícitos, e não pela combinação ambígua de nomes posicionais e `--include` da CLI `hf`. A preparação falha se `config.json`, `tokenizer_config.json` ou `tokenizer.json` não estiverem presentes; isso evita iniciar o llama.cpp com um diretório de tokenizer incompleto.
 
@@ -71,15 +70,14 @@ As configurações vLLM deste repositório usam por padrão `--gpu-memory-utiliz
 Para a rodada 14B:
 
 ```bash
-make prepare-benchmark MODEL_SIZE=14B
-make prepare-ollama MODEL_SIZE=14B
+make prepare-all MODEL_SIZE=14B
 make bench MODEL_SIZE=14B
 ```
 
 Se o arquivo estiver em outro caminho:
 
 ```bash
-make prepare-benchmark MODEL_SIZE=14B \
+make prepare-all MODEL_SIZE=14B \
   MODEL_14B_GGUF=/workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf
 ```
 
@@ -87,7 +85,25 @@ O 14B pode exceder a VRAM da RTX 3090. Isso é uma falha experimental válida: p
 
 ## O que cada alvo faz
 
-### `make prepare-benchmark`
+### Preparação comum e por runtime
+
+O fluxo recomendado é:
+
+```bash
+make prepare-vllm MODEL_SIZE=7B
+make prepare-llama MODEL_SIZE=7B
+make prepare-ollama MODEL_SIZE=7B
+```
+
+Ou, para preparar os três de uma vez:
+
+```bash
+make prepare-all MODEL_SIZE=7B
+```
+
+Cada alvo `prepare-<runtime>` chama automaticamente `prepare-benchmark`, que é a etapa interna comum de modelo, tokenizer, cliente e configurações. Portanto, `prepare-benchmark` não precisa ser executado manualmente antes de um runtime.
+
+### `make prepare-benchmark` (etapa comum interna)
 
 Executa a preparação completa, nesta ordem:
 
@@ -130,10 +146,7 @@ Antes de iniciar o vLLM com GGUF, `prepare-vllm` executa `make check-vllm-gguf`.
 
 O erro `config file ... .gguf is not a valid JSON file` significa que o plugin não foi carregado; não significa que a assinatura GGUF esteja inválida. llama.cpp não precisa desse plugin: `llama-server` lê GGUF nativamente. Ollama também lê GGUF nativamente, mas precisa do daemon e do alias criado por `prepare-ollama`.
 
-```bash
-make prepare-benchmark MODEL_SIZE=7B
-make prepare-benchmark MODEL_SIZE=14B
-```
+Use `make prepare-all MODEL_SIZE=7B` ou `make prepare-all MODEL_SIZE=14B`; a etapa comum é chamada automaticamente pelos alvos por runtime.
 
 O cliente usa por padrão `.venv` na raiz do repositório. A criação e instalação podem ser executadas isoladamente:
 
@@ -169,7 +182,7 @@ Cria o alias correspondente ao tamanho escolhido (`qwen7b-q8-gguf` ou `qwen14b-q
 make bench-vllm MODEL_SIZE=7B
 make bench-llama MODEL_SIZE=7B
 make bench-ollama MODEL_SIZE=7B
-make bench MODEL_SIZE=7B
+make bench-all MODEL_SIZE=7B
 ```
 
 `bench` é um alias de `bench-all`. Cada alvo individual executa a bateria base e, imediatamente depois, o sweep de KV. O agregador tenta os três runtimes, continua se um falhar e retorna erro ao final se houver falha.
@@ -180,6 +193,7 @@ make bench MODEL_SIZE=7B
 make smoke-vllm MODEL_SIZE=7B
 make smoke-llama MODEL_SIZE=7B
 make smoke-ollama MODEL_SIZE=7B
+make smoke-all MODEL_SIZE=7B
 ```
 
 Os três smokes usam poucas requisições e somente `short`; servem para diagnosticar instalação, porta, tokenizer e carregamento. Não são resultados finais.
@@ -366,7 +380,7 @@ Depois interrompa o servidor com `Ctrl-C`. O relatório fica em `results/profili
 ## Diagnóstico rápido
 
 ```bash
-make prepare-benchmark MODEL_SIZE=7B
+make prepare-vllm MODEL_SIZE=7B
 make smoke-vllm MODEL_SIZE=7B
 ```
 

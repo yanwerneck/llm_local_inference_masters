@@ -234,13 +234,13 @@ Esse benchmark mede desempenho, **não qualidade**. Uma pequena bateria fixa de 
 
 ## Atualização 0.4: métricas e telemetria operacional
 
-Antes da medição, `make prepare-benchmark` cria diretórios, baixa o GGUF e tokenizer, instala o cliente e valida configurações e os três executáveis. `make prepare-ollama` importa o GGUF local no alias Ollama sem novo download. Essas etapas são preparação e não entram nos tempos do benchmark.
+Antes da medição, `make prepare-all` encadeia `prepare-vllm`, `prepare-llama` e `prepare-ollama`. Cada alvo por runtime chama a etapa comum `prepare-benchmark`, que cria diretórios, baixa o GGUF e tokenizer, instala o cliente e valida configurações; depois valida somente o runtime escolhido. Essas etapas são preparação e não entram nos tempos do benchmark.
 
 O protocolo formal usa `short`, `medium` e `long` automaticamente, com 50 requisições, 3 repetições e 3 aquecimentos por cenário. As métricas principais têm nomes canônicos: **Time To First Token (ms)**, um valor por requisição do POST ao primeiro token, e **Tokens/s**, a taxa de decode sem o TTFT. Percentis são calculados sobre requisições bem-sucedidas; p99 é uma cauda de uma distribuição de requisições, não três TTFTs da mesma chamada.
 
 O monitor escreve `gpu.csv`, `system.csv` e `events.csv` durante toda a vida do processo e gera `telemetry-summary.json` agrupado pelas fases. CPU/RAM/SSD são observações do host; VRAM/utilização/temperatura/potência vêm do `nvidia-smi`. Esses sinais relacionam mudanças a startup, primeiro POST, aquecimento, medida e encerramento, mas não medem o tempo de cada cópia PCIe: para isso, use Nsight/CUDA instrumentation.
 
-Cada alvo formal (`make bench-vllm`, `make bench-llama`, `make bench-ollama`) inclui a bateria short/medium/long e depois reinicia o runtime para 1024, 2048, 3072, … tokens, ajustando o limite de contexto até a primeira falha. `make bench-all` executa os três e resume os códigos de saída. O percentual do pool KV exposto pelo vLLM e a VRAM usada são mantidos como séries distintas; nenhum deles é apresentado como “bytes de KV” sem coeficiente arquitetural verificado.
+Cada alvo formal (`make bench-vllm`, `make bench-llama`, `make bench-ollama`) inclui a bateria short/medium/long e depois reinicia o runtime para 1024, 2048, 3072, … tokens, ajustando o limite de contexto até a primeira falha. `make bench-all` executa os três e resume os códigos de saída. Para diagnóstico rápido, `smoke-vllm`, `smoke-llama`, `smoke-ollama` são os alvos individuais e `smoke-all` encadeia os três. O percentual do pool KV exposto pelo vLLM e a VRAM usada são mantidos como séries distintas; nenhum deles é apresentado como “bytes de KV” sem coeficiente arquitetural verificado.
 
 ## Próximo passo
 

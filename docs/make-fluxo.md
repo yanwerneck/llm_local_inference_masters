@@ -11,26 +11,34 @@ Requer GNU Make com suporte a `.ONESHELL` (3.82 ou mais recente). O Make 3.81 fo
 Os launch/configs do vLLM usam por padrão `--gpu-memory-utilization 0.95`, deixando 5% de margem na VRAM. É um orçamento de memória, não um teto de 95% para utilização computacional da GPU. No Pod observado, `1.0` falhou porque havia 23,30 GiB livres de 23,56 GiB, menos que o orçamento integral solicitado.
 
 ```bash
-make prepare-benchmark MODEL_SIZE=7B
-make prepare-benchmark MODEL_SIZE=14B
+make prepare-vllm MODEL_SIZE=7B
+make prepare-llama MODEL_SIZE=7B
+make prepare-ollama MODEL_SIZE=7B
+```
+
+Para preparar todos os runtimes em sequência:
+
+```bash
+make prepare-all MODEL_SIZE=7B
 ```
 
 Os caminhos podem ser sobrescritos:
 
 ```bash
-make prepare-benchmark MODEL_SIZE=7B \
+make prepare-all MODEL_SIZE=7B \
   MODEL_7B_GGUF=/workspace/models/arthur/qwen7b.gguf \
   MODEL_7B_TOKENIZER=/workspace/models/qwen7b-tokenizer
 ```
 
 ## 2. Preparação
 
-`prepare-benchmark` depende de `install-benchmark`, `download-model`, `download-tokenizer` e `verify-gguf`. Depois da primeira preparação, use `PREPARE_OFFLINE=1` para reutilizar o ambiente e os arquivos locais sem pip nem downloads. As verificações de GGUF, imports, tokenizer e JSONs continuam obrigatórias; dependências ausentes causam falha.
+Cada alvo `prepare-<runtime>` depende de `prepare-benchmark`, que é a etapa comum de `install-benchmark`, `download-model`, `download-tokenizer` e `verify-gguf`. Depois da primeira preparação, use `PREPARE_OFFLINE=1` para reutilizar o ambiente e os arquivos locais sem pip nem downloads. `prepare-all` encadeia os três runtimes. As verificações de GGUF, imports, tokenizer e JSONs continuam obrigatórias; dependências ausentes causam falha.
 
 ```bash
 make smoke-vllm PREPARE_OFFLINE=1 BENCH_STARTUP_TIMEOUT=300
 make smoke-llama PREPARE_OFFLINE=1 BENCH_STARTUP_TIMEOUT=300
 make smoke-ollama PREPARE_OFFLINE=1 BENCH_STARTUP_TIMEOUT=300
+make smoke-all PREPARE_OFFLINE=1 BENCH_STARTUP_TIMEOUT=300
 ```
 
 `BENCH_STARTUP_TIMEOUT` vale para os três smokes. `VLLM_EXTRA_ARGS` é repassado tanto à bateria base quanto ao sweep.
@@ -94,6 +102,7 @@ Há smoke equivalente para cada runtime:
 make smoke-vllm MODEL_SIZE=7B
 make smoke-llama MODEL_SIZE=7B
 make smoke-ollama MODEL_SIZE=7B
+make smoke-all MODEL_SIZE=7B
 ```
 
 Para exercitar também a variação de contexto sem aguardar a bateria formal:
@@ -167,8 +176,7 @@ O vLLM foi executado com `--enforce-eager --max-model-len 2048 --gpu-memory-util
 ## 11. Sequência recomendada
 
 ```bash
-make prepare-benchmark MODEL_SIZE=7B
-make prepare-ollama MODEL_SIZE=7B
+make prepare-all MODEL_SIZE=7B
 make smoke-vllm MODEL_SIZE=7B
 make smoke-llama MODEL_SIZE=7B
 make smoke-ollama MODEL_SIZE=7B
