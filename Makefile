@@ -192,6 +192,8 @@ prepare-benchmark: install-benchmark download-model download-tokenizer verify-gg
 	$(PYTHON) -c 'from importlib.metadata import version; import guidellm, httpx, psutil, transformers, huggingface_hub; print("guidellm", version("guidellm"), "httpx", version("httpx"), "psutil", version("psutil"), "transformers", version("transformers"), "huggingface_hub", version("huggingface_hub"))'
 	@echo '[PREPARE] validando tokenizer e JSONs'
 	test -f "$(TOKENIZER_DIR)/tokenizer_config.json"
+	test -f "$(TOKENIZER_DIR)/config.json"
+	$(PYTHON) -c 'import json,sys; from pathlib import Path; p=Path(sys.argv[1]); c=json.loads((p/"config.json").read_text()); mt=c.get("model_type"); print("[PREPARE] tokenizer model_type:", mt); raise SystemExit("config.json do tokenizer não contém model_type=qwen2; redownload do tokenizer necessário") if mt != "qwen2" else None' "$(TOKENIZER_DIR)"
 	$(PYTHON) -m json.tool "$(VLLM_CONFIG)" >/dev/null
 	$(PYTHON) -m json.tool "$(VLLM_LAUNCH)" >/dev/null
 	$(PYTHON) -m json.tool "$(LLAMA_CONFIG)" >/dev/null
