@@ -220,10 +220,10 @@ class Monitor:
         with (self.output / "gpu.csv").open("w", newline="", encoding="utf-8") as handle, \
              (self.output / "system.csv").open("w", newline="", encoding="utf-8") as system_handle:
             writer = csv.writer(handle)
-            writer.writerow(["utc", "phase", "index", "name", "used_mib", "total_mib", "used_gib", "total_gib",
+            writer.writerow(["utc", "elapsed_s", "sample_index", "phase", "index", "name", "used_mib", "total_mib", "used_gib", "total_gib",
                              "vram_used_pct", "gpu_util_pct", "memory_util_pct", "temperature_c", "power_w"])
             system_writer = csv.writer(system_handle)
-            system_writer.writerow(["utc", "phase", "cpu_util_pct", "ram_used_mib", "ram_available_mib", "ram_total_mib",
+            system_writer.writerow(["utc", "elapsed_s", "sample_index", "phase", "cpu_util_pct", "ram_used_mib", "ram_available_mib", "ram_total_mib",
                                     "load1", "root_disk_used_mib", "root_disk_free_mib", "disk_read_bytes", "disk_write_bytes"])
             if psutil:
                 psutil.cpu_percent(interval=None)
@@ -241,7 +241,7 @@ class Monitor:
                     for row in gpu_rows:
                         used_mib, total_mib = float(row[2]), float(row[3])
                         vram_pct = (100 * used_mib / total_mib) if total_mib else None
-                        writer.writerow([utc, phase, row[0], row[1], row[2], row[3],
+                        writer.writerow([utc, time.monotonic() - self.started_monotonic, sample_number, phase, row[0], row[1], row[2], row[3],
                                          used_mib / 1024, total_mib / 1024, vram_pct, *row[4:]])
                     if sample_number == 1 or sample_number % 10 == 0:
                         compact = "; ".join(f"GPU{row[0]} VRAM={float(row[2]) / 1024:.2f}/{float(row[3]) / 1024:.2f} GiB "
@@ -253,7 +253,7 @@ class Monitor:
                     vm = psutil.virtual_memory()
                     du = psutil.disk_usage(str(self.output.anchor or "/"))
                     io = psutil.disk_io_counters()
-                    system_writer.writerow([utc, phase, psutil.cpu_percent(interval=None), vm.used / 1048576,
+                    system_writer.writerow([utc, time.monotonic() - self.started_monotonic, sample_number, phase, psutil.cpu_percent(interval=None), vm.used / 1048576,
                                              vm.available / 1048576, vm.total / 1048576, os.getloadavg()[0],
                                              du.used / 1048576, du.free / 1048576,
                                              getattr(io, "read_bytes", None), getattr(io, "write_bytes", None)])
@@ -280,6 +280,11 @@ class Monitor:
             with path.open() as handle:
                 return list(csv.DictReader(handle))
         sources = {"gpu": read_rows("gpu.csv"), "system": read_rows("system.csv"), "kv": read_rows("kv-cache.csv")}
+        # Arquivo de entrada simples para gráficos: uma observação por linha,
+        # com UTC, tempo desde o início do monitor e fase experimental.
+        if sources["gpu"]:
+            import shutil
+            shutil.copyfile(self.output / "gpu.csv", self.output / "telemetry-timeseries.csv")
         phases = sorted({r.get("phase") for rows in sources.values() for r in rows if r.get("phase")})
         output = {"definition": "Amostras observadas por fase; não são bytes nem tempos de transferência PCIe.", "phases": {}}
         for phase in phases:
