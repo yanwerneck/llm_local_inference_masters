@@ -83,7 +83,7 @@ help:
 		'Fluxo llama.cpp → GGUF Q8_0' \
 		'' \
 		'  make clone-llama          clona o llama.cpp em LLAMA_CPP_DIR' \
-		'  make build-llama          compila o binário llama-quantize' \
+		'  make build-llama          clona/compila llama-server e llama-quantize com CUDA' \
 		'  make install-llama-python instala dependências em venv separado' \
 		'  make download-source      baixa o Qwen original para o SSD' \
 		'  make inspect-source       mostra formato/metadados da fonte' \
@@ -126,7 +126,7 @@ clone-llama: check-tools
 
 build-llama: clone-llama
 	cmake -S "$(LLAMA_CPP_DIR)" -B "$(LLAMA_CPP_BUILD_DIR)" -DGGML_CUDA=ON
-	cmake --build "$(LLAMA_CPP_BUILD_DIR)" --target llama-quantize -j"$(QUANTIZE_THREADS)"
+	cmake --build "$(LLAMA_CPP_BUILD_DIR)" --target llama-server llama-quantize -j"$(QUANTIZE_THREADS)"
 
 install-llama-python: clone-llama
 	$(PYTHON) -m venv "$(LLAMA_VENV)"
@@ -208,7 +208,7 @@ prepare-vllm: prepare-benchmark
 	"$(VLLM_BIN)" --help >/dev/null
 	@echo '[PREPARE vLLM] cliente, modelo, tokenizer e executável validados'
 
-prepare-llama: prepare-benchmark
+prepare-llama: prepare-benchmark build-llama
 	@test -x "$(LLAMA_SERVER_BIN)" || { echo "llama-server ausente: $(LLAMA_SERVER_BIN). Compile o llama.cpp ou use LLAMA_SERVER_BIN=..."; exit 1; }
 	"$(LLAMA_SERVER_BIN)" --help >/dev/null
 	@echo '[PREPARE llama.cpp] cliente, modelo, tokenizer e executável validados'

@@ -83,6 +83,8 @@ make prepare-ollama MODEL_SIZE=7B
 
 Assim, a ausência de vLLM não impede preparar o modelo para llama.cpp ou Ollama.
 
+`prepare-llama` também executa `build-llama`: clona o llama.cpp se necessário, configura CUDA e compila tanto `llama-server` (inferência) quanto `llama-quantize` (conversão). Portanto, não é necessário instalar `llama-server` manualmente quando o pod tem CMake e toolkit CUDA disponíveis.
+
 ```bash
 make prepare-benchmark MODEL_SIZE=7B
 make prepare-benchmark MODEL_SIZE=14B
