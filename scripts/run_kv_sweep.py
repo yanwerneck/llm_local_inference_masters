@@ -8,6 +8,13 @@ import subprocess
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
+import sys
+
+# Executado como `python scripts/run_kv_sweep.py`, o Python coloca `scripts/`
+# no sys.path, não a raiz do checkout onde fica results_layout.py.
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from results_layout import artifact, prepare, runtime_root
 
