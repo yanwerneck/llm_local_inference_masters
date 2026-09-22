@@ -170,16 +170,18 @@ class Monitor:
 
     def set_phase(self, phase, event=None):
         self.phase = phase
-        print(f"[telemetria] fase={phase} evento={event or 'phase_change'}", flush=True)
+        utc = datetime.now(timezone.utc).isoformat()
+        elapsed = (time.monotonic() - self.started_monotonic) if self.started_monotonic else 0.0
+        print(f"[telemetria] utc={utc} decorrido={elapsed:.3f}s fase={phase} evento={event or 'phase_change'}", flush=True)
         if hasattr(self, "events_handle"):
             writer = csv.writer(self.events_handle)
-            writer.writerow([datetime.now(timezone.utc).isoformat(), time.monotonic(), phase, event or "phase_change"])
+            writer.writerow([utc, time.monotonic(), elapsed, phase, event or "phase_change"])
             self.events_handle.flush()
 
     def start(self):
         self.started_monotonic = time.monotonic()
         self.events_handle = (self.output / "events.csv").open("w", newline="", encoding="utf-8")
-        csv.writer(self.events_handle).writerow(["utc", "monotonic_s", "phase", "event"])
+        csv.writer(self.events_handle).writerow(["utc", "monotonic_s", "elapsed_s", "phase", "event"])
         self.set_phase(self.phase, "monitor_started")
         self.thread = threading.Thread(target=self.loop, daemon=True)
         self.thread.start()
@@ -248,7 +250,9 @@ class Monitor:
                         compact = "; ".join(f"GPU{row[0]} VRAM={float(row[2]) / 1024:.2f}/{float(row[3]) / 1024:.2f} GiB "
                                              f"ocupada={100 * float(row[2]) / float(row[3]):.1f}% "
                                              f"uso_gpu={row[4]}% banda_memoria={row[5]}%" for row in gpu_rows)
-                        print(f"[telemetria] fase={phase} {compact or 'GPU sem amostra'}", flush=True)
+                        elapsed = time.monotonic() - self.started_monotonic
+                        utc_log = datetime.now(timezone.utc).isoformat()
+                        print(f"[telemetria] utc={utc_log} decorrido={elapsed:.3f}s fase={phase} {compact or 'GPU sem amostra'}", flush=True)
                 handle.flush()
                 if psutil:
                     vm = psutil.virtual_memory()
