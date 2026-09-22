@@ -5,7 +5,17 @@
 <li><a href="#bench-explicado">Bench explicado</a><ul>
 <li><a href="#a-ideia-em-uma-frase">A ideia em uma frase</a></li>
 <li><a href="#o-mapa-completo">O mapa completo</a></li>
-<li><a href="#nao-confunda-os-tres-conceitos">Não confunda os três conceitos</a><ul>
+<li><a href="#nao-confunda-os-tres-conceitos">Não confunda os três conceitos</a></li>
+<li><a href="#parametros-efetivos-do-makefile">Parâmetros efetivos do Makefile</a><ul>
+<li><a href="#quantas-requisicoes-isso-realmente-representa">Quantas requisições isso realmente representa?</a></li>
+</ul>
+</li>
+<li><a href="#exemplo-pratico-do-corpo-http">Exemplo prático do corpo HTTP</a><ul>
+<li><a href="#exemplo-didatico-tres-formas-de-enviar-a-mesma-interacao">Exemplo didático: três formas de enviar a mesma interação</a></li>
+<li><a href="#exemplo-didatico-o-que-muda-no-sweep">Exemplo didático: o que muda no sweep</a></li>
+</ul>
+</li>
+<li><a href="#exemplos-de-execucao-controlada">Exemplos de execução controlada</a><ul>
 <li><a href="#como-funciona-o-modo-independent">Como funciona o modo independent</a></li>
 </ul>
 </li>
@@ -82,6 +92,180 @@ bench-&lt;runtime&gt;
 </tbody>
 </table></div>
 <p><code>replay</code> não é o sweep. Replay é uma política de mensagens; sweep é uma série de execuções com tamanhos de contexto diferentes. É possível usar <code>SWEEP_MODE=replay</code>, mas ainda serão dois eixos experimentais diferentes.</p>
+<h2 id="parametros-efetivos-do-makefile">Parâmetros efetivos do Makefile</h2>
+<p>Quando você executa <code>make bench-vllm</code>, <code>make bench-llama</code> ou <code>make bench-ollama</code> sem sobrescrever variáveis, estes são os valores usados:</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Variável</th>
+<th style="text-align: right;">Valor padrão</th>
+<th>Efeito prático</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>BENCH_SCENARIOS</code></td>
+<td style="text-align: right;"><code>short medium long</code></td>
+<td>três tamanhos de entrada na bateria base</td>
+</tr>
+<tr>
+<td><code>BENCH_REQUESTS</code></td>
+<td style="text-align: right;"><code>50</code></td>
+<td>50 requisições de medição por cenário e repetição</td>
+</tr>
+<tr>
+<td><code>BENCH_REPETITIONS</code></td>
+<td style="text-align: right;"><code>3</code></td>
+<td>três blocos independentes no mesmo processo</td>
+</tr>
+<tr>
+<td><code>BENCH_WARMUP</code></td>
+<td style="text-align: right;"><code>3</code></td>
+<td>três requisições descartadas da medição por cenário/repetição</td>
+</tr>
+<tr>
+<td><code>BENCH_MODE</code></td>
+<td style="text-align: right;"><code>independent</code></td>
+<td>uma mensagem de usuário, sem histórico acumulado</td>
+</tr>
+<tr>
+<td><code>CONVERSATION_TURNS</code></td>
+<td style="text-align: right;"><code>1</code></td>
+<td>só tem efeito quando o modo conversacional é usado</td>
+</tr>
+<tr>
+<td><code>BENCH_STARTUP_TIMEOUT</code></td>
+<td style="text-align: right;"><code>1800</code> s</td>
+<td>limite para readiness, não para a execução inteira</td>
+</tr>
+<tr>
+<td>saída máxima</td>
+<td style="text-align: right;"><code>128</code> tokens</td>
+<td>limite solicitado no corpo HTTP; o modelo pode parar antes</td>
+</tr>
+<tr>
+<td><code>SWEEP_START</code></td>
+<td style="text-align: right;"><code>1024</code></td>
+<td>primeiro contexto do sweep</td>
+</tr>
+<tr>
+<td><code>SWEEP_STEP</code></td>
+<td style="text-align: right;"><code>1024</code></td>
+<td>incremento entre pontos formais</td>
+</tr>
+<tr>
+<td><code>SWEEP_MAX_CONTEXT</code></td>
+<td style="text-align: right;"><code>16384</code></td>
+<td>último contexto permitido</td>
+</tr>
+<tr>
+<td><code>SWEEP_REQUESTS</code></td>
+<td style="text-align: right;"><code>50</code></td>
+<td>herdado de <code>BENCH_REQUESTS</code></td>
+</tr>
+<tr>
+<td><code>SWEEP_REPETITIONS</code></td>
+<td style="text-align: right;"><code>3</code></td>
+<td>herdado de <code>BENCH_REPETITIONS</code></td>
+</tr>
+<tr>
+<td><code>SWEEP_WARMUP</code></td>
+<td style="text-align: right;"><code>3</code></td>
+<td>herdado de <code>BENCH_WARMUP</code></td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="quantas-requisicoes-isso-realmente-representa">Quantas requisições isso realmente representa?</h3>
+<p>Na bateria base, cada runtime faz, por cenário e repetição:</p>
+<pre><code class="language-text">3 warmup + 50 measure = 53 requisições
+3 cenários × 3 repetições × 53 = 477 requisições
++ 1 primeira resposta
+ + 1 referência final aquecida
+</code></pre>
+<p>O sweep usa um cenário de contexto por ponto. Com <code>1024..16384</code> em passos de 1024, são 16 pontos. Cada ponto faz:</p>
+<pre><code class="language-text">3 warmup + 50 measure = 53
+3 repetições × 53 = 159
++ primeira resposta + referência final = 161 requisições/probes
+16 pontos × 161 = 2576 requisições/probes por runtime
+</code></pre>
+<p>É por isso que o <code>bench-&lt;runtime&gt;</code> formal é longo: ele combina a bateria base com um sweep que reinicia e carrega o servidor em cada ponto. <code>bench-all</code> repete isso três vezes, uma para cada runtime.</p>
+<h2 id="exemplo-pratico-do-corpo-http">Exemplo prático do corpo HTTP</h2>
+<p>No padrão <code>independent</code>, uma requisição enviada pelo cliente se parece com:</p>
+<pre><code class="language-json">{
+  &quot;model&quot;: &quot;qwen7b-q8-gguf&quot;,
+  &quot;messages&quot;: [
+    {
+      &quot;role&quot;: &quot;user&quot;,
+      &quot;content&quot;: &quot;Explique de forma objetiva este conceito para um estudante de estatística. ...&quot;
+    }
+  ],
+  &quot;temperature&quot;: 0,
+  &quot;top_p&quot;: 1,
+  &quot;max_tokens&quot;: 128,
+  &quot;stream&quot;: true,
+  &quot;stream_options&quot;: {&quot;include_usage&quot;: true}
+}
+</code></pre>
+<p>O <code>...</code> não é uma elipse enviada: é a mesma frase-base repetida e cortada pelo tokenizer no alvo de <code>short</code>, <code>medium</code> ou <code>long</code>. O <code>system</code>/<code>assistant</code> não aparece no modo <code>independent</code>. Depois que a resposta chega, ela não é inserida na próxima requisição.</p>
+<p>Para usar <code>replay</code>, o mesmo corpo passa a carregar o histórico do fixture:</p>
+<pre><code class="language-json">{
+  &quot;messages&quot;: [
+    {&quot;role&quot;: &quot;system&quot;, &quot;content&quot;: &quot;Voce e um assistente tecnico conciso...&quot;},
+    {&quot;role&quot;: &quot;user&quot;, &quot;content&quot;: &quot;Explique em duas frases a diferenca entre RAM ...&quot;},
+    {&quot;role&quot;: &quot;assistant&quot;, &quot;content&quot;: &quot;RAM guarda dados e processos ...&quot;},
+    {&quot;role&quot;: &quot;user&quot;, &quot;content&quot;: &quot;Agora relacione essa diferenca com o KV-cache ...&quot;}
+  ],
+  &quot;max_tokens&quot;: 128,
+  &quot;stream&quot;: true
+}
+</code></pre>
+<p>No <code>closed-loop</code>, a mensagem <code>assistant</code> do turno anterior seria a resposta real recebida do runtime, e não o texto fixo do fixture.</p>
+<h3 id="exemplo-didatico-tres-formas-de-enviar-a-mesma-interacao">Exemplo didático: três formas de enviar a mesma interação</h3>
+<p>Considere o primeiro turno do fixture:</p>
+<pre><code class="language-text">system: Voce e um assistente tecnico conciso. Responda em portugues...
+user:   Explique em duas frases a diferenca entre RAM do sistema e VRAM da GPU...
+</code></pre>
+<p>No <code>independent</code>, cada requisição continua curta e sem histórico:</p>
+<pre><code class="language-text">POST 1 → [user: &quot;Explique de forma objetiva este conceito...&quot; ] → resposta 1
+POST 2 → [user: &quot;Explique de forma objetiva este conceito...&quot; ] → resposta 2
+POST 3 → [user: &quot;Explique de forma objetiva este conceito...&quot; ] → resposta 3
+</code></pre>
+<p>Mesmo que a resposta 1 fale sobre VRAM, ela não aparece no POST 2. A entrada é controlada pelo tamanho do cenário, e não pela conversa.</p>
+<p>No <code>replay</code>, cada turno cresce com o histórico fixo:</p>
+<pre><code class="language-text">turno 1 → [system, user_1]
+turno 2 → [system, user_1, assistant_1_fixo, user_2]
+turno 3 → [system, user_1, assistant_1_fixo, user_2,
+           assistant_2_fixo, user_3]
+</code></pre>
+<p>No <code>closed-loop</code>, a forma é igual, mas as respostas vêm do runtime:</p>
+<pre><code class="language-text">turno 1 → [system, user_1]                    → resposta_real_1
+turno 2 → [system, user_1, resposta_real_1, user_2] → resposta_real_2
+turno 3 → [system, user_1, resposta_real_1, user_2,
+           resposta_real_2, user_3]
+</code></pre>
+<p>Assim, <code>replay</code> permite repetir a mesma conversa com entradas determinísticas; <code>closed-loop</code> mede uma conversa que evolui conforme as respostas produzidas. Em ambos, <code>prompt_tokens</code> é a contagem real do histórico enviado naquele turno, não apenas o tamanho do texto do último <code>user</code>.</p>
+<h3 id="exemplo-didatico-o-que-muda-no-sweep">Exemplo didático: o que muda no sweep</h3>
+<p>O sweep não acrescenta <code>assistant</code> ao histórico. Ele mantém a política de carga escolhida e muda o tamanho do contexto alvo:</p>
+<pre><code class="language-text">ponto 1024 → prompt sintético de ~1024 tokens → servidor reinicia
+ponto 2048 → prompt sintético de ~2048 tokens → servidor reinicia
+ponto 3072 → prompt sintético de ~3072 tokens → servidor reinicia
+</code></pre>
+<p>Cada ponto gera seu próprio <code>manifest.json</code>, <code>first-request.json</code>, <code>summary.json</code>, telemetria e log. Se o modo do sweep for <code>replay</code>, então cada ponto combina as duas coisas: histórico conversacional reproduzido e novo limite de contexto. Isso aumenta o custo experimental e não transforma o sweep em uma simples repetição da bateria base.</p>
+<h2 id="exemplos-de-execucao-controlada">Exemplos de execução controlada</h2>
+<p>A configuração formal padrão é equivalente a:</p>
+<pre><code class="language-bash">make bench-vllm MODEL_SIZE=7B PREPARE_OFFLINE=1
+</code></pre>
+<p>Para um diagnóstico pequeno no Pod, reduza explicitamente todas as dimensões:</p>
+<pre><code class="language-bash">make bench-vllm MODEL_SIZE=7B PREPARE_OFFLINE=1 \
+  BENCH_SCENARIOS=short BENCH_REQUESTS=1 BENCH_REPETITIONS=1 BENCH_WARMUP=0 \
+  SWEEP_MAX_CONTEXT=1024 SWEEP_REQUESTS=1 SWEEP_REPETITIONS=1 SWEEP_WARMUP=0
+</code></pre>
+<p>Para uma conversa reproduzível na bateria base:</p>
+<pre><code class="language-bash">make bench-vllm MODEL_SIZE=7B PREPARE_OFFLINE=1 \
+  BENCH_MODE=replay CONVERSATION_TURNS=3 \
+  BENCH_SCENARIOS=short BENCH_REQUESTS=10 BENCH_REPETITIONS=3 BENCH_WARMUP=3
+</code></pre>
+<p>Esses overrides mudam o experimento e precisam ficar registrados no <code>manifest.json</code>; não compare o resultado reduzido com a bateria formal sem declarar a diferença.</p>
 <h3 id="como-funciona-o-modo-independent">Como funciona o modo <code>independent</code></h3>
 <p><code>independent</code> é o modo padrão da bateria base. Cada requisição contém somente uma mensagem do usuário, sem <code>system</code>/<code>assistant</code> acumulados de requisições anteriores:</p>
 <pre><code class="language-text">requisição 1: [user: prompt short]
