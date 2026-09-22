@@ -6,6 +6,24 @@ O fluxo oficial é baseado no `Makefile`. O benchmark não baixa modelos, não t
 
 Documentação detalhada: [fluxo completo do Make](docs/make-fluxo.md) · [metodologia](docs/metodologia.html) · [código explicado](docs/codigo-explicado.html).
 
+## Preparar um pod novo
+
+Em uma imagem Ubuntu/Debian do RunPod:
+
+```bash
+apt-get update
+apt-get install -y git curl ca-certificates build-essential cmake pkg-config python3 python3-venv python3-pip
+nvidia-smi
+git --version
+python3 --version
+mkdir -p /workspace
+cd /workspace
+git clone git@github.com:yanwerneck/llm_local_inference_masters.git
+cd /workspace/llm_local_inference_masters/chatbot-runtime-bench
+```
+
+Se SSH não estiver configurado, use `git clone https://github.com/yanwerneck/llm_local_inference_masters.git`. O `hf` é instalado dentro do venv pelo `make install-benchmark`; não é necessário instalar um `hf` separado no sistema. Depois da instalação, verifique com `/workspace/chatbot-runtime-bench/.venv/bin/hf --help` ou deixe o Make chamá-lo automaticamente.
+
 ## Fluxo mínimo no RunPod
 
 ```bash
