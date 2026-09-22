@@ -110,6 +110,8 @@ Cada execução tem um timestamp em `results/`. Os arquivos importantes são:
 
 Para copiar os resultados do pod para o computador local, execute localmente: `make pull-results POD_SSH=root@HOST_DO_POD`. O alvo usa `scp`, aceita `POD_PORT`, `REMOTE_RESULTS_DIR` e `LOCAL_RESULTS_DIR`, e não apaga resultados locais. `make check-profilers` verifica `nsys` e `ncu`; profiling é complementar e deve ser executado separadamente, pois altera a latência.
 
+O profiling automatizado fica em `Makefile.profiling`, separado da bateria oficial. Execute `make -f Makefile.profiling profile-vllm-nsys MODEL_SIZE=7B` ou o alvo equivalente de `ncu`/llama.cpp em outro ambiente. O alvo inicia o servidor em primeiro plano; envie uma única requisição curta em outro terminal e encerre com `Ctrl-C`. Os relatórios ficam em `results/profiling/`. Não instale/remova Nsight durante `bench-vllm`, pois isso mudaria o ambiente e contaminaria a medição.
+
 ## 9. Sequência recomendada
 
 ```bash

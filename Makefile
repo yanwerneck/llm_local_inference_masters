@@ -362,6 +362,7 @@ check-profilers:
 	@command -v nsys >/dev/null 2>&1 && nsys --version || echo '[PROFILE] nsys não encontrado: instale Nsight Systems no pod ou use o pacote NVIDIA correspondente.'
 	@command -v ncu >/dev/null 2>&1 && ncu --version || echo '[PROFILE] ncu não encontrado: instale Nsight Compute no pod ou use o pacote NVIDIA correspondente.'
 
+
 docs:
 	$(PYTHON) scripts/build_docs.py
 

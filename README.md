@@ -235,6 +235,27 @@ make check-profilers
 
 Não misture Nsight com a bateria oficial de TTFT/Tokens/s: o profiler altera o tempo observado. Registre esse profiling como experimento complementar, com o mesmo modelo, prompt e contexto.
 
+#### Makefile de profiling separado
+
+O arquivo `Makefile.profiling` é deliberadamente separado do Makefile principal. Use-o em outro ambiente/execução, com `nsys` ou `ncu` instalados. Ele não instala nem remove o Nsight automaticamente e não deve ser usado para produzir os números oficiais de latência.
+
+Exemplos no pod:
+
+```bash
+make -f Makefile.profiling check
+make -f Makefile.profiling profile-vllm-nsys MODEL_SIZE=7B
+```
+
+O servidor fica em primeiro plano. Em outro terminal do pod, envie uma única requisição curta:
+
+```bash
+curl -s http://127.0.0.1:8000/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"qwen7b-q8-gguf","messages":[{"role":"user","content":"Explique RAM e VRAM em duas frases."}],"max_tokens":64,"temperature":0,"stream":false}'
+```
+
+Depois interrompa o servidor com `Ctrl-C`. O relatório fica em `results/profiling/`. Para Nsight Compute, use `profile-vllm-ncu` ou `profile-llama-ncu`, faça uma única requisição e interrompa após os kernels desejados. O resultado `.ncu-rep` contém os contadores para estimar FLOPs, bytes de DRAM, FLOP/s, GB/s e intensidade aritmética.
+
 ## Regras de validade
 
 - mesmo GGUF, tokenizer, prompt, temperatura e limite de saída nos três runtimes;
