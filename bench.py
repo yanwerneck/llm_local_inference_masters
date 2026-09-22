@@ -283,7 +283,7 @@ class Monitor:
         for phase in phases:
             entry = {"gpu_samples": 0, "system_samples": 0, "kv_samples": 0}
             grows = [r for r in sources["gpu"] if r.get("phase") == phase]
-            for key in ("used_mib", "gpu_util_pct", "temperature_c", "power_w"):
+            for key in ("used_mib", "total_mib", "used_gib", "total_gib", "gpu_util_pct", "memory_util_pct", "temperature_c", "power_w"):
                 vals = []
                 for r in grows:
                     try: vals.append(float(r[key]))
