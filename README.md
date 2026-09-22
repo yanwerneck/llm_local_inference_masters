@@ -307,7 +307,7 @@ BENCH_MODE=independent|closed-loop|replay
 CONVERSATION_TURNS / CONVERSATION_FIXTURE
 ```
 
-`independent` preserva a carga histórica de uma requisição isolada por cenário. `closed-loop` usa o fixture em `CONVERSATION_FIXTURE`, envia o histórico completo a cada turno e acrescenta ao próximo turno a resposta real gerada pelo runtime. `replay` também envia o histórico completo, mas acrescenta as respostas `assistant` fixas do fixture. O fixture é JSON com `system` textual e `turns`; cada turno tem `user`, e os turnos usados em `replay` também precisam de `assistant`.
+`independent` preserva a carga histórica de uma requisição isolada por cenário. Cada requisição recebe um prompt determinístico próprio, com o mesmo comprimento-alvo; warmup e medição usam conjuntos disjuntos para reduzir viés de cache de prefixo. `closed-loop` usa o fixture em `CONVERSATION_FIXTURE`, envia o histórico completo a cada turno e acrescenta ao próximo turno a resposta real gerada pelo runtime. `replay` também envia o histórico completo, mas acrescenta as respostas `assistant` fixas do fixture. O fixture é JSON com `system` textual e `turns`; cada turno tem `user`, e os turnos usados em `replay` também precisam de `assistant`.
 
 ## Telemetria e resultados
 
@@ -396,7 +396,7 @@ Depois interrompa o servidor com `Ctrl-C`. O relatório fica em `results/profili
 
 ## Regras de validade
 
-- mesmo GGUF, tokenizer, prompt, temperatura e limite de saída nos três runtimes;
+- mesmo GGUF, tokenizer, conjunto determinístico de prompts, temperatura e limite de saída nos três runtimes;
 - uma GPU limpa e nenhum servidor concorrente;
 - nenhum download durante `bench`;
 - smoke não é comparável à bateria formal;

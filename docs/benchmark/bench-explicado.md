@@ -87,7 +87,7 @@ No padrão `independent`, uma requisição enviada pelo cliente se parece com:
   "messages": [
     {
       "role": "user",
-      "content": "Explique de forma objetiva este conceito para um estudante de estatística. ..."
+      "content": "word17 word83 word4 ... Explique de forma objetiva este conceito para um estudante de estatística. ..."
     }
   ],
   "temperature": 0,
@@ -98,7 +98,7 @@ No padrão `independent`, uma requisição enviada pelo cliente se parece com:
 }
 ```
 
-O `...` não é uma elipse enviada: é a mesma frase-base repetida e cortada pelo tokenizer no alvo de `short`, `medium` ou `long`. O `system`/`assistant` não aparece no modo `independent`. Depois que a resposta chega, ela não é inserida na próxima requisição.
+O primeiro trecho é um marcador determinístico derivado da semente do bloco e do índice da requisição. O `...` não é uma elipse enviada: depois do marcador, a frase-base é repetida e cortada pelo tokenizer no alvo de `short`, `medium` ou `long`. Cada requisição recebe outro marcador, mas preserva exatamente o mesmo número-alvo de tokens. O `system`/`assistant` não aparece no modo `independent`. Depois que a resposta chega, ela não é inserida na próxima requisição.
 
 Para usar `replay`, o mesmo corpo passa a carregar o histórico do fixture:
 
@@ -129,9 +129,9 @@ user:   Explique em duas frases a diferenca entre RAM do sistema e VRAM da GPU..
 No `independent`, cada requisição continua curta e sem histórico:
 
 ```text
-POST 1 → [user: "Explique de forma objetiva este conceito..." ] → resposta 1
-POST 2 → [user: "Explique de forma objetiva este conceito..." ] → resposta 2
-POST 3 → [user: "Explique de forma objetiva este conceito..." ] → resposta 3
+POST 1 → [user: "marcador A + Explique de forma objetiva..." ] → resposta 1
+POST 2 → [user: "marcador B + Explique de forma objetiva..." ] → resposta 2
+POST 3 → [user: "marcador C + Explique de forma objetiva..." ] → resposta 3
 ```
 
 Mesmo que a resposta 1 fale sobre VRAM, ela não aparece no POST 2. A entrada é controlada pelo tamanho do cenário, e não pela conversa.
@@ -204,7 +204,7 @@ requisição 2: [user: prompt short]
 requisição 3: [user: prompt short]
 ```
 
-O cliente não coloca a resposta da requisição 1 na requisição 2 e não envia um histórico conversacional. Para cada cenário, o prompt sintético é construído uma vez a partir da frase-base e reutilizado nas requisições daquele bloco; isso mantém a carga textual controlada. `short`, `medium` e `long` usam tamanhos de entrada diferentes.
+O cliente não coloca a resposta da requisição 1 na requisição 2 e não envia um histórico conversacional. Para cada requisição, o prompt sintético combina um marcador determinístico único com a mesma frase-base, mantendo o comprimento-alvo fixo. A semente base muda entre warmup e medição, e o índice muda dentro do bloco. Isso preserva reprodutibilidade entre runtimes sem oferecer o prompt medido ao cache durante o aquecimento. `short`, `medium` e `long` usam tamanhos de entrada diferentes.
 
 Isso é independência **da conversa**, não garantia de estado frio. O servidor continua vivo durante warmup e measure e pode manter pesos na GPU, caches de prefixo, alocadores e estruturas internas. Assim, `independent` responde “quanto custa servir mensagens isoladas em um processo aquecido?”, não “quanto custa iniciar um runtime frio a cada requisição?”. Para cold starts, o processo precisa ser reiniciado entre execuções, como no sweep ou em chamadas separadas com `--launch`.
 
@@ -241,7 +241,7 @@ Essa é uma **sonda de primeira resposta**, registrada em `first-request.json` e
 
 ### 4. Warmup
 
-O warmup envia requisições reais antes da medição formal. Elas podem aquecer compilação, buffers, alocadores, HTTP/SSE, tokenizer, prefixos e estruturas KV. Por padrão são três por cenário e repetição.
+O warmup envia requisições reais antes da medição formal. Elas podem aquecer compilação, buffers, alocadores, HTTP/SSE, tokenizer e estruturas KV. Por padrão são três por cenário e repetição. Seus prompts têm o mesmo tamanho-alvo dos prompts medidos, mas usam sementes disjuntas, evitando o reaproveitamento do prompt completo entre as fases.
 
 Warmup não é TTFT:
 
@@ -254,7 +254,7 @@ O warmup não limpa caches, não prova estabilidade e não entra na fase `measur
 
 ### 5. Medição oficial
 
-Na fase `measure`, o cliente envia uma requisição por vez. Para cada resposta bem-sucedida calcula TTFT, intervalo entre tokens, tokens/s de decode, tokens/s efetivos e latência total. A bateria formal padrão usa 50 requisições, três repetições e três warmups por cenário.
+Na fase `measure`, o cliente envia uma requisição por vez. Cada requisição usa um prompt determinístico próprio para evitar que as demais amostras do mesmo bloco sejam simples cache hits de prefixo. Para cada resposta bem-sucedida calcula TTFT, intervalo entre tokens, tokens/s de decode, tokens/s efetivos e latência total. A bateria formal padrão usa 50 requisições, três repetições e três warmups por cenário.
 
 `short`, `medium` e `long` representam aproximadamente 256, 2048 e 8192 tokens de entrada, com teto de 128 tokens de saída. O servidor informa os comprimentos reais; esses valores devem ser conferidos antes da comparação.
 

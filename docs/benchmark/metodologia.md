@@ -26,7 +26,7 @@ Uma execução do cliente por vez não impede interferência externa: outro term
 
 ## 3. Qual carga será usada?
 
-O próprio GuideLLM gera texto sintético com um tokenizer fixado. Usamos aproximadamente 256, 2048 e, opcionalmente, 8192 tokens de conteúdo, com teto de 128 tokens na resposta. O [gerador de datasets](https://vllm-project.github.io/guidellm/0.7.0/guides/datasets/) fornece uma carga repetível por semente.
+No modo padrão `independent`, o cliente gera localmente texto sintético com o tokenizer fixado. Usamos aproximadamente 256, 2048 e, opcionalmente, 8192 tokens de conteúdo, com teto de 128 tokens na resposta. Cada requisição recebe um marcador determinístico derivado da semente do bloco e do índice da amostra; em seguida, a frase-base é repetida e cortada exatamente no tamanho-alvo. Assim, os três runtimes recebem a mesma carga, mas warmup e medição não repetem o mesmo prefixo.
 
 | Cenário | Conteúdo de entrada | Teto de saída | Pergunta experimental |
 |---|---:|---:|---|
@@ -36,7 +36,7 @@ O próprio GuideLLM gera texto sintético com um tokenizer fixado. Usamos aproxi
 
 Esses números são **nosso desenho**, não limites oficiais de classificação de chatbot. Tokens de template e mensagens de sistema podem aumentar a entrada total. O servidor devolve as contagens reais, que devem ser analisadas.
 
-O texto não é um dataset validado de perguntas em português, nem uma conversa real com histórico crescente. Cada requisição é independente. O cenário longo **representa o volume de contexto**, mas não avalia reaproveitamento de uma conversa em vários turnos. Esse escopo evita misturar dois fenômenos no primeiro experimento.
+O texto não é um dataset validado de perguntas em português, nem uma conversa real com histórico crescente. Cada requisição é independente e usa um prompt próprio, com o mesmo comprimento-alvo das demais amostras do cenário. O cenário longo **representa o volume de contexto**, mas não avalia reaproveitamento de uma conversa em vários turnos. Esse escopo evita misturar dois fenômenos no primeiro experimento.
 
 O modelo pode encerrar antes de 128 tokens. Não forçamos ignore-EOS porque não é um parâmetro portátil entre os três servidores. Registrar saída efetiva é obrigatório: uma configuração pode parecer mais rápida apenas por gerar menos texto. Textos sintéticos também podem provocar respostas curtas ou estranhas; confirme os comprimentos no piloto antes de investir na bateria inteira.
 
@@ -75,7 +75,7 @@ Uma amostra faltante permanece um diagnóstico do caminho GuideLLM/servidor; nã
 
 **Warmup não é TTFT.** TTFT é uma métrica de uma requisição: o intervalo entre o envio do POST e o primeiro conteúdo/token observado. Warmup é uma fase de preparação do estado do processo. O warmup pode reduzir o TTFT das requisições seguintes, mas não é o valor de TTFT e não prova que o sistema atingiu estabilidade. A primeira resposta pode ter TTFT alto por cold start; as requisições após o warmup medem um estado mais próximo de operação contínua.
 
-O warmup não limpa caches nem garante um estado frio. Ele pode aquecer compilação, alocadores, buffers, HTTP/SSE, tokenizer, prefixos e estruturas KV. Por isso, `phase=warmup` deve ser analisada separadamente. O padrão formal é `--warmup 3` por cenário e repetição; use o mesmo valor em todos os runtimes. `--warmup 0` é útil para diagnóstico barato, mas deixa a medição mais dependente do estado inicial.
+O warmup não limpa caches nem garante um estado frio. Ele pode aquecer compilação, alocadores, buffers, HTTP/SSE, tokenizer e estruturas KV. Seus prompts, porém, usam sementes diferentes das medições e cada requisição recebe um marcador próprio; isso evita transformar deliberadamente a fase `measure` em cache hit do mesmo prefixo. Por isso, `phase=warmup` deve ser analisada separadamente. O padrão formal é `--warmup 3` por cenário e repetição; use o mesmo valor em todos os runtimes. `--warmup 0` é útil para diagnóstico barato, mas deixa a medição mais dependente do estado inicial.
 
 TTFT também não é o tempo total de resposta: a geração começa depois do primeiro conteúdo, enquanto a taxa efetiva divide os tokens de saída pela latência total. Portanto, uma configuração pode melhorar TTFT e piorar decode, ou melhorar tokens/s sem melhorar a latência ponta a ponta.
 
@@ -123,7 +123,7 @@ Uma chamada do programa produz uma amostra de partida. `--repetitions` repete ce
 
 A pergunta inicial é texto real em português, distinta da carga sintética dos cenários. Pode ser substituída por `--first-prompt-file`. Comparamos seu primeiro acesso com uma referência usando **o mesmo texto** no final; não comparamos diretamente essa pergunta curta com o cenário sintético longo. A referência final pode aproveitar cache de prefixo, portanto a diferença não isola automaticamente apenas inicialização de kernels. Ambos os resultados ficam disponíveis para interpretação.
 
-Aquecer com três requisições é um ponto de partida, não prova de estabilidade. Observe se ainda há tendência na sequência temporal. Se necessário, aumente `--warmup` igualmente para todas as configurações. Não use o conjunto medido inteiro como aquecimento: isso pode popular caches com os mesmos prompts.
+Aquecer com três requisições é um ponto de partida, não prova de estabilidade. Observe se ainda há tendência na sequência temporal. Se necessário, aumente `--warmup` igualmente para todas as configurações. O conjunto de prompts de warmup é determinístico, mas disjunto do conjunto medido; não reutilize manualmente as requisições oficiais como aquecimento.
 
 ## 5. O relógio começa e termina onde?
 
@@ -184,7 +184,7 @@ O modelo estar carregado na GPU é desejável neste protocolo. Já reaproveitar 
 
 Para uma comparação de requisições independentes, tentem desativar reutilização entre requisições, quando o runtime permitir, e registrem como fizeram. Se não for possível, mantenham essa limitação explícita. O cliente não possui um botão universal de limpeza de cache para todos os servidores.
 
-As sementes de aquecimento diferem das sementes de medição, e os prompts variam. Isso reduz repetição exata, mas **não garante cache frio**: templates e prefixos comuns ainda podem ser reaproveitados. `cache_policy` é uma declaração do operador, não uma medição automática.
+As sementes de aquecimento diferem das sementes de medição. Dentro de cada bloco, o índice da requisição também participa da geração, de modo que todas as amostras `independent` têm prompts distintos, mas o mesmo tamanho-alvo. Isso evita o cache hit do prompt completo sem garantir cache frio: template e pequenos prefixos comuns ainda podem ser reaproveitados. `cache_policy` é uma declaração do operador, não uma medição automática.
 
 ## 9. Memória e saúde do pod
 

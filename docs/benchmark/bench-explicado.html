@@ -196,7 +196,7 @@ bench-&lt;runtime&gt;
   &quot;messages&quot;: [
     {
       &quot;role&quot;: &quot;user&quot;,
-      &quot;content&quot;: &quot;Explique de forma objetiva este conceito para um estudante de estatística. ...&quot;
+      &quot;content&quot;: &quot;word17 word83 word4 ... Explique de forma objetiva este conceito para um estudante de estatística. ...&quot;
     }
   ],
   &quot;temperature&quot;: 0,
@@ -206,7 +206,7 @@ bench-&lt;runtime&gt;
   &quot;stream_options&quot;: {&quot;include_usage&quot;: true}
 }
 </code></pre>
-<p>O <code>...</code> não é uma elipse enviada: é a mesma frase-base repetida e cortada pelo tokenizer no alvo de <code>short</code>, <code>medium</code> ou <code>long</code>. O <code>system</code>/<code>assistant</code> não aparece no modo <code>independent</code>. Depois que a resposta chega, ela não é inserida na próxima requisição.</p>
+<p>O primeiro trecho é um marcador determinístico derivado da semente do bloco e do índice da requisição. O <code>...</code> não é uma elipse enviada: depois do marcador, a frase-base é repetida e cortada pelo tokenizer no alvo de <code>short</code>, <code>medium</code> ou <code>long</code>. Cada requisição recebe outro marcador, mas preserva exatamente o mesmo número-alvo de tokens. O <code>system</code>/<code>assistant</code> não aparece no modo <code>independent</code>. Depois que a resposta chega, ela não é inserida na próxima requisição.</p>
 <p>Para usar <code>replay</code>, o mesmo corpo passa a carregar o histórico do fixture:</p>
 <pre><code class="language-json">{
   &quot;messages&quot;: [
@@ -226,9 +226,9 @@ bench-&lt;runtime&gt;
 user:   Explique em duas frases a diferenca entre RAM do sistema e VRAM da GPU...
 </code></pre>
 <p>No <code>independent</code>, cada requisição continua curta e sem histórico:</p>
-<pre><code class="language-text">POST 1 → [user: &quot;Explique de forma objetiva este conceito...&quot; ] → resposta 1
-POST 2 → [user: &quot;Explique de forma objetiva este conceito...&quot; ] → resposta 2
-POST 3 → [user: &quot;Explique de forma objetiva este conceito...&quot; ] → resposta 3
+<pre><code class="language-text">POST 1 → [user: &quot;marcador A + Explique de forma objetiva...&quot; ] → resposta 1
+POST 2 → [user: &quot;marcador B + Explique de forma objetiva...&quot; ] → resposta 2
+POST 3 → [user: &quot;marcador C + Explique de forma objetiva...&quot; ] → resposta 3
 </code></pre>
 <p>Mesmo que a resposta 1 fale sobre VRAM, ela não aparece no POST 2. A entrada é controlada pelo tamanho do cenário, e não pela conversa.</p>
 <p>No <code>replay</code>, cada turno cresce com o histórico fixo:</p>
@@ -272,7 +272,7 @@ ponto 3072 → prompt sintético de ~3072 tokens → servidor reinicia
 requisição 2: [user: prompt short]
 requisição 3: [user: prompt short]
 </code></pre>
-<p>O cliente não coloca a resposta da requisição 1 na requisição 2 e não envia um histórico conversacional. Para cada cenário, o prompt sintético é construído uma vez a partir da frase-base e reutilizado nas requisições daquele bloco; isso mantém a carga textual controlada. <code>short</code>, <code>medium</code> e <code>long</code> usam tamanhos de entrada diferentes.</p>
+<p>O cliente não coloca a resposta da requisição 1 na requisição 2 e não envia um histórico conversacional. Para cada requisição, o prompt sintético combina um marcador determinístico único com a mesma frase-base, mantendo o comprimento-alvo fixo. A semente base muda entre warmup e medição, e o índice muda dentro do bloco. Isso preserva reprodutibilidade entre runtimes sem oferecer o prompt medido ao cache durante o aquecimento. <code>short</code>, <code>medium</code> e <code>long</code> usam tamanhos de entrada diferentes.</p>
 <p>Isso é independência <strong>da conversa</strong>, não garantia de estado frio. O servidor continua vivo durante warmup e measure e pode manter pesos na GPU, caches de prefixo, alocadores e estruturas internas. Assim, <code>independent</code> responde “quanto custa servir mensagens isoladas em um processo aquecido?”, não “quanto custa iniciar um runtime frio a cada requisição?”. Para cold starts, o processo precisa ser reiniciado entre execuções, como no sweep ou em chamadas separadas com <code>--launch</code>.</p>
 <p>No <code>independent</code>, a resposta nunca altera a próxima entrada. No <code>replay</code>, o fixture fornece o histórico e respostas <code>assistant</code> fixas; no <code>closed-loop</code>, as respostas reais entram no turno seguinte. Essa é a diferença operacional entre os três modos.</p>
 <h2 id="o-que-acontece-em-uma-execucao">O que acontece em uma execução</h2>
@@ -294,14 +294,14 @@ requisição 3: [user: prompt short]
 </ul>
 <p>Essa é uma <strong>sonda de primeira resposta</strong>, registrada em <code>first-request.json</code> e no lifecycle. Ela não é misturada ao p50 da fase <code>measure</code>.</p>
 <h3 id="4-warmup">4. Warmup</h3>
-<p>O warmup envia requisições reais antes da medição formal. Elas podem aquecer compilação, buffers, alocadores, HTTP/SSE, tokenizer, prefixos e estruturas KV. Por padrão são três por cenário e repetição.</p>
+<p>O warmup envia requisições reais antes da medição formal. Elas podem aquecer compilação, buffers, alocadores, HTTP/SSE, tokenizer e estruturas KV. Por padrão são três por cenário e repetição. Seus prompts têm o mesmo tamanho-alvo dos prompts medidos, mas usam sementes disjuntas, evitando o reaproveitamento do prompt completo entre as fases.</p>
 <p>Warmup não é TTFT:</p>
 <pre><code class="language-text">TTFT  = uma métrica: POST → primeiro conteúdo daquela requisição
 warmup = uma fase: requisições usadas para preparar o estado do processo
 </code></pre>
 <p>O warmup não limpa caches, não prova estabilidade e não entra na fase <code>measure</code>. Seus dados ficam registrados como <code>phase=warmup</code> para investigar tendência. Com <code>BENCH_WARMUP=0</code>, a execução fica mais barata, mas mais dependente do estado inicial.</p>
 <h3 id="5-medicao-oficial">5. Medição oficial</h3>
-<p>Na fase <code>measure</code>, o cliente envia uma requisição por vez. Para cada resposta bem-sucedida calcula TTFT, intervalo entre tokens, tokens/s de decode, tokens/s efetivos e latência total. A bateria formal padrão usa 50 requisições, três repetições e três warmups por cenário.</p>
+<p>Na fase <code>measure</code>, o cliente envia uma requisição por vez. Cada requisição usa um prompt determinístico próprio para evitar que as demais amostras do mesmo bloco sejam simples cache hits de prefixo. Para cada resposta bem-sucedida calcula TTFT, intervalo entre tokens, tokens/s de decode, tokens/s efetivos e latência total. A bateria formal padrão usa 50 requisições, três repetições e três warmups por cenário.</p>
 <p><code>short</code>, <code>medium</code> e <code>long</code> representam aproximadamente 256, 2048 e 8192 tokens de entrada, com teto de 128 tokens de saída. O servidor informa os comprimentos reais; esses valores devem ser conferidos antes da comparação.</p>
 <h3 id="6-referencia-final-e-cleanup">6. Referência final e cleanup</h3>
 <p>O prompt inicial é repetido no final como referência aquecida. Depois, o launcher encerra somente o processo criado pelo benchmark e fecha os coletores. A referência ajuda a comparar o primeiro acesso com um estado posterior, mas pode aproveitar cache de prefixo; não isola sozinha um único custo.</p>

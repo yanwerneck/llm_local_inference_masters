@@ -4,52 +4,52 @@ Leia junto com [a explicação detalhada](codigo-explicado.md). Gerado dos arqui
 
 ## bench.py
 
-SHA-256: `0d896f026c31034e89415090a27e5af0494063e35aada5b4a112db7822dd203f`.
+SHA-256: `f01a8c551ce090af614510a4d02658b5793dbf22c214c65004468405171bd397`.
 
 | Função/classe | Linhas |
 |---|---|
-| `_synthetic_prompt` | 33–40 |
-| `estimate_messages_tokens` | 43–47 |
-| `request_sha256` | 50–52 |
-| `stream_messages_request` | 55–105 |
-| `stream_request` | 108–109 |
-| `stream_metrics` | 112–131 |
-| `run_stream_batch` | 134–146 |
-| `load_conversation_fixture` | 149–162 |
-| `validate_conversation_fixture_for_mode` | 165–170 |
-| `fixture_messages_for_turn` | 173–187 |
-| `run_conversational_batch` | 190–217 |
-| `local_model_check` | 220–240 |
-| `write_json` | 243–244 |
-| `redact` | 247–255 |
-| `capture` | 258–263 |
-| `load_config` | 266–282 |
-| `validate_run` | 285–298 |
-| `tokenizer_digest` | 301–310 |
-| `prepare_tokenizer` | 313–325 |
-| `scenario_config` | 328–347 |
-| `Monitor` | 350–525 |
-| `percentile` | 528–534 |
-| `summarize` | 537–601 |
-| `requests_digest` | 604–611 |
-| `turn_manifest` | 614–624 |
-| `conversation_artifact` | 627–649 |
-| `write_requests_csv` | 652–671 |
-| `write_summary` | 674–684 |
-| `run` | 687–853 |
-| `positive` | 856–860 |
-| `nonnegative` | 863–867 |
-| `rebuild_report` | 870–884 |
-| `main` | 887–952 |
-| `__init__` | 352–359 |
-| `set_phase` | 361–369 |
-| `start` | 371–381 |
-| `log` | 383–387 |
-| `kv_loop` | 389–413 |
-| `loop` | 415–463 |
-| `stop` | 465–476 |
-| `write_telemetry_summary` | 478–525 |
-| `read_rows` | 480–485 |
+| `_synthetic_prompt` | 33–42 |
+| `estimate_messages_tokens` | 45–49 |
+| `request_sha256` | 52–54 |
+| `stream_messages_request` | 57–107 |
+| `stream_request` | 110–111 |
+| `stream_metrics` | 114–133 |
+| `run_stream_batch` | 136–153 |
+| `load_conversation_fixture` | 156–169 |
+| `validate_conversation_fixture_for_mode` | 172–177 |
+| `fixture_messages_for_turn` | 180–194 |
+| `run_conversational_batch` | 197–224 |
+| `local_model_check` | 227–247 |
+| `write_json` | 250–251 |
+| `redact` | 254–262 |
+| `capture` | 265–270 |
+| `load_config` | 273–289 |
+| `validate_run` | 292–305 |
+| `tokenizer_digest` | 308–317 |
+| `prepare_tokenizer` | 320–332 |
+| `scenario_config` | 335–354 |
+| `Monitor` | 357–532 |
+| `percentile` | 535–541 |
+| `summarize` | 544–608 |
+| `requests_digest` | 611–618 |
+| `turn_manifest` | 621–631 |
+| `conversation_artifact` | 634–656 |
+| `write_requests_csv` | 659–678 |
+| `write_summary` | 681–691 |
+| `run` | 694–864 |
+| `positive` | 867–871 |
+| `nonnegative` | 874–878 |
+| `rebuild_report` | 881–895 |
+| `main` | 898–963 |
+| `__init__` | 359–366 |
+| `set_phase` | 368–376 |
+| `start` | 378–388 |
+| `log` | 390–394 |
+| `kv_loop` | 396–420 |
+| `loop` | 422–470 |
+| `stop` | 472–483 |
+| `write_telemetry_summary` | 485–532 |
+| `read_rows` | 487–492 |
 
 ```text
 0001 | #!/usr/bin/env python3
@@ -77,937 +77,948 @@ SHA-256: `0d896f026c31034e89415090a27e5af0494063e35aada5b4a112db7822dd203f`.
 0023 | from results_layout import artifact, execution_label, href, locate, prepare, runtime_root, slug
 0024 |
 0025 | ROOT = Path(__file__).resolve().parent
-0026 | VERSION = "0.4.0"
+0026 | VERSION = "0.4.1"
 0027 | GUIDELLM_VERSION = "0.7.4"
 0028 | WORKLOADS = {"short": 256, "medium": 2048, "long": 8192}
 0029 | OUTPUT_TOKENS = 128
 0030 | DEFAULT_CONVERSATION_FIXTURE = ROOT / "workloads" / "conversations" / "qwen_chat_v1.json"
 0031 |
 0032 |
-0033 | def _synthetic_prompt(tokenizer, target_tokens: int) -> str:
-0034 |     """Cria texto localmente; nenhuma chamada de servidor participa do relógio."""
-0035 |     seed = "Explique de forma objetiva este conceito para um estudante de estatística. "
-0036 |     text = seed
-0037 |     while len(tokenizer.encode(text, add_special_tokens=False)) < target_tokens:
-0038 |         text += seed
-0039 |     ids = tokenizer.encode(text, add_special_tokens=False)[:target_tokens]
-0040 |     return tokenizer.decode(ids, skip_special_tokens=False)
-0041 |
-0042 |
-0043 | def estimate_messages_tokens(tokenizer, messages) -> int:
-0044 |     try:
-0045 |         return len(tokenizer.apply_chat_template(messages, tokenize=True, add_generation_prompt=True))
-0046 |     except Exception:
-0047 |         return sum(len(tokenizer.encode(m.get("content", ""), add_special_tokens=False)) for m in messages)
-0048 |
-0049 |
-0050 | def request_sha256(body) -> str:
-0051 |     payload = {k: body.get(k) for k in ("messages", "max_tokens")}
-0052 |     return hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
-0053 |
-0054 |
-0055 | def stream_messages_request(cfg, messages, timeout, secret="", max_tokens=OUTPUT_TOKENS, metadata=None):
-0056 |     """Mede uma requisição SSE com ``time.perf_counter`` por requisição.
-0057 |
-0058 |     ``first_token_time``/``last_token_time`` são os instantes do primeiro/último
-0059 |     evento SSE com conteúdo. A API OpenAI não promete um evento por token; por
-0060 |     isso a resolução é a do evento de conteúdo, enquanto ``completion_tokens``
-0061 |     vem exclusivamente de ``usage`` quando o servidor o fornece.
-0062 |     """
-0063 |     import httpx
-0064 |     body = {"model": cfg["model"], "messages": messages,
-0065 |             "temperature": 0, "top_p": 1, "max_tokens": max_tokens,
-0066 |             "stream": True, "stream_options": {"include_usage": True}}
-0067 |     started = time.perf_counter()
-0068 |     first = last = None
-0069 |     chunks = 0
-0070 |     content = ""
-0071 |     usage = None
-0072 |     headers = {"Authorization": f"Bearer {secret}"} if secret else {}
-0073 |     with httpx.Client(timeout=timeout, headers=headers, follow_redirects=False) as client:
-0074 |         with client.stream("POST", cfg["base_url"] + "/v1/chat/completions", json=body) as response:
-0075 |             response.raise_for_status()
-0076 |             if "text/event-stream" not in response.headers.get("content-type", ""):
-0077 |                 raise ValueError("A API não respondeu com SSE.")
-0078 |             for line in response.iter_lines():
-0079 |                 if not line.startswith("data:"):
-0080 |                     continue
-0081 |                 value = line[5:].strip()
-0082 |                 if value == "[DONE]":
-0083 |                     break
-0084 |                 event = json.loads(value)
-0085 |                 if "error" in event:
-0086 |                     raise ValueError(f"Erro no stream: {event['error']}")
-0087 |                 if event.get("usage"):
-0088 |                     usage = event["usage"]
-0089 |                 text = "".join(c.get("delta", {}).get("content") or "" for c in event.get("choices", []))
-0090 |                 if text:
-0091 |                     now = time.perf_counter()
-0092 |                     first = first or now
-0093 |                     last = now
-0094 |                     chunks += 1
-0095 |                     content += text
-0096 |     ended = time.perf_counter()
-0097 |     e2e = ended - started
-0098 |     metrics = stream_metrics(started, first, last, ended, usage)
-0099 |     metadata = dict(metadata or {})
-0100 |     if "history_tokens_estimate" in metadata:
-0101 |         metadata["history_tokens"] = metrics["prompt_tokens"] if metrics["prompt_tokens"] is not None else metadata["history_tokens_estimate"]
-0102 |     return {**metrics,
-0103 |             "stream_content_event_count": chunks, "output": content, "usage_observed": usage is not None,
-0104 |             "request_sha256": request_sha256(body),
-0105 |             "request_args": json.dumps({"body": body}, ensure_ascii=False), **metadata}
-0106 |
-0107 |
-0108 | def stream_request(cfg, prompt, timeout, secret=""):
-0109 |     return stream_messages_request(cfg, [{"role": "user", "content": prompt}], timeout, secret)
-0110 |
-0111 |
-0112 | def stream_metrics(request_start_time, first_token_time, last_token_time, request_end_time, usage):
-0113 |     """Calcula métricas exclusivamente de timestamps monotônicos do cliente."""
-0114 |     usage = usage if isinstance(usage, dict) else {}
-0115 |     completion = usage.get("completion_tokens") if type(usage.get("completion_tokens")) is int else None
-0116 |     prompt_tokens = usage.get("prompt_tokens") if type(usage.get("prompt_tokens")) is int else None
-0117 |     total = usage.get("total_tokens") if type(usage.get("total_tokens")) is int else None
-0118 |     ttft = first_token_time - request_start_time if first_token_time is not None else None
-0119 |     e2e = request_end_time - request_start_time
-0120 |     generation = (last_token_time - first_token_time) if first_token_time is not None and last_token_time is not None and completion is not None and completion > 1 else None
-0121 |     inter = generation / (completion - 1) if generation is not None else None
-0122 |     decode = completion / generation if completion is not None and generation and generation > 0 else None
-0123 |     effective = completion / e2e if completion is not None and e2e > 0 else None
-0124 |     return {"request_start_time": request_start_time, "first_token_time": first_token_time,
-0125 |             "request_end_time": request_end_time, "time_to_first_token_seconds": ttft,
-0126 |             "generation_time_seconds": generation, "end_to_end_latency_seconds": e2e,
-0127 |             "completion_tokens": completion, "prompt_tokens": prompt_tokens, "total_tokens": total,
-0128 |             "decode_tokens_per_second": decode, "end_to_end_tokens_per_second": effective,
-0129 |             "inter_token_latency_seconds": inter, "time_to_first_token_ms": ttft * 1000 if ttft is not None else None,
-0130 |             "request_latency": e2e, "inter_token_latency_ms": inter * 1000 if inter is not None else None,
-0131 |             "output_tokens": completion, "decode_tokens_s": decode, "effective_tokens_s": effective}
-0132 |
-0133 |
-0134 | def run_stream_batch(cfg, tokenizer, scenario, count, timeout, secret=""):
-0135 |     prompt = _synthetic_prompt(tokenizer, WORKLOADS[scenario])
-0136 |     successful, errored = [], []
-0137 |     for index in range(count):
-0138 |         try:
-0139 |             row = stream_request(cfg, prompt, timeout, secret)
-0140 |             row.update({"mode": "independent", "request_id": f"{scenario}-independent-{index+1}"})
-0141 |             row["status"] = "successful"
-0142 |             successful.append(row)
-0143 |         except Exception as exc:
-0144 |             errored.append({"status": "errored", "mode": "independent",
-0145 |                             "request_id": f"{scenario}-independent-{index+1}", "error": str(exc)})
-0146 |     return {"benchmarks": [{"requests": {"successful": successful, "errored": errored, "incomplete": []}}]}
-0147 |
-0148 |
-0149 | def load_conversation_fixture(path):
-0150 |     path = Path(path)
-0151 |     data = json.loads(path.read_text(encoding="utf-8"))
-0152 |     if not isinstance(data.get("system"), str) or not data["system"].strip():
-0153 |         raise ValueError("Fixture conversacional precisa de campo system textual nao vazio.")
-0154 |     if not isinstance(data.get("turns"), list) or not data["turns"]:
-0155 |         raise ValueError("Fixture conversacional precisa de lista nao vazia em turns.")
-0156 |     for index, turn in enumerate(data["turns"], 1):
-0157 |         if not isinstance(turn, dict) or not isinstance(turn.get("user"), str) or not turn["user"].strip():
-0158 |             raise ValueError(f"Turno {index} do fixture precisa de user textual.")
-0159 |         if "assistant" in turn and (not isinstance(turn["assistant"], str) or not turn["assistant"].strip()):
-0160 |             raise ValueError(f"Turno {index} do fixture tem assistant vazio/invalido.")
-0161 |     digest = hashlib.sha256(path.read_bytes()).hexdigest()
-0162 |     return {"path": str(path), "sha256": digest, "data": data}
-0163 |
-0164 |
-0165 | def validate_conversation_fixture_for_mode(fixture, loop_mode, turns):
-0166 |     if loop_mode == "replay":
-0167 |         missing = [index for index, turn in enumerate(fixture["data"]["turns"][:turns], 1)
-0168 |                    if "assistant" not in turn]
-0169 |         if missing:
-0170 |             raise ValueError(f"--mode replay exige assistant fixo em cada turno usado do fixture; ausente em: {missing}.")
+0033 | def _synthetic_prompt(tokenizer, target_tokens: int, seed: str | int) -> str:
+0034 |     """Cria um prompt determinístico e distinto com exatamente o tamanho-alvo."""
+0035 |     digest = hashlib.sha256(str(seed).encode()).digest()
+0036 |     marker = " ".join(f"word{value % 100}" for value in digest[:8])
+0037 |     sentence = "Explique de forma objetiva este conceito para um estudante de estatística. "
+0038 |     text = f"{marker}. {sentence}"
+0039 |     while len(tokenizer.encode(text, add_special_tokens=False)) < target_tokens:
+0040 |         text += sentence
+0041 |     ids = tokenizer.encode(text, add_special_tokens=False)[:target_tokens]
+0042 |     return tokenizer.decode(ids, skip_special_tokens=False)
+0043 |
+0044 |
+0045 | def estimate_messages_tokens(tokenizer, messages) -> int:
+0046 |     try:
+0047 |         return len(tokenizer.apply_chat_template(messages, tokenize=True, add_generation_prompt=True))
+0048 |     except Exception:
+0049 |         return sum(len(tokenizer.encode(m.get("content", ""), add_special_tokens=False)) for m in messages)
+0050 |
+0051 |
+0052 | def request_sha256(body) -> str:
+0053 |     payload = {k: body.get(k) for k in ("messages", "max_tokens")}
+0054 |     return hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+0055 |
+0056 |
+0057 | def stream_messages_request(cfg, messages, timeout, secret="", max_tokens=OUTPUT_TOKENS, metadata=None):
+0058 |     """Mede uma requisição SSE com ``time.perf_counter`` por requisição.
+0059 |
+0060 |     ``first_token_time``/``last_token_time`` são os instantes do primeiro/último
+0061 |     evento SSE com conteúdo. A API OpenAI não promete um evento por token; por
+0062 |     isso a resolução é a do evento de conteúdo, enquanto ``completion_tokens``
+0063 |     vem exclusivamente de ``usage`` quando o servidor o fornece.
+0064 |     """
+0065 |     import httpx
+0066 |     body = {"model": cfg["model"], "messages": messages,
+0067 |             "temperature": 0, "top_p": 1, "max_tokens": max_tokens,
+0068 |             "stream": True, "stream_options": {"include_usage": True}}
+0069 |     started = time.perf_counter()
+0070 |     first = last = None
+0071 |     chunks = 0
+0072 |     content = ""
+0073 |     usage = None
+0074 |     headers = {"Authorization": f"Bearer {secret}"} if secret else {}
+0075 |     with httpx.Client(timeout=timeout, headers=headers, follow_redirects=False) as client:
+0076 |         with client.stream("POST", cfg["base_url"] + "/v1/chat/completions", json=body) as response:
+0077 |             response.raise_for_status()
+0078 |             if "text/event-stream" not in response.headers.get("content-type", ""):
+0079 |                 raise ValueError("A API não respondeu com SSE.")
+0080 |             for line in response.iter_lines():
+0081 |                 if not line.startswith("data:"):
+0082 |                     continue
+0083 |                 value = line[5:].strip()
+0084 |                 if value == "[DONE]":
+0085 |                     break
+0086 |                 event = json.loads(value)
+0087 |                 if "error" in event:
+0088 |                     raise ValueError(f"Erro no stream: {event['error']}")
+0089 |                 if event.get("usage"):
+0090 |                     usage = event["usage"]
+0091 |                 text = "".join(c.get("delta", {}).get("content") or "" for c in event.get("choices", []))
+0092 |                 if text:
+0093 |                     now = time.perf_counter()
+0094 |                     first = first or now
+0095 |                     last = now
+0096 |                     chunks += 1
+0097 |                     content += text
+0098 |     ended = time.perf_counter()
+0099 |     e2e = ended - started
+0100 |     metrics = stream_metrics(started, first, last, ended, usage)
+0101 |     metadata = dict(metadata or {})
+0102 |     if "history_tokens_estimate" in metadata:
+0103 |         metadata["history_tokens"] = metrics["prompt_tokens"] if metrics["prompt_tokens"] is not None else metadata["history_tokens_estimate"]
+0104 |     return {**metrics,
+0105 |             "stream_content_event_count": chunks, "output": content, "usage_observed": usage is not None,
+0106 |             "request_sha256": request_sha256(body),
+0107 |             "request_args": json.dumps({"body": body}, ensure_ascii=False), **metadata}
+0108 |
+0109 |
+0110 | def stream_request(cfg, prompt, timeout, secret=""):
+0111 |     return stream_messages_request(cfg, [{"role": "user", "content": prompt}], timeout, secret)
+0112 |
+0113 |
+0114 | def stream_metrics(request_start_time, first_token_time, last_token_time, request_end_time, usage):
+0115 |     """Calcula métricas exclusivamente de timestamps monotônicos do cliente."""
+0116 |     usage = usage if isinstance(usage, dict) else {}
+0117 |     completion = usage.get("completion_tokens") if type(usage.get("completion_tokens")) is int else None
+0118 |     prompt_tokens = usage.get("prompt_tokens") if type(usage.get("prompt_tokens")) is int else None
+0119 |     total = usage.get("total_tokens") if type(usage.get("total_tokens")) is int else None
+0120 |     ttft = first_token_time - request_start_time if first_token_time is not None else None
+0121 |     e2e = request_end_time - request_start_time
+0122 |     generation = (last_token_time - first_token_time) if first_token_time is not None and last_token_time is not None and completion is not None and completion > 1 else None
+0123 |     inter = generation / (completion - 1) if generation is not None else None
+0124 |     decode = completion / generation if completion is not None and generation and generation > 0 else None
+0125 |     effective = completion / e2e if completion is not None and e2e > 0 else None
+0126 |     return {"request_start_time": request_start_time, "first_token_time": first_token_time,
+0127 |             "request_end_time": request_end_time, "time_to_first_token_seconds": ttft,
+0128 |             "generation_time_seconds": generation, "end_to_end_latency_seconds": e2e,
+0129 |             "completion_tokens": completion, "prompt_tokens": prompt_tokens, "total_tokens": total,
+0130 |             "decode_tokens_per_second": decode, "end_to_end_tokens_per_second": effective,
+0131 |             "inter_token_latency_seconds": inter, "time_to_first_token_ms": ttft * 1000 if ttft is not None else None,
+0132 |             "request_latency": e2e, "inter_token_latency_ms": inter * 1000 if inter is not None else None,
+0133 |             "output_tokens": completion, "decode_tokens_s": decode, "effective_tokens_s": effective}
+0134 |
+0135 |
+0136 | def run_stream_batch(cfg, tokenizer, scenario, count, timeout, secret="", seed=0):
+0137 |     samples = [
+0138 |         (f"{seed}:{index}", _synthetic_prompt(tokenizer, WORKLOADS[scenario], f"{seed}:{index}"))
+0139 |         for index in range(count)
+0140 |     ]
+0141 |     successful, errored = [], []
+0142 |     for index, (workload_seed, prompt) in enumerate(samples):
+0143 |         try:
+0144 |             row = stream_request(cfg, prompt, timeout, secret)
+0145 |             row.update({"mode": "independent", "request_id": f"{scenario}-independent-{index+1}",
+0146 |                         "workload_seed": workload_seed})
+0147 |             row["status"] = "successful"
+0148 |             successful.append(row)
+0149 |         except Exception as exc:
+0150 |             errored.append({"status": "errored", "mode": "independent",
+0151 |                             "request_id": f"{scenario}-independent-{index+1}",
+0152 |                             "workload_seed": workload_seed, "error": str(exc)})
+0153 |     return {"benchmarks": [{"requests": {"successful": successful, "errored": errored, "incomplete": []}}]}
+0154 |
+0155 |
+0156 | def load_conversation_fixture(path):
+0157 |     path = Path(path)
+0158 |     data = json.loads(path.read_text(encoding="utf-8"))
+0159 |     if not isinstance(data.get("system"), str) or not data["system"].strip():
+0160 |         raise ValueError("Fixture conversacional precisa de campo system textual nao vazio.")
+0161 |     if not isinstance(data.get("turns"), list) or not data["turns"]:
+0162 |         raise ValueError("Fixture conversacional precisa de lista nao vazia em turns.")
+0163 |     for index, turn in enumerate(data["turns"], 1):
+0164 |         if not isinstance(turn, dict) or not isinstance(turn.get("user"), str) or not turn["user"].strip():
+0165 |             raise ValueError(f"Turno {index} do fixture precisa de user textual.")
+0166 |         if "assistant" in turn and (not isinstance(turn["assistant"], str) or not turn["assistant"].strip()):
+0167 |             raise ValueError(f"Turno {index} do fixture tem assistant vazio/invalido.")
+0168 |     digest = hashlib.sha256(path.read_bytes()).hexdigest()
+0169 |     return {"path": str(path), "sha256": digest, "data": data}
+0170 |
 0171 |
-0172 |
-0173 | def fixture_messages_for_turn(fixture, turn_index, prior_assistant_outputs, loop_mode):
-0174 |     data = fixture["data"]
-0175 |     messages = []
-0176 |     if data.get("system"):
-0177 |         messages.append({"role": "system", "content": data["system"]})
-0178 |     for index, turn in enumerate(data["turns"][:turn_index], 1):
-0179 |         messages.append({"role": "user", "content": turn["user"]})
-0180 |         if index < turn_index:
-0181 |             if loop_mode == "closed-loop":
-0182 |                 messages.append({"role": "assistant", "content": prior_assistant_outputs[index - 1]})
-0183 |             else:
-0184 |                 if "assistant" not in turn:
-0185 |                     raise ValueError("--mode replay exige assistant fixo nos turnos anteriores do fixture.")
-0186 |                 messages.append({"role": "assistant", "content": turn["assistant"]})
-0187 |     return messages
-0188 |
-0189 |
-0190 | def run_conversational_batch(cfg, tokenizer, scenario, conversations, turns, timeout, secret="", fixture=None, loop_mode="closed-loop"):
-0191 |     if fixture is None:
-0192 |         fixture = load_conversation_fixture(DEFAULT_CONVERSATION_FIXTURE)
-0193 |     if turns > len(fixture["data"]["turns"]):
-0194 |         raise ValueError(f"--conversation-turns={turns} excede turnos disponiveis no fixture ({len(fixture['data']['turns'])}).")
-0195 |     validate_conversation_fixture_for_mode(fixture, loop_mode, turns)
-0196 |     target = WORKLOADS[scenario]
-0197 |     successful, errored = [], []
-0198 |     for conversation_index in range(1, conversations + 1):
-0199 |         assistant_outputs = []
-0200 |         for turn_index in range(1, turns + 1):
-0201 |             messages = fixture_messages_for_turn(fixture, turn_index, assistant_outputs, loop_mode)
-0202 |             estimate = estimate_messages_tokens(tokenizer, messages)
-0203 |             metadata = {"mode": loop_mode, "conversation_index": conversation_index,
-0204 |                         "fixture_sha256": fixture["sha256"],
-0205 |                         "fixture_name": fixture["data"].get("name"),
-0206 |                         "turn_index": turn_index, "history_tokens_estimate": estimate,
-0207 |                         "target_history_tokens": target, "messages_count": len(messages),
-0208 |                         "request_id": f"{scenario}-c{conversation_index}-t{turn_index}"}
-0209 |             try:
-0210 |                 row = stream_messages_request(cfg, messages, timeout, secret, metadata=metadata)
-0211 |                 row["status"] = "successful"
-0212 |                 successful.append(row)
-0213 |                 assistant_outputs.append(row.get("output") or "")
-0214 |             except Exception as exc:
-0215 |                 errored.append({"status": "errored", **metadata, "history_tokens": estimate, "error": str(exc)})
-0216 |                 break
-0217 |     return {"benchmarks": [{"requests": {"successful": successful, "errored": errored, "incomplete": []}}]}
-0218 |
-0219 |
-0220 | def local_model_check(value):
-0221 |     """Checa presença, não lê pesos nem aquece o page cache deliberadamente."""
-0222 |     path = Path(value).expanduser().resolve()
-0223 |     if path.is_file():
-0224 |         if path.suffix not in {".safetensors", ".gguf", ".bin", ".pt", ".pth"} and not path.name.startswith("sha256-"):
-0225 |             raise ValueError("Informe um arquivo de pesos (não configuração/texto) ou blob sha256- do Ollama.")
-0226 |         files = [path]
-0227 |     elif path.is_dir():
-0228 |         files = [f for f in path.rglob("*") if f.is_file() and f.suffix in {".safetensors", ".gguf", ".bin", ".pt", ".pth"}]
-0229 |         for index in path.glob("*.index.json"):
-0230 |             data = json.loads(index.read_text())
-0231 |             missing = [name for name in set(data.get("weight_map", {}).values()) if not (path / name).is_file()]
-0232 |             if missing:
-0233 |                 raise ValueError(f"Shards ausentes: {missing}")
-0234 |     else:
-0235 |         files = []
-0236 |     if not files or any(f.stat().st_size == 0 for f in files):
-0237 |         raise ValueError("Pesos locais ausentes/vazios. Prepare o modelo antes do benchmark; downloads não são permitidos na medição.")
-0238 |     return {"policy": "Pesos locais obrigatórios; download excluído do protocolo.", "path": str(path),
-0239 |             "files": len(files), "bytes": sum(f.stat().st_size for f in files),
-0240 |             "validation": "presença/tamanho e shards declarados; não verifica conteúdo, SSD físico ou vínculo com API"}
-0241 |
-0242 |
-0243 | def write_json(path, data):
-0244 |     Path(path).write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-0245 |
-0246 |
-0247 | def redact(value, secret):
-0248 |     if isinstance(value, dict):
-0249 |         return {k: ("[REDACTED]" if k.lower() in {"api_key", "authorization"} else redact(v, secret))
-0250 |                 for k, v in value.items()}
-0251 |     if isinstance(value, list):
-0252 |         return [redact(v, secret) for v in value]
-0253 |     if isinstance(value, str) and secret:
-0254 |         return value.replace(secret, "[REDACTED]")
-0255 |     return value
-0256 |
-0257 |
-0258 | def capture(command):
-0259 |     try:
-0260 |         proc = subprocess.run(command, capture_output=True, text=True, timeout=15)
-0261 |         return {"returncode": proc.returncode, "stdout": proc.stdout, "stderr": proc.stderr}
-0262 |     except (OSError, subprocess.TimeoutExpired) as exc:
-0263 |         return {"unavailable": str(exc)}
+0172 | def validate_conversation_fixture_for_mode(fixture, loop_mode, turns):
+0173 |     if loop_mode == "replay":
+0174 |         missing = [index for index, turn in enumerate(fixture["data"]["turns"][:turns], 1)
+0175 |                    if "assistant" not in turn]
+0176 |         if missing:
+0177 |             raise ValueError(f"--mode replay exige assistant fixo em cada turno usado do fixture; ausente em: {missing}.")
+0178 |
+0179 |
+0180 | def fixture_messages_for_turn(fixture, turn_index, prior_assistant_outputs, loop_mode):
+0181 |     data = fixture["data"]
+0182 |     messages = []
+0183 |     if data.get("system"):
+0184 |         messages.append({"role": "system", "content": data["system"]})
+0185 |     for index, turn in enumerate(data["turns"][:turn_index], 1):
+0186 |         messages.append({"role": "user", "content": turn["user"]})
+0187 |         if index < turn_index:
+0188 |             if loop_mode == "closed-loop":
+0189 |                 messages.append({"role": "assistant", "content": prior_assistant_outputs[index - 1]})
+0190 |             else:
+0191 |                 if "assistant" not in turn:
+0192 |                     raise ValueError("--mode replay exige assistant fixo nos turnos anteriores do fixture.")
+0193 |                 messages.append({"role": "assistant", "content": turn["assistant"]})
+0194 |     return messages
+0195 |
+0196 |
+0197 | def run_conversational_batch(cfg, tokenizer, scenario, conversations, turns, timeout, secret="", fixture=None, loop_mode="closed-loop"):
+0198 |     if fixture is None:
+0199 |         fixture = load_conversation_fixture(DEFAULT_CONVERSATION_FIXTURE)
+0200 |     if turns > len(fixture["data"]["turns"]):
+0201 |         raise ValueError(f"--conversation-turns={turns} excede turnos disponiveis no fixture ({len(fixture['data']['turns'])}).")
+0202 |     validate_conversation_fixture_for_mode(fixture, loop_mode, turns)
+0203 |     target = WORKLOADS[scenario]
+0204 |     successful, errored = [], []
+0205 |     for conversation_index in range(1, conversations + 1):
+0206 |         assistant_outputs = []
+0207 |         for turn_index in range(1, turns + 1):
+0208 |             messages = fixture_messages_for_turn(fixture, turn_index, assistant_outputs, loop_mode)
+0209 |             estimate = estimate_messages_tokens(tokenizer, messages)
+0210 |             metadata = {"mode": loop_mode, "conversation_index": conversation_index,
+0211 |                         "fixture_sha256": fixture["sha256"],
+0212 |                         "fixture_name": fixture["data"].get("name"),
+0213 |                         "turn_index": turn_index, "history_tokens_estimate": estimate,
+0214 |                         "target_history_tokens": target, "messages_count": len(messages),
+0215 |                         "request_id": f"{scenario}-c{conversation_index}-t{turn_index}"}
+0216 |             try:
+0217 |                 row = stream_messages_request(cfg, messages, timeout, secret, metadata=metadata)
+0218 |                 row["status"] = "successful"
+0219 |                 successful.append(row)
+0220 |                 assistant_outputs.append(row.get("output") or "")
+0221 |             except Exception as exc:
+0222 |                 errored.append({"status": "errored", **metadata, "history_tokens": estimate, "error": str(exc)})
+0223 |                 break
+0224 |     return {"benchmarks": [{"requests": {"successful": successful, "errored": errored, "incomplete": []}}]}
+0225 |
+0226 |
+0227 | def local_model_check(value):
+0228 |     """Checa presença, não lê pesos nem aquece o page cache deliberadamente."""
+0229 |     path = Path(value).expanduser().resolve()
+0230 |     if path.is_file():
+0231 |         if path.suffix not in {".safetensors", ".gguf", ".bin", ".pt", ".pth"} and not path.name.startswith("sha256-"):
+0232 |             raise ValueError("Informe um arquivo de pesos (não configuração/texto) ou blob sha256- do Ollama.")
+0233 |         files = [path]
+0234 |     elif path.is_dir():
+0235 |         files = [f for f in path.rglob("*") if f.is_file() and f.suffix in {".safetensors", ".gguf", ".bin", ".pt", ".pth"}]
+0236 |         for index in path.glob("*.index.json"):
+0237 |             data = json.loads(index.read_text())
+0238 |             missing = [name for name in set(data.get("weight_map", {}).values()) if not (path / name).is_file()]
+0239 |             if missing:
+0240 |                 raise ValueError(f"Shards ausentes: {missing}")
+0241 |     else:
+0242 |         files = []
+0243 |     if not files or any(f.stat().st_size == 0 for f in files):
+0244 |         raise ValueError("Pesos locais ausentes/vazios. Prepare o modelo antes do benchmark; downloads não são permitidos na medição.")
+0245 |     return {"policy": "Pesos locais obrigatórios; download excluído do protocolo.", "path": str(path),
+0246 |             "files": len(files), "bytes": sum(f.stat().st_size for f in files),
+0247 |             "validation": "presença/tamanho e shards declarados; não verifica conteúdo, SSD físico ou vínculo com API"}
+0248 |
+0249 |
+0250 | def write_json(path, data):
+0251 |     Path(path).write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+0252 |
+0253 |
+0254 | def redact(value, secret):
+0255 |     if isinstance(value, dict):
+0256 |         return {k: ("[REDACTED]" if k.lower() in {"api_key", "authorization"} else redact(v, secret))
+0257 |                 for k, v in value.items()}
+0258 |     if isinstance(value, list):
+0259 |         return [redact(v, secret) for v in value]
+0260 |     if isinstance(value, str) and secret:
+0261 |         return value.replace(secret, "[REDACTED]")
+0262 |     return value
+0263 |
 0264 |
-0265 |
-0266 | def load_config(path):
-0267 |     cfg = json.loads(Path(path).read_text(encoding="utf-8"))
-0268 |     required = {"runtime", "base_url", "model", "tokenizer", "context_window", "cache_policy",
-0269 |                 "runtime_version", "model_artifact", "server_command", "notes"}
-0270 |     if set(cfg) != required:
-0271 |         raise ValueError(f"Campos da configuração devem ser exatamente: {sorted(required)}")
-0272 |     if any(not isinstance(cfg[k], str) or not cfg[k].strip() for k in required - {"context_window"}):
-0273 |         raise ValueError("Os campos textuais da configuração devem estar preenchidos.")
-0274 |     if type(cfg["context_window"]) is not int or cfg["context_window"] < 512:
-0275 |         raise ValueError("context_window deve ser um inteiro >= 512.")
-0276 |     url = urlsplit(cfg["base_url"])
-0277 |     if url.scheme not in {"http", "https"} or not url.hostname or url.username or url.password or url.query or url.fragment:
-0278 |         raise ValueError("URL inválida: use http(s), sem credenciais, query ou fragmento.")
-0279 |     if url.path not in {"", "/", "/v1", "/v1/"}:
-0280 |         raise ValueError("Use a raiz do servidor (ex.: http://127.0.0.1:8000), sem endpoint.")
-0281 |     cfg["base_url"] = f"{url.scheme}://{url.netloc}"
-0282 |     return cfg
-0283 |
-0284 |
-0285 | def validate_run(cfg, scenarios, smoke):
-0286 |     for scenario in scenarios:
-0287 |         # Margem para o template; o servidor continua sendo a autoridade final.
-0288 |         needed = WORKLOADS[scenario] + OUTPUT_TOKENS + 256
-0289 |         if cfg["context_window"] < needed:
-0290 |             raise ValueError(f"{scenario} precisa de contexto declarado >= {needed}; "
-0291 |                              "altere o servidor e depois o JSON, ou retire esse cenário.")
-0292 |     if not smoke:
-0293 |         if any("PREENCHER" in cfg[k] or "SUBSTITUA" in cfg[k]
-0294 |                for k in ("model", "runtime_version", "model_artifact", "server_command")):
-0295 |             raise ValueError("Preencha modelo, versão, artefato e comando antes da medição formal; --smoke permite rascunhos.")
-0296 |         if cfg["cache_policy"] == "runtime-default-unverified":
-0297 |             raise ValueError("Registre cache_policy após verificar o servidor. Ex.: disabled-confirmed ou enabled-recorded. "
-0298 |                              "O script NÃO altera nem comprova a política de cache.")
-0299 |
-0300 |
-0301 | def tokenizer_digest(path):
-0302 |     path = Path(path)
-0303 |     if not path.is_dir() or not (path / "tokenizer_config.json").exists():
-0304 |         raise ValueError("Tokenizer local ausente. Execute: python bench.py prepare-tokenizer")
-0305 |     hashes = {}
-0306 |     for file in sorted(path.rglob("*")):
-0307 |         if file.is_file() and not file.name.startswith("."):
-0308 |             hashes[str(file.relative_to(path))] = hashlib.sha256(file.read_bytes()).hexdigest()
-0309 |     digest = hashlib.sha256(json.dumps(hashes, sort_keys=True).encode()).hexdigest()
-0310 |     return {"sha256": digest, "files": hashes}
-0311 |
-0312 |
-0313 | def prepare_tokenizer(args):
-0314 |     from huggingface_hub import HfApi
-0315 |     from transformers import AutoTokenizer
-0316 |     path = Path(args.output)
-0317 |     if path.exists():
-0318 |         raise ValueError(f"{path} já existe; não será sobrescrito. Use outro --output.")
-0319 |     revision = HfApi().model_info(args.model, revision=args.revision).sha
-0320 |     tokenizer = AutoTokenizer.from_pretrained(args.model, revision=revision, trust_remote_code=False)
-0321 |     path.mkdir(parents=True)
-0322 |     tokenizer.save_pretrained(path)
-0323 |     write_json(path / "source.json", {"model": args.model, "revision": revision})
-0324 |     print(f"Tokenizer salvo em {path}; revisão {revision}. Não foram baixados pesos.")
-0325 |     print("Compartilhe esta pasta com o grupo para usar os mesmos arquivos.")
-0326 |
-0327 |
-0328 | def scenario_config(cfg, name, count, seed, secret, timeout):
-0329 |     return {
-0330 |         "spec": {
-0331 |             "backend": {"kind": "openai_http", "target": cfg["base_url"], "model": cfg["model"],
-0332 |                         "request_format": "/v1/chat/completions", "stream": True,
-0333 |                         "validate_backend": False, "verify": True, "follow_redirects": False,
-0334 |                         "timeout": timeout, "api_key": secret or None,
-0335 |                         "extras": {"body": {"temperature": 0, "top_p": 1}}},
-0336 |             "profile": {"kind": "synchronous", "warmup": 0, "cooldown": 0},
-0337 |             "constraints": [{"kind": "max_requests", "count": count}, {"kind": "max_errors", "count": 1}],
-0338 |             "tokenizer": {"kind": "huggingface_auto", "model": str(Path(cfg["tokenizer"]).resolve()),
-0339 |                           "load_kwargs": {"local_files_only": True, "trust_remote_code": False}},
-0340 |             "data": [{"kind": "synthetic_text", "prompt_tokens": WORKLOADS[name],
-0341 |                       "output_tokens": OUTPUT_TOKENS}],
-0342 |             "data_loader": {"kind": "pytorch", "samples": count, "num_workers": 0, "shuffle": False},
-0343 |             "seed": {"kind": "static", "value": seed},
-0344 |             "metrics": {"kind": "generative", "sample_size": None, "prefer_response_metrics": True},
-0345 |             "outputs": [],
-0346 |         }
-0347 |     }
-0348 |
-0349 |
-0350 | class Monitor:
-0351 |     """Amostragem contínua e marcação de fases; não é um profiler PCIe."""
-0352 |     def __init__(self, output, cfg=None, secret="", collect_kv=False):
-0353 |         self.output = Path(output)
-0354 |         self.stop_event = threading.Event()
-0355 |         self.thread = None
-0356 |         self.phase = "setup"
-0357 |         self.cfg, self.secret, self.collect_kv = cfg, secret, collect_kv
-0358 |         self.kv_thread = None
-0359 |         self.started_monotonic = None
-0360 |
-0361 |     def set_phase(self, phase, event=None):
-0362 |         self.phase = phase
-0363 |         utc = datetime.now(timezone.utc).isoformat()
-0364 |         elapsed = (time.monotonic() - self.started_monotonic) if self.started_monotonic else 0.0
-0365 |         self.log(f"[telemetria] utc={utc} decorrido={elapsed:.3f}s fase={phase} evento={event or 'phase_change'}")
-0366 |         if hasattr(self, "events_handle"):
-0367 |             writer = csv.writer(self.events_handle)
-0368 |             writer.writerow([utc, time.monotonic(), elapsed, phase, event or "phase_change"])
-0369 |             self.events_handle.flush()
-0370 |
-0371 |     def start(self):
-0372 |         self.started_monotonic = time.monotonic()
-0373 |         self.telemetry_handle = artifact(self.output, "telemetry.log").open("a", encoding="utf-8")
-0374 |         self.events_handle = artifact(self.output, "events.csv").open("w", newline="", encoding="utf-8")
-0375 |         csv.writer(self.events_handle).writerow(["utc", "monotonic_s", "elapsed_s", "phase", "event"])
-0376 |         self.set_phase(self.phase, "monitor_started")
-0377 |         self.thread = threading.Thread(target=self.loop, daemon=True)
-0378 |         self.thread.start()
-0379 |         if self.collect_kv:
-0380 |             self.kv_thread = threading.Thread(target=self.kv_loop, daemon=True)
-0381 |             self.kv_thread.start()
-0382 |
-0383 |     def log(self, message):
-0384 |         print(message, flush=True)
-0385 |         if hasattr(self, "telemetry_handle"):
-0386 |             self.telemetry_handle.write(message + "\n")
-0387 |             self.telemetry_handle.flush()
-0388 |
-0389 |     def kv_loop(self):
-0390 |         import httpx
-0391 |         headers = {"Authorization": f"Bearer {self.secret}"} if self.secret else {}
-0392 |         pattern = re.compile(r'^(vllm:(?:kv_cache_usage_perc|gpu_cache_usage_perc))(\{[^}]*\})?\s+([0-9.eE+\-]+)(?:\s|$)')
-0393 |         with artifact(self.output, "kv-cache.csv").open("w", newline="") as handle, httpx.Client(timeout=1, headers=headers, follow_redirects=False) as client:
-0394 |             writer = csv.writer(handle)
-0395 |             writer.writerow(["utc", "elapsed_s", "phase", "series", "fraction"])
-0396 |             while not self.stop_event.is_set():
-0397 |                 phase = self.phase
-0398 |                 try:
-0399 |                     response = client.get(self.cfg["base_url"] + "/metrics")
-0400 |                     response.raise_for_status()
-0401 |                     matches = [m for line in response.text.splitlines() if (m := pattern.match(line))]
-0402 |                     modern = any(m[1] == "vllm:kv_cache_usage_perc" for m in matches)
-0403 |                     for m in matches:
-0404 |                         if modern and m[1] != "vllm:kv_cache_usage_perc":
-0405 |                             continue
-0406 |                         value = float(m[3])
-0407 |                         if math.isfinite(value) and 0 <= value <= 1:
-0408 |                             writer.writerow([datetime.now(timezone.utc).isoformat(), time.monotonic() - self.started_monotonic,
-0409 |                                              phase, redact(m[1] + (m[2] or ""), self.secret), value])
-0410 |                     handle.flush()
-0411 |                 except (httpx.HTTPError, ValueError):
-0412 |                     pass  # Serveur inicializando/endpoint ausente: nunca inventar zeros.
-0413 |                 self.stop_event.wait(1)
-0414 |
-0415 |     def loop(self):
-0416 |         try:
-0417 |             import psutil
-0418 |         except ImportError:
-0419 |             psutil = None
-0420 |         with artifact(self.output, "gpu.csv").open("w", newline="", encoding="utf-8") as handle, \
-0421 |              artifact(self.output, "system.csv").open("w", newline="", encoding="utf-8") as system_handle:
-0422 |             writer = csv.writer(handle)
-0423 |             writer.writerow(["utc", "elapsed_s", "sample_index", "phase", "index", "name", "used_mib", "total_mib", "used_gib", "total_gib",
-0424 |                              "vram_used_pct", "gpu_util_pct", "memory_util_pct", "temperature_c", "power_w"])
-0425 |             system_writer = csv.writer(system_handle)
-0426 |             system_writer.writerow(["utc", "elapsed_s", "sample_index", "phase", "cpu_util_pct", "ram_used_mib", "ram_available_mib", "ram_total_mib",
-0427 |                                     "load1", "root_disk_used_mib", "root_disk_free_mib", "disk_read_bytes", "disk_write_bytes"])
-0428 |             if psutil:
-0429 |                 psutil.cpu_percent(interval=None)
-0430 |             sample_number = 0
-0431 |             while not self.stop_event.is_set():
-0432 |                 sample_number += 1
-0433 |                 phase = self.phase
-0434 |                 utc = datetime.now(timezone.utc).isoformat()
-0435 |                 result = capture(["nvidia-smi", "--query-gpu=index,name,memory.used,memory.total,utilization.gpu,utilization.memory,temperature.gpu,power.draw",
-0436 |                                   "--format=csv,noheader,nounits"])
-0437 |                 if result.get("returncode") != 0:
-0438 |                     write_json(artifact(self.output, "gpu-unavailable.json"), result)
-0439 |                 else:
-0440 |                     gpu_rows = list(csv.reader(result["stdout"].splitlines(), skipinitialspace=True))
-0441 |                     for row in gpu_rows:
-0442 |                         used_mib, total_mib = float(row[2]), float(row[3])
-0443 |                         vram_pct = (100 * used_mib / total_mib) if total_mib else None
-0444 |                         writer.writerow([utc, time.monotonic() - self.started_monotonic, sample_number, phase, row[0], row[1], row[2], row[3],
-0445 |                                          used_mib / 1024, total_mib / 1024, vram_pct, *row[4:]])
-0446 |                     if sample_number == 1 or sample_number % 10 == 0:
-0447 |                         compact = "; ".join(f"GPU{row[0]} VRAM={float(row[2]) / 1024:.2f}/{float(row[3]) / 1024:.2f} GiB "
-0448 |                                              f"ocupada={100 * float(row[2]) / float(row[3]):.1f}% "
-0449 |                                              f"atividade_gpu={row[4]}% atividade_leitura_escrita_memoria={row[5]}%" for row in gpu_rows)
-0450 |                         elapsed = time.monotonic() - self.started_monotonic
-0451 |                         utc_log = datetime.now(timezone.utc).isoformat()
-0452 |                         self.log(f"[telemetria] utc={utc_log} decorrido={elapsed:.3f}s fase={phase} {compact or 'GPU sem amostra'}")
-0453 |                 handle.flush()
-0454 |                 if psutil:
-0455 |                     vm = psutil.virtual_memory()
-0456 |                     du = psutil.disk_usage(str(self.output.anchor or "/"))
-0457 |                     io = psutil.disk_io_counters()
-0458 |                     system_writer.writerow([utc, time.monotonic() - self.started_monotonic, sample_number, phase, psutil.cpu_percent(interval=None), vm.used / 1048576,
-0459 |                                              vm.available / 1048576, vm.total / 1048576, os.getloadavg()[0],
-0460 |                                              du.used / 1048576, du.free / 1048576,
-0461 |                                              getattr(io, "read_bytes", None), getattr(io, "write_bytes", None)])
-0462 |                     system_handle.flush()
-0463 |                 self.stop_event.wait(1)
-0464 |
-0465 |     def stop(self):
-0466 |         self.stop_event.set()
-0467 |         if self.thread:
-0468 |             self.thread.join(timeout=17)
-0469 |         if self.kv_thread:
-0470 |             self.kv_thread.join(timeout=3)
-0471 |         self.set_phase("stopped", "monitor_stopped")
-0472 |         if hasattr(self, "events_handle"):
-0473 |             self.events_handle.close()
-0474 |         if hasattr(self, "telemetry_handle"):
-0475 |             self.telemetry_handle.close()
-0476 |         self.write_telemetry_summary()
-0477 |
-0478 |     def write_telemetry_summary(self):
-0479 |         """Agrega telemetria por fase para relacionar picos com eventos do benchmark."""
-0480 |         def read_rows(name):
-0481 |             path = locate(self.output, name)
-0482 |             if not path.exists():
-0483 |                 return []
-0484 |             with path.open() as handle:
-0485 |                 return list(csv.DictReader(handle))
-0486 |         sources = {"gpu": read_rows("gpu.csv"), "system": read_rows("system.csv"), "kv": read_rows("kv-cache.csv")}
-0487 |         # Arquivo de entrada simples para gráficos: uma observação por linha,
-0488 |         # com UTC, tempo desde o início do monitor e fase experimental.
-0489 |         if sources["gpu"]:
-0490 |             import shutil
-0491 |             shutil.copyfile(artifact(self.output, "gpu.csv"), artifact(self.output, "telemetry-timeseries.csv"))
-0492 |         phases = sorted({r.get("phase") for rows in sources.values() for r in rows if r.get("phase")})
-0493 |         output = {"definition": "Amostras observadas por fase; não são bytes nem tempos de transferência PCIe.", "phases": {}}
-0494 |         for phase in phases:
-0495 |             entry = {"gpu_samples": 0, "system_samples": 0, "kv_samples": 0}
-0496 |             grows = [r for r in sources["gpu"] if r.get("phase") == phase]
-0497 |             for key in ("used_mib", "total_mib", "used_gib", "total_gib", "vram_used_pct", "gpu_util_pct", "memory_util_pct", "temperature_c", "power_w"):
-0498 |                 vals = []
-0499 |                 for r in grows:
-0500 |                     try: vals.append(float(r[key]))
-0501 |                     except (ValueError, TypeError, KeyError): pass
-0502 |                 entry[f"gpu_{key}_mean"] = sum(vals) / len(vals) if vals else None
-0503 |                 entry[f"gpu_{key}_max"] = max(vals) if vals else None
-0504 |                 if key in {"used_mib", "used_gib", "vram_used_pct"}:
-0505 |                     entry[f"gpu_{key}_min"] = min(vals) if vals else None
-0506 |             entry["gpu_samples"] = len(grows)
-0507 |             srows = [r for r in sources["system"] if r.get("phase") == phase]
-0508 |             for key in ("cpu_util_pct", "ram_used_mib", "ram_available_mib", "root_disk_used_mib", "root_disk_free_mib"):
-0509 |                 vals = []
-0510 |                 for r in srows:
-0511 |                     try: vals.append(float(r[key]))
-0512 |                     except (ValueError, TypeError, KeyError): pass
-0513 |                 entry[f"{key}_mean"] = sum(vals) / len(vals) if vals else None
-0514 |                 entry[f"{key}_max"] = max(vals) if vals else None
-0515 |             entry["system_samples"] = len(srows)
-0516 |             krows = [r for r in sources["kv"] if r.get("phase") == phase]
-0517 |             vals = []
-0518 |             for r in krows:
-0519 |                 try: vals.append(float(r["fraction"]) * 100)
-0520 |                 except (ValueError, TypeError, KeyError): pass
-0521 |             entry["kv_occupancy_pct_mean"] = sum(vals) / len(vals) if vals else None
-0522 |             entry["kv_occupancy_pct_max"] = max(vals) if vals else None
-0523 |             entry["kv_samples"] = len(vals)
-0524 |             output["phases"][phase] = entry
-0525 |         write_json(artifact(self.output, "telemetry-summary.json"), output)
-0526 |
-0527 |
-0528 | def percentile(values, q):
-0529 |     values = sorted(v for v in values if v is not None and math.isfinite(v))
-0530 |     if not values:
-0531 |         return None
-0532 |     pos = (len(values) - 1) * q
-0533 |     lo, hi = math.floor(pos), math.ceil(pos)
-0534 |     return values[lo] + (values[hi] - values[lo]) * (pos - lo)
-0535 |
-0536 |
-0537 | def summarize(report):
-0538 |     """Métricas por requisição, sem misturar warmup ou erros com sucessos."""
-0539 |     benchmarks = report["benchmarks"]
-0540 |     if len(benchmarks) != 1:
-0541 |         raise ValueError("Esperado exatamente um benchmark sequencial.")
-0542 |     requests = benchmarks[0]["requests"]
-0543 |     from reporting import derived
-0544 |     good = [{**r, **derived(r)} for r in requests["successful"]]
-0545 |     result = {
-0546 |         "successful_request_count": len(good),
-0547 |         "errored_request_count": len(requests["errored"]),
-0548 |         "incomplete_request_count": len(requests["incomplete"]),
-0549 |     }
-0550 |     # Os nomes são deliberadamente longos: summary.json é um artefato de
-0551 |     # análise, e não uma API em que economizar alguns bytes melhora algo.
-0552 |     metrics = {
-0553 |         "request_first_token_latency_milliseconds": "time_to_first_token_ms",
-0554 |         "request_latency_seconds": "request_latency",
-0555 |         "within_response_next_token_latency_milliseconds": "inter_token_latency_ms",
-0556 |         "output_completion_token_count": "output_tokens",
-0557 |         "input_prompt_token_count": "prompt_tokens",
-0558 |         "decode_generation_tokens_per_second": "decode_tokens_s",
-0559 |         "effective_output_tokens_per_second": "effective_tokens_s",
-0560 |     }
-0561 |     for label, key in metrics.items():
-0562 |         vals = [r.get(key) for r in good]
-0563 |         result[label + "_sample_count"] = sum(v is not None for v in vals)
-0564 |         result[label + "_p50"] = percentile(vals, .5)
-0565 |         result[label + "_p95"] = percentile(vals, .95)
-0566 |         result[label + "_p99"] = percentile(vals, .99)
-0567 |     # Nomes canônicos para a comparação entre runtimes. Os campos históricos
-0568 |     # acima permanecem para compatibilidade com relatórios já gerados.
-0569 |     ttft = [r.get("time_to_first_token_ms") for r in good]
-0570 |     tokens_s = [r.get("decode_tokens_s") for r in good]
-0571 |     result["time_to_first_token_milliseconds_sample_count"] = sum(v is not None for v in ttft)
-0572 |     result["tokens_per_second_sample_count"] = sum(v is not None for v in tokens_s)
-0573 |     for suffix, q in (("p50", .50), ("p95", .95), ("p99", .99)):
-0574 |         result[f"time_to_first_token_milliseconds_{suffix}"] = percentile(ttft, q)
-0575 |         result[f"tokens_per_second_{suffix}"] = percentile(tokens_s, q)
-0576 |     for label, key in {
-0577 |         "time_to_first_token_seconds": "time_to_first_token_seconds",
-0578 |         "generation_time_seconds": "generation_time_seconds",
-0579 |         "end_to_end_latency_seconds": "end_to_end_latency_seconds",
-0580 |         "decode_tokens_per_second": "decode_tokens_per_second",
-0581 |         "end_to_end_tokens_per_second": "end_to_end_tokens_per_second",
-0582 |     }.items():
-0583 |         values = [r.get(key) for r in good]
-0584 |         result[label + "_sample_count"] = sum(v is not None for v in values)
-0585 |         result[label + "_p50"] = percentile(values, .50)
-0586 |         result[label + "_p95"] = percentile(values, .95)
-0587 |         result[label + "_p99"] = percentile(values, .99)
-0588 |     result["metric_definitions"] = {
-0589 |         "Time To First Token": "milissegundos entre o envio da requisição e o primeiro token/conteúdo observado; há um valor por requisição.",
-0590 |         "Tokens/s": "tokens de saída por segundo durante o decode, calculado por requisição a partir do intervalo entre tokens; não inclui TTFT.",
-0591 |     }
-0592 |     result["requests_sha256"] = requests_digest(report)
-0593 |     turns = sorted({r.get("turn_index") for r in good if r.get("turn_index") is not None})
-0594 |     result["turn_indices"] = turns
-0595 |     result["history_tokens_by_turn"] = [{"turn_index": turn,
-0596 |                                          "history_tokens_p50": percentile([r.get("history_tokens") for r in good if r.get("turn_index") == turn], .50),
-0597 |                                          "history_tokens_p95": percentile([r.get("history_tokens") for r in good if r.get("turn_index") == turn], .95)}
-0598 |                                         for turn in turns]
-0599 |     result["percentiles_are_exploratory"] = len(good) < 100
-0600 |     result["percentile_definition"] = "Empirical linear interpolation over successful requests in this phase/scenario/repetition block."
-0601 |     return result
-0602 |
-0603 |
-0604 | def requests_digest(report):
-0605 |     # O hash exclui aliases do modelo e chaves: apenas carga de entrada e limite de saída.
-0606 |     bodies = []
-0607 |     for row in report["benchmarks"][0]["requests"]["successful"]:
-0608 |         args = json.loads(row["request_args"])
-0609 |         body = args.get("body", {})
-0610 |         bodies.append({k: body.get(k) for k in ("messages", "max_tokens")})
-0611 |     return hashlib.sha256(json.dumps(bodies, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
-0612 |
-0613 |
-0614 | def turn_manifest(report):
-0615 |     rows = report["benchmarks"][0]["requests"]["successful"]
-0616 |     turns = []
-0617 |     for row in rows:
-0618 |         turns.append({"request_id": row.get("request_id"), "conversation_index": row.get("conversation_index"),
-0619 |                       "turn_index": row.get("turn_index"), "mode": row.get("mode"),
-0620 |                       "fixture_sha256": row.get("fixture_sha256"), "history_tokens": row.get("history_tokens"),
-0621 |                       "history_tokens_estimate": row.get("history_tokens_estimate"),
-0622 |                       "prompt_tokens": row.get("prompt_tokens"), "total_tokens": row.get("total_tokens"),
-0623 |                       "request_sha256": row.get("request_sha256")})
-0624 |     return turns
-0625 |
-0626 |
-0627 | def conversation_artifact(report, fixture=None):
-0628 |     requests = report["benchmarks"][0]["requests"]
-0629 |     rows = []
-0630 |     for status in ("successful", "errored", "incomplete"):
-0631 |         for row in requests[status]:
-0632 |             body = {}
-0633 |             if row.get("request_args"):
-0634 |                 body = json.loads(row["request_args"]).get("body", {})
-0635 |             rows.append({"status": status, "request_id": row.get("request_id"),
-0636 |                          "conversation_index": row.get("conversation_index"),
-0637 |                          "turn_index": row.get("turn_index"), "mode": row.get("mode"),
-0638 |                          "messages": body.get("messages"),
-0639 |                          "assistant_output": row.get("output") if status == "successful" else None,
-0640 |                          "error": row.get("error") if status != "successful" else None,
-0641 |                          "request_sha256": row.get("request_sha256"),
-0642 |                          "history_tokens": row.get("history_tokens"),
-0643 |                          "history_tokens_estimate": row.get("history_tokens_estimate")})
-0644 |     artifact = {"mode": rows[0].get("mode") if rows else None, "turns": rows}
-0645 |     if fixture:
-0646 |         artifact["fixture"] = {"path": fixture["path"], "sha256": fixture["sha256"],
-0647 |                                "name": fixture["data"].get("name"),
-0648 |                                "version": fixture["data"].get("version")}
-0649 |     return artifact
-0650 |
-0651 |
-0652 | def write_requests_csv(path, report):
-0653 |     """Amostras individuais para análise no R/Python, incluindo status de erro."""
-0654 |     from reporting import derived
-0655 |     fields = ["status", "error", "mode", "request_id", "conversation_index", "turn_index",
-0656 |               "fixture_name", "fixture_sha256",
-0657 |               "history_tokens", "history_tokens_estimate", "target_history_tokens", "messages_count",
-0658 |               "request_sha256", "request_start_time", "first_token_time", "request_end_time",
-0659 |               "time_to_first_token_seconds", "generation_time_seconds", "end_to_end_latency_seconds",
-0660 |               "completion_tokens", "prompt_tokens", "total_tokens", "decode_tokens_per_second",
-0661 |               "end_to_end_tokens_per_second", "inter_token_latency_seconds", "request_latency",
-0662 |               "time_to_first_token_ms", "inter_token_latency_ms", "output_tokens", "decode_tokens_s", "effective_tokens_s",
-0663 |               "context_start_tokens", "context_end_tokens", "context_band"]
-0664 |     with Path(path).open("w", newline="", encoding="utf-8") as handle:
-0665 |         writer = csv.DictWriter(handle, fieldnames=fields)
-0666 |         writer.writeheader()
-0667 |         for status in ("successful", "errored", "incomplete"):
-0668 |             for row in report["benchmarks"][0]["requests"][status]:
-0669 |                 if status == "successful":
-0670 |                     row = {**row, **derived(row)}
-0671 |                 writer.writerow({"status": status, **{key: row.get(key) for key in fields[1:]}})
-0672 |
-0673 |
-0674 | def write_summary(output, rows):
-0675 |     from reporting import render
-0676 |     write_json(artifact(output, "summary.json"), rows)
-0677 |     if not rows:
-0678 |         render(output, rows)
-0679 |         return
-0680 |     with artifact(output, "summary.csv").open("w", newline="", encoding="utf-8") as handle:
-0681 |         writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
-0682 |         writer.writeheader()
-0683 |         writer.writerows(rows)
-0684 |     render(output, rows)
-0685 |
-0686 |
-0687 | def run(args):
-0688 |     import fcntl
-0689 |     from lifecycle import DEFAULT_PROMPT, Launch, lifecycle_report, timed_request, wait_models
-0690 |     if importlib.metadata.version("guidellm") != GUIDELLM_VERSION:
-0691 |         raise ValueError(f"Este projeto exige guidellm=={GUIDELLM_VERSION}; reinstale requirements.txt.")
-0692 |     cfg = load_config(args.config)
-0693 |     validate_run(cfg, args.scenarios, args.smoke)
-0694 |     availability = local_model_check(args.local_model_path)
-0695 |     availability["kv_bytes_per_token"] = args.kv_bytes_per_token
-0696 |     availability["launch_hf_offline"] = bool(args.launch)
-0697 |     digest = tokenizer_digest(cfg["tokenizer"])
-0698 |     from transformers import AutoTokenizer
-0699 |     measurement_tokenizer = AutoTokenizer.from_pretrained(cfg["tokenizer"], local_files_only=True, trust_remote_code=False)
-0700 |     count, repetitions = (3, 1) if args.smoke else (args.requests, args.repetitions)
-0701 |     secret = os.environ.get("BENCH_API_KEY", "")
-0702 |     prompt = Path(args.first_prompt_file).read_text(encoding="utf-8") if args.first_prompt_file else DEFAULT_PROMPT
-0703 |     if not prompt.strip():
-0704 |         raise ValueError("O prompt inicial não pode estar vazio.")
-0705 |     conversation_mode = args.mode in {"closed-loop", "replay"}
-0706 |     if not conversation_mode and args.conversation_turns != 1:
-0707 |         raise ValueError("--conversation-turns só pode ser maior que 1 com --mode closed-loop ou --mode replay.")
-0708 |     conversation_fixture = load_conversation_fixture(args.conversation_fixture) if conversation_mode else None
-0709 |     if conversation_fixture:
-0710 |         validate_conversation_fixture_for_mode(conversation_fixture, args.mode, args.conversation_turns)
-0711 |     base = Path(args.results)
-0712 |     base.mkdir(parents=True, exist_ok=True)
-0713 |     with (base / ".benchmark.lock").open("a") as lock:
-0714 |         try:
-0715 |             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-0716 |         except BlockingIOError:
-0717 |             raise ValueError("Já existe um benchmark usando esta pasta results. Não execute dois ao mesmo tempo.") from None
-0718 |         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
-0719 |         label = execution_label(smoke=args.smoke, scenarios=args.scenarios,
-0720 |                                 input_tokens=args.input_tokens, result_name=args.result_name)
-0721 |         output = runtime_root(base, cfg["runtime"], stamp, label)
-0722 |         prepare(output)
-0723 |         manifest = {"project_version": VERSION, "guidellm_version": GUIDELLM_VERSION, "started_utc": stamp,
-0724 |                     "results_layout": "runtime/timestamp/human-name/{html,json,csv,logs,text}",
-0725 |                     "result_name": label, "runtime_directory": slug(cfg["runtime"]),
-0726 |                     "config": cfg, "tokenizer": digest, "smoke": args.smoke, "requests": count,
-0727 |                     "repetitions": repetitions, "warmup_requests_per_case": args.warmup,
-0728 |                     "scenarios": args.scenarios, "seed": args.seed, "profile": "synchronous",
-0729 |                     "mode": args.mode, "conversation_turns": args.conversation_turns,
-0730 |                     "conversation_fixture": {"path": conversation_fixture["path"], "sha256": conversation_fixture["sha256"],
-0731 |                                              "name": conversation_fixture["data"].get("name"),
-0732 |                                              "version": conversation_fixture["data"].get("version")} if conversation_fixture else None,
-0733 |                     "conversation_first_request": "first-request.json is a separate single-turn lifecycle probe; closed-loop/replay measured histories start empty per conversation and per block",
-0734 |                     "blocks": [],
-0735 |                     "model_availability": availability,
-0736 |                     "guidellm_compat": "0.7.4 bounded drain of real late completion updates (5s); no request retry",
-0737 |                     "telemetry": {"gpu_source": "local nvidia-smi", "system_source": "psutil host CPU/RAM/disk counters",
-0738 |                                   "event_source": "events.csv phase markers", "kv_metrics_requested": args.collect_kv_metrics,
-0739 |                                   "sampling": "approximately 1 Hz; not per-token; PCIe copy time is not directly measured"},
-0740 |                     "python": sys.version, "platform": platform.platform(),
-0741 |                     "git": capture(["git", "rev-parse", "HEAD"]), "status": "running"}
-0742 |         write_json(artifact(output, "manifest.json"), redact(manifest, secret))
-0743 |         write_json(artifact(output, "client-packages.json"), {d.metadata["Name"]: d.version for d in importlib.metadata.distributions()})
-0744 |         write_json(artifact(output, "gpu-before.json"), capture(["nvidia-smi"]))
-0745 |         monitor, rows = Monitor(output, cfg, secret, args.collect_kv_metrics), []
-0746 |         launch, origin, cleanup_error = None, None, None
-0747 |         lifecycle = {"mode": "new-process" if args.launch else "existing-server-state-unknown",
-0748 |                      "status": "running", "initial_state_note": args.initial_state,
-0749 |                      "startup_timeout_s": args.startup_timeout}
-0750 |         print(f"Resultados: {output.resolve()}", flush=True)
-0751 |         try:
-0752 |             monitor.start()
-0753 |             if args.launch:
-0754 |                 launch = Launch(cfg, args.launch, output, args.launch_extra_args, args.launch_executable)
-0755 |                 lifecycle["argv"] = redact(launch.argv, secret)
-0756 |                 monitor.set_phase("process_startup")
-0757 |                 origin = launch.start()
-0758 |                 lifecycle["pid"] = launch.process.pid
-0759 |             lifecycle_report(output, redact(lifecycle, secret))
-0760 |             monitor.set_phase("server_readiness")
-0761 |             lifecycle["readiness"] = wait_models(cfg, secret, args.startup_timeout, launch)
-0762 |             lifecycle_report(output, redact(lifecycle, secret))
-0763 |             monitor.set_phase("first_request")
-0764 |             print("Primeiro POST: medição da primeira resposta (nenhuma geração prévia enviada pelo cliente).", flush=True)
-0765 |             lifecycle["first_request"] = timed_request(cfg, secret, args.timeout, prompt,
-0766 |                                                        artifact(output, "first-request.json"), origin)
-0767 |             lifecycle_report(output, redact(lifecycle, secret))
-0768 |             for rep in range(repetitions):
-0769 |                 # Rotação balanceia parcialmente a posição dos cenários entre repetições.
-0770 |                 names = args.scenarios[rep % len(args.scenarios):] + args.scenarios[:rep % len(args.scenarios)]
-0771 |                 for name in names:
-0772 |                     for phase, n in (("warmup", args.warmup), ("measure", count)):
-0773 |                         if not n:
-0774 |                             continue
-0775 |                         seed = args.seed + rep * 100 + list(WORKLOADS).index(name)
-0776 |                         if phase == "warmup":
-0777 |                             seed += 1_000_000
-0778 |                         prefix = f"r{rep+1}-{name}-{phase}"
-0779 |                         monitor.set_phase(prefix)
-0780 |                         config = scenario_config(cfg, name, n, seed, secret, args.timeout)
-0781 |                         config["mode"] = args.mode
-0782 |                         if conversation_mode:
-0783 |                             config["conversation_turns"] = args.conversation_turns
-0784 |                             config["conversation_fixture_sha256"] = conversation_fixture["sha256"]
-0785 |                             config["spec_note"] = "GuideLLM synthetic data spec is retained for independent baseline context only; measured conversational requests are generated from the fixed fixture with accumulated chat history."
-0786 |                         write_json(artifact(output, f"{prefix}-config.json"), redact(config, secret))
-0787 |                         expected = n * args.conversation_turns if conversation_mode else n
-0788 |                         unit = "conversas" if conversation_mode else "requisições"
-0789 |                         print(f"{prefix}: {n} {unit}, uma chamada por vez", flush=True)
-0790 |                         if conversation_mode:
-0791 |                             report = run_conversational_batch(cfg, measurement_tokenizer, name, n, args.conversation_turns,
-0792 |                                                               args.timeout, secret, conversation_fixture, args.mode)
-0793 |                         else:
-0794 |                             report = run_stream_batch(cfg, measurement_tokenizer, name, n, args.timeout, secret)
-0795 |                         raw = redact(report, secret)
-0796 |                         write_json(artifact(output, f"{prefix}.json"), raw)
-0797 |                         turns = turn_manifest(raw) if conversation_mode else []
-0798 |                         conversation_file = None
-0799 |                         if conversation_mode:
-0800 |                             write_json(artifact(output, f"{prefix}-turns.json"), turns)
-0801 |                             conversation_file = f"{prefix}-conversation.json"
-0802 |                             write_json(artifact(output, conversation_file), conversation_artifact(raw, conversation_fixture))
-0803 |                         write_requests_csv(artifact(output, f"{prefix}-requests.csv"), raw)
-0804 |                         summary = summarize(raw)
-0805 |                         summary["expected"] = expected
-0806 |                         summary["missing_request_count"] = max(0, expected - sum(summary[k] for k in ("successful_request_count", "errored_request_count", "incomplete_request_count")))
-0807 |                         manifest["blocks"].append({"prefix": prefix, "mode": args.mode, "phase": phase,
-0808 |                                                    "scenario": name, "repetition": rep+1,
-0809 |                                                    "conversations": n if conversation_mode else None,
-0810 |                                                    "conversation_turns": args.conversation_turns if conversation_mode else None,
-0811 |                                                    "expected_requests": expected,
-0812 |                                                    "requests_sha256": summary["requests_sha256"],
-0813 |                                                    "conversation_artifact": conversation_file,
-0814 |                                                    "turns": turns if conversation_mode else None})
-0815 |                         write_json(artifact(output, "manifest.json"), redact(manifest, secret))
-0816 |                         rows.append({"runtime": cfg["runtime"], "model": cfg["model"],
-0817 |                                      "cache_policy": cfg["cache_policy"], "tokenizer_sha256": digest["sha256"],
-0818 |                                      "mode": args.mode, "phase": phase, "scenario": name, "repetition": rep+1, **summary})
-0819 |                         write_summary(output, rows)
-0820 |                         if summary["successful_request_count"] != expected or summary["errored_request_count"] or summary["incomplete_request_count"]:
-0821 |                             raise RuntimeError(f"{prefix}: requisições falharam ou execução incompleta. Veja o JSON; não compare como sucesso.")
-0822 |             monitor.set_phase("warm_reference")
-0823 |             lifecycle["warm_reference"] = timed_request(cfg, secret, args.timeout, prompt,
-0824 |                                                          artifact(output, "warm-reference.json"))
-0825 |             manifest["status"] = lifecycle["status"] = "complete"
-0826 |         except BaseException as exc:
-0827 |             manifest["status"] = "interrupted" if isinstance(exc, KeyboardInterrupt) else "failed"
-0828 |             manifest["error"] = redact(str(exc), secret)
-0829 |             lifecycle["status"] = manifest["status"]
-0830 |             lifecycle["error"] = manifest["error"]
-0831 |             raise
-0832 |         finally:
-0833 |             for key, filename in (("first_request", "first-request.json"), ("warm_reference", "warm-reference.json")):
-0834 |                 if artifact(output, filename).exists():
-0835 |                     lifecycle[key] = json.loads(artifact(output, filename).read_text(encoding="utf-8"))
-0836 |             if launch is not None:
-0837 |                 monitor.set_phase("server_shutdown")
-0838 |                 try:
-0839 |                     launch.close()
-0840 |                     lifecycle["server_cleanup"] = "stopped owned process group only"
-0841 |                 except Exception as exc:
-0842 |                     cleanup_error = redact(str(exc), secret)
-0843 |                     lifecycle["server_cleanup_error"] = cleanup_error
-0844 |                     lifecycle["status"] = manifest["status"] = "failed"
-0845 |             lifecycle_report(output, redact(lifecycle, secret))
-0846 |             monitor.stop()
-0847 |             manifest["ended_utc"] = datetime.now(timezone.utc).isoformat()
-0848 |             write_json(artifact(output, "manifest.json"), redact(manifest, secret))
-0849 |             write_json(artifact(output, "gpu-after.json"), capture(["nvidia-smi"]))
-0850 |             write_summary(output, rows)
-0851 |         if cleanup_error:
-0852 |             raise RuntimeError(f"Falha ao encerrar processo criado: {cleanup_error}. Confira o PID no lifecycle.json.")
-0853 |         print(f"Concluído. Abra {artifact(output, 'lifecycle.html')} e {artifact(output, 'summary.html')}")
-0854 |
-0855 |
-0856 | def positive(value):
-0857 |     number = int(value)
-0858 |     if number <= 0:
-0859 |         raise argparse.ArgumentTypeError("Use um inteiro positivo.")
-0860 |     return number
-0861 |
-0862 |
-0863 | def nonnegative(value):
-0864 |     number = int(value)
-0865 |     if number < 0:
-0866 |         raise argparse.ArgumentTypeError("Use zero ou um inteiro positivo.")
-0867 |     return number
-0868 |
-0869 |
-0870 | def rebuild_report(args):
-0871 |     """Atualiza apenas derivados, preservando relatórios brutos e manifesto original."""
-0872 |     output = Path(args.output)
-0873 |     rows = json.loads(locate(output, "summary.json").read_text())
-0874 |     manifest = json.loads(locate(output, "manifest.json").read_text())
-0875 |     for row in rows:
-0876 |         prefix = f"r{row['repetition']}-{row['scenario']}-{row['phase']}"
-0877 |         raw = json.loads(locate(output, f"{prefix}.json").read_text())
-0878 |         row.update(summarize(raw))
-0879 |         expected = manifest.get("warmup_requests_per_case") if row["phase"] == "warmup" else manifest.get("requests")
-0880 |         row["expected"] = expected
-0881 |         row["missing_request_count"] = max(0, expected - sum(row[k] for k in ("successful_request_count", "errored_request_count", "incomplete_request_count"))) if expected is not None else None
-0882 |         write_requests_csv(artifact(output, f"{prefix}-requests.csv"), raw)
-0883 |     write_summary(output, rows)
-0884 |     print(f"Relatório atualizado: {artifact(output, 'summary.html')}; dados brutos preservados.")
-0885 |
-0886 |
-0887 | def main():
-0888 |     parser = argparse.ArgumentParser(description=__doc__)
-0889 |     commands = parser.add_subparsers(dest="command", required=True)
-0890 |     report = commands.add_parser("report", help="Regenera derivados de uma execução existente, sem nova inferência.")
-0891 |     report.add_argument("--output", required=True)
-0892 |     report.set_defaults(func=rebuild_report)
-0893 |     prep = commands.add_parser("prepare-tokenizer", help="Baixa apenas tokenizer; fixa revisão e guarda origem.")
-0894 |     prep.add_argument("--model", default="Qwen/Qwen2.5-14B-Instruct")
-0895 |     prep.add_argument("--revision", default="main")
-0896 |     prep.add_argument("--output", default="tokenizer")
-0897 |     prep.set_defaults(func=prepare_tokenizer)
-0898 |     cmd = commands.add_parser("run", help="Mede primeiro acesso, aquecimento e GuideLLM; lançamento do servidor é opcional.")
-0899 |     cmd.add_argument("--config", required=True)
-0900 |     cmd.add_argument("--local-model-path", required=True, help="Pesos já no SSD: pasta HF, arquivo GGUF ou blob local do Ollama. Não baixa arquivos.")
-0901 |     cmd.add_argument("--collect-kv-metrics", action="store_true", help="Amostra /metrics do vLLM (~1 Hz); ocupação do pool KV, não bytes.")
-0902 |     cmd.add_argument("--kv-bytes-per-token", type=positive, help="Opcional: bytes de KV lógico por token, calculados para arquitetura/dtype reais. Estimativa, não VRAM medida.")
-0903 |     cmd.add_argument("--input-tokens", nargs="+", type=positive, help="Substitui --scenarios por uma grade de comprimentos sintéticos, ex.: 256 512 1024 2048 3072.")
-0904 |     cmd.add_argument("--scenarios", nargs="+", choices=list(WORKLOADS), default=["short", "medium", "long"])
-0905 |     cmd.add_argument("--requests", type=positive, default=50, help="Requisições de medição por cenário e repetição; 50×3 dá 150 sucessos para percentis.")
-0906 |     cmd.add_argument("--repetitions", type=positive, default=3)
-0907 |     cmd.add_argument("--warmup", type=nonnegative, default=3)
-0908 |     cmd.add_argument("--mode", choices=["independent", "closed-loop", "replay"], default="independent",
-0909 |                      help="independent preserva uma requisição sem histórico; closed-loop acumula respostas reais; replay usa assistant fixo do fixture.")
-0910 |     cmd.add_argument("--conversation-turns", type=positive, default=1,
-0911 |                      help="Turnos por conversa em --mode closed-loop ou replay; cada turno envia o histórico completo.")
-0912 |     cmd.add_argument("--conversation-fixture", default=str(DEFAULT_CONVERSATION_FIXTURE),
-0913 |                      help="Fixture JSON versionado com system e lista fixa de user turns; replay tambem exige assistant nos turnos anteriores.")
-0914 |     cmd.add_argument("--seed", type=positive, default=42)
-0915 |     cmd.add_argument("--timeout", type=positive, default=300)
-0916 |     cmd.add_argument("--results", default="results")
-0917 |     cmd.add_argument("--result-name", help="Nome humano da execução na pasta timestamp; sem isso é derivado do modo/cenário.")
-0918 |     cmd.add_argument("--smoke", action="store_true", help="3 medições e 1 repetição; não vale como resultado final.")
-0919 |     cmd.add_argument("--launch", help="Arquivo JSON com argv para iniciar um runtime LOCAL; encerra só esse processo ao final.")
-0920 |     cmd.add_argument("--launch-extra-args", nargs="*", default=[],
-0921 |                      help="Argumentos experimentais acrescentados ao argv do launch, sem editar o JSON; registrados no lifecycle.")
-0922 |     cmd.add_argument("--launch-executable", help="Substitui argv[0] do launch pelo executável resolvido no ambiente do runtime.")
-0923 |     cmd.add_argument("--launch-extra-args-json", default="[]", help="Array JSON de argumentos do runtime, preservando flags e espaços.")
-0924 |     cmd.add_argument("--startup-timeout", type=positive, default=1800, help="Limite da espera pela API com --launch, em segundos.")
-0925 |     cmd.add_argument("--first-prompt-file", help="Texto UTF-8 para a primeira requisição e referência final; default: pergunta sobre RAM/VRAM.")
-0926 |     cmd.add_argument("--initial-state", default="weights local; OS/compilation caches not controlled", help="Descreva SSD e caches existentes; apenas registra, não limpa.")
-0927 |     cmd.set_defaults(func=run)
-0928 |     args = parser.parse_args()
-0929 |     if hasattr(args, "launch_extra_args_json"):
-0930 |         extra = json.loads(args.launch_extra_args_json)
-0931 |         if not isinstance(extra, list) or any(not isinstance(x, str) for x in extra):
-0932 |             parser.error("--launch-extra-args-json deve ser array de strings")
-0933 |         args.launch_extra_args.extend(extra)
-0934 |     if getattr(args, "input_tokens", None):
-0935 |         if len(set(args.input_tokens)) != len(args.input_tokens):
-0936 |             parser.error("Não repita comprimentos em --input-tokens.")
-0937 |         args.scenarios = []
-0938 |         for size in args.input_tokens:
-0939 |             name = f"ctx{size}"
-0940 |             WORKLOADS[name] = size
-0941 |             args.scenarios.append(name)
-0942 |     if hasattr(args, "scenarios") and len(set(args.scenarios)) != len(args.scenarios):
-0943 |         parser.error("Não repita cenários na lista.")
-0944 |     try:
-0945 |         args.func(args)
-0946 |     except KeyboardInterrupt:
-0947 |         print("Interrompido; resultados já concluídos foram preservados.", file=sys.stderr)
-0948 |         return 130
-0949 |     except Exception as exc:
-0950 |         print(f"ERRO: {redact(str(exc), os.environ.get('BENCH_API_KEY', ''))}", file=sys.stderr)
-0951 |         return 1
-0952 |     return 0
-0953 |
-0954 |
-0955 | if __name__ == "__main__":
-0956 |     raise SystemExit(main())
+0265 | def capture(command):
+0266 |     try:
+0267 |         proc = subprocess.run(command, capture_output=True, text=True, timeout=15)
+0268 |         return {"returncode": proc.returncode, "stdout": proc.stdout, "stderr": proc.stderr}
+0269 |     except (OSError, subprocess.TimeoutExpired) as exc:
+0270 |         return {"unavailable": str(exc)}
+0271 |
+0272 |
+0273 | def load_config(path):
+0274 |     cfg = json.loads(Path(path).read_text(encoding="utf-8"))
+0275 |     required = {"runtime", "base_url", "model", "tokenizer", "context_window", "cache_policy",
+0276 |                 "runtime_version", "model_artifact", "server_command", "notes"}
+0277 |     if set(cfg) != required:
+0278 |         raise ValueError(f"Campos da configuração devem ser exatamente: {sorted(required)}")
+0279 |     if any(not isinstance(cfg[k], str) or not cfg[k].strip() for k in required - {"context_window"}):
+0280 |         raise ValueError("Os campos textuais da configuração devem estar preenchidos.")
+0281 |     if type(cfg["context_window"]) is not int or cfg["context_window"] < 512:
+0282 |         raise ValueError("context_window deve ser um inteiro >= 512.")
+0283 |     url = urlsplit(cfg["base_url"])
+0284 |     if url.scheme not in {"http", "https"} or not url.hostname or url.username or url.password or url.query or url.fragment:
+0285 |         raise ValueError("URL inválida: use http(s), sem credenciais, query ou fragmento.")
+0286 |     if url.path not in {"", "/", "/v1", "/v1/"}:
+0287 |         raise ValueError("Use a raiz do servidor (ex.: http://127.0.0.1:8000), sem endpoint.")
+0288 |     cfg["base_url"] = f"{url.scheme}://{url.netloc}"
+0289 |     return cfg
+0290 |
+0291 |
+0292 | def validate_run(cfg, scenarios, smoke):
+0293 |     for scenario in scenarios:
+0294 |         # Margem para o template; o servidor continua sendo a autoridade final.
+0295 |         needed = WORKLOADS[scenario] + OUTPUT_TOKENS + 256
+0296 |         if cfg["context_window"] < needed:
+0297 |             raise ValueError(f"{scenario} precisa de contexto declarado >= {needed}; "
+0298 |                              "altere o servidor e depois o JSON, ou retire esse cenário.")
+0299 |     if not smoke:
+0300 |         if any("PREENCHER" in cfg[k] or "SUBSTITUA" in cfg[k]
+0301 |                for k in ("model", "runtime_version", "model_artifact", "server_command")):
+0302 |             raise ValueError("Preencha modelo, versão, artefato e comando antes da medição formal; --smoke permite rascunhos.")
+0303 |         if cfg["cache_policy"] == "runtime-default-unverified":
+0304 |             raise ValueError("Registre cache_policy após verificar o servidor. Ex.: disabled-confirmed ou enabled-recorded. "
+0305 |                              "O script NÃO altera nem comprova a política de cache.")
+0306 |
+0307 |
+0308 | def tokenizer_digest(path):
+0309 |     path = Path(path)
+0310 |     if not path.is_dir() or not (path / "tokenizer_config.json").exists():
+0311 |         raise ValueError("Tokenizer local ausente. Execute: python bench.py prepare-tokenizer")
+0312 |     hashes = {}
+0313 |     for file in sorted(path.rglob("*")):
+0314 |         if file.is_file() and not file.name.startswith("."):
+0315 |             hashes[str(file.relative_to(path))] = hashlib.sha256(file.read_bytes()).hexdigest()
+0316 |     digest = hashlib.sha256(json.dumps(hashes, sort_keys=True).encode()).hexdigest()
+0317 |     return {"sha256": digest, "files": hashes}
+0318 |
+0319 |
+0320 | def prepare_tokenizer(args):
+0321 |     from huggingface_hub import HfApi
+0322 |     from transformers import AutoTokenizer
+0323 |     path = Path(args.output)
+0324 |     if path.exists():
+0325 |         raise ValueError(f"{path} já existe; não será sobrescrito. Use outro --output.")
+0326 |     revision = HfApi().model_info(args.model, revision=args.revision).sha
+0327 |     tokenizer = AutoTokenizer.from_pretrained(args.model, revision=revision, trust_remote_code=False)
+0328 |     path.mkdir(parents=True)
+0329 |     tokenizer.save_pretrained(path)
+0330 |     write_json(path / "source.json", {"model": args.model, "revision": revision})
+0331 |     print(f"Tokenizer salvo em {path}; revisão {revision}. Não foram baixados pesos.")
+0332 |     print("Compartilhe esta pasta com o grupo para usar os mesmos arquivos.")
+0333 |
+0334 |
+0335 | def scenario_config(cfg, name, count, seed, secret, timeout):
+0336 |     return {
+0337 |         "spec": {
+0338 |             "backend": {"kind": "openai_http", "target": cfg["base_url"], "model": cfg["model"],
+0339 |                         "request_format": "/v1/chat/completions", "stream": True,
+0340 |                         "validate_backend": False, "verify": True, "follow_redirects": False,
+0341 |                         "timeout": timeout, "api_key": secret or None,
+0342 |                         "extras": {"body": {"temperature": 0, "top_p": 1}}},
+0343 |             "profile": {"kind": "synchronous", "warmup": 0, "cooldown": 0},
+0344 |             "constraints": [{"kind": "max_requests", "count": count}, {"kind": "max_errors", "count": 1}],
+0345 |             "tokenizer": {"kind": "huggingface_auto", "model": str(Path(cfg["tokenizer"]).resolve()),
+0346 |                           "load_kwargs": {"local_files_only": True, "trust_remote_code": False}},
+0347 |             "data": [{"kind": "synthetic_text", "prompt_tokens": WORKLOADS[name],
+0348 |                       "output_tokens": OUTPUT_TOKENS}],
+0349 |             "data_loader": {"kind": "pytorch", "samples": count, "num_workers": 0, "shuffle": False},
+0350 |             "seed": {"kind": "static", "value": seed},
+0351 |             "metrics": {"kind": "generative", "sample_size": None, "prefer_response_metrics": True},
+0352 |             "outputs": [],
+0353 |         }
+0354 |     }
+0355 |
+0356 |
+0357 | class Monitor:
+0358 |     """Amostragem contínua e marcação de fases; não é um profiler PCIe."""
+0359 |     def __init__(self, output, cfg=None, secret="", collect_kv=False):
+0360 |         self.output = Path(output)
+0361 |         self.stop_event = threading.Event()
+0362 |         self.thread = None
+0363 |         self.phase = "setup"
+0364 |         self.cfg, self.secret, self.collect_kv = cfg, secret, collect_kv
+0365 |         self.kv_thread = None
+0366 |         self.started_monotonic = None
+0367 |
+0368 |     def set_phase(self, phase, event=None):
+0369 |         self.phase = phase
+0370 |         utc = datetime.now(timezone.utc).isoformat()
+0371 |         elapsed = (time.monotonic() - self.started_monotonic) if self.started_monotonic else 0.0
+0372 |         self.log(f"[telemetria] utc={utc} decorrido={elapsed:.3f}s fase={phase} evento={event or 'phase_change'}")
+0373 |         if hasattr(self, "events_handle"):
+0374 |             writer = csv.writer(self.events_handle)
+0375 |             writer.writerow([utc, time.monotonic(), elapsed, phase, event or "phase_change"])
+0376 |             self.events_handle.flush()
+0377 |
+0378 |     def start(self):
+0379 |         self.started_monotonic = time.monotonic()
+0380 |         self.telemetry_handle = artifact(self.output, "telemetry.log").open("a", encoding="utf-8")
+0381 |         self.events_handle = artifact(self.output, "events.csv").open("w", newline="", encoding="utf-8")
+0382 |         csv.writer(self.events_handle).writerow(["utc", "monotonic_s", "elapsed_s", "phase", "event"])
+0383 |         self.set_phase(self.phase, "monitor_started")
+0384 |         self.thread = threading.Thread(target=self.loop, daemon=True)
+0385 |         self.thread.start()
+0386 |         if self.collect_kv:
+0387 |             self.kv_thread = threading.Thread(target=self.kv_loop, daemon=True)
+0388 |             self.kv_thread.start()
+0389 |
+0390 |     def log(self, message):
+0391 |         print(message, flush=True)
+0392 |         if hasattr(self, "telemetry_handle"):
+0393 |             self.telemetry_handle.write(message + "\n")
+0394 |             self.telemetry_handle.flush()
+0395 |
+0396 |     def kv_loop(self):
+0397 |         import httpx
+0398 |         headers = {"Authorization": f"Bearer {self.secret}"} if self.secret else {}
+0399 |         pattern = re.compile(r'^(vllm:(?:kv_cache_usage_perc|gpu_cache_usage_perc))(\{[^}]*\})?\s+([0-9.eE+\-]+)(?:\s|$)')
+0400 |         with artifact(self.output, "kv-cache.csv").open("w", newline="") as handle, httpx.Client(timeout=1, headers=headers, follow_redirects=False) as client:
+0401 |             writer = csv.writer(handle)
+0402 |             writer.writerow(["utc", "elapsed_s", "phase", "series", "fraction"])
+0403 |             while not self.stop_event.is_set():
+0404 |                 phase = self.phase
+0405 |                 try:
+0406 |                     response = client.get(self.cfg["base_url"] + "/metrics")
+0407 |                     response.raise_for_status()
+0408 |                     matches = [m for line in response.text.splitlines() if (m := pattern.match(line))]
+0409 |                     modern = any(m[1] == "vllm:kv_cache_usage_perc" for m in matches)
+0410 |                     for m in matches:
+0411 |                         if modern and m[1] != "vllm:kv_cache_usage_perc":
+0412 |                             continue
+0413 |                         value = float(m[3])
+0414 |                         if math.isfinite(value) and 0 <= value <= 1:
+0415 |                             writer.writerow([datetime.now(timezone.utc).isoformat(), time.monotonic() - self.started_monotonic,
+0416 |                                              phase, redact(m[1] + (m[2] or ""), self.secret), value])
+0417 |                     handle.flush()
+0418 |                 except (httpx.HTTPError, ValueError):
+0419 |                     pass  # Serveur inicializando/endpoint ausente: nunca inventar zeros.
+0420 |                 self.stop_event.wait(1)
+0421 |
+0422 |     def loop(self):
+0423 |         try:
+0424 |             import psutil
+0425 |         except ImportError:
+0426 |             psutil = None
+0427 |         with artifact(self.output, "gpu.csv").open("w", newline="", encoding="utf-8") as handle, \
+0428 |              artifact(self.output, "system.csv").open("w", newline="", encoding="utf-8") as system_handle:
+0429 |             writer = csv.writer(handle)
+0430 |             writer.writerow(["utc", "elapsed_s", "sample_index", "phase", "index", "name", "used_mib", "total_mib", "used_gib", "total_gib",
+0431 |                              "vram_used_pct", "gpu_util_pct", "memory_util_pct", "temperature_c", "power_w"])
+0432 |             system_writer = csv.writer(system_handle)
+0433 |             system_writer.writerow(["utc", "elapsed_s", "sample_index", "phase", "cpu_util_pct", "ram_used_mib", "ram_available_mib", "ram_total_mib",
+0434 |                                     "load1", "root_disk_used_mib", "root_disk_free_mib", "disk_read_bytes", "disk_write_bytes"])
+0435 |             if psutil:
+0436 |                 psutil.cpu_percent(interval=None)
+0437 |             sample_number = 0
+0438 |             while not self.stop_event.is_set():
+0439 |                 sample_number += 1
+0440 |                 phase = self.phase
+0441 |                 utc = datetime.now(timezone.utc).isoformat()
+0442 |                 result = capture(["nvidia-smi", "--query-gpu=index,name,memory.used,memory.total,utilization.gpu,utilization.memory,temperature.gpu,power.draw",
+0443 |                                   "--format=csv,noheader,nounits"])
+0444 |                 if result.get("returncode") != 0:
+0445 |                     write_json(artifact(self.output, "gpu-unavailable.json"), result)
+0446 |                 else:
+0447 |                     gpu_rows = list(csv.reader(result["stdout"].splitlines(), skipinitialspace=True))
+0448 |                     for row in gpu_rows:
+0449 |                         used_mib, total_mib = float(row[2]), float(row[3])
+0450 |                         vram_pct = (100 * used_mib / total_mib) if total_mib else None
+0451 |                         writer.writerow([utc, time.monotonic() - self.started_monotonic, sample_number, phase, row[0], row[1], row[2], row[3],
+0452 |                                          used_mib / 1024, total_mib / 1024, vram_pct, *row[4:]])
+0453 |                     if sample_number == 1 or sample_number % 10 == 0:
+0454 |                         compact = "; ".join(f"GPU{row[0]} VRAM={float(row[2]) / 1024:.2f}/{float(row[3]) / 1024:.2f} GiB "
+0455 |                                              f"ocupada={100 * float(row[2]) / float(row[3]):.1f}% "
+0456 |                                              f"atividade_gpu={row[4]}% atividade_leitura_escrita_memoria={row[5]}%" for row in gpu_rows)
+0457 |                         elapsed = time.monotonic() - self.started_monotonic
+0458 |                         utc_log = datetime.now(timezone.utc).isoformat()
+0459 |                         self.log(f"[telemetria] utc={utc_log} decorrido={elapsed:.3f}s fase={phase} {compact or 'GPU sem amostra'}")
+0460 |                 handle.flush()
+0461 |                 if psutil:
+0462 |                     vm = psutil.virtual_memory()
+0463 |                     du = psutil.disk_usage(str(self.output.anchor or "/"))
+0464 |                     io = psutil.disk_io_counters()
+0465 |                     system_writer.writerow([utc, time.monotonic() - self.started_monotonic, sample_number, phase, psutil.cpu_percent(interval=None), vm.used / 1048576,
+0466 |                                              vm.available / 1048576, vm.total / 1048576, os.getloadavg()[0],
+0467 |                                              du.used / 1048576, du.free / 1048576,
+0468 |                                              getattr(io, "read_bytes", None), getattr(io, "write_bytes", None)])
+0469 |                     system_handle.flush()
+0470 |                 self.stop_event.wait(1)
+0471 |
+0472 |     def stop(self):
+0473 |         self.stop_event.set()
+0474 |         if self.thread:
+0475 |             self.thread.join(timeout=17)
+0476 |         if self.kv_thread:
+0477 |             self.kv_thread.join(timeout=3)
+0478 |         self.set_phase("stopped", "monitor_stopped")
+0479 |         if hasattr(self, "events_handle"):
+0480 |             self.events_handle.close()
+0481 |         if hasattr(self, "telemetry_handle"):
+0482 |             self.telemetry_handle.close()
+0483 |         self.write_telemetry_summary()
+0484 |
+0485 |     def write_telemetry_summary(self):
+0486 |         """Agrega telemetria por fase para relacionar picos com eventos do benchmark."""
+0487 |         def read_rows(name):
+0488 |             path = locate(self.output, name)
+0489 |             if not path.exists():
+0490 |                 return []
+0491 |             with path.open() as handle:
+0492 |                 return list(csv.DictReader(handle))
+0493 |         sources = {"gpu": read_rows("gpu.csv"), "system": read_rows("system.csv"), "kv": read_rows("kv-cache.csv")}
+0494 |         # Arquivo de entrada simples para gráficos: uma observação por linha,
+0495 |         # com UTC, tempo desde o início do monitor e fase experimental.
+0496 |         if sources["gpu"]:
+0497 |             import shutil
+0498 |             shutil.copyfile(artifact(self.output, "gpu.csv"), artifact(self.output, "telemetry-timeseries.csv"))
+0499 |         phases = sorted({r.get("phase") for rows in sources.values() for r in rows if r.get("phase")})
+0500 |         output = {"definition": "Amostras observadas por fase; não são bytes nem tempos de transferência PCIe.", "phases": {}}
+0501 |         for phase in phases:
+0502 |             entry = {"gpu_samples": 0, "system_samples": 0, "kv_samples": 0}
+0503 |             grows = [r for r in sources["gpu"] if r.get("phase") == phase]
+0504 |             for key in ("used_mib", "total_mib", "used_gib", "total_gib", "vram_used_pct", "gpu_util_pct", "memory_util_pct", "temperature_c", "power_w"):
+0505 |                 vals = []
+0506 |                 for r in grows:
+0507 |                     try: vals.append(float(r[key]))
+0508 |                     except (ValueError, TypeError, KeyError): pass
+0509 |                 entry[f"gpu_{key}_mean"] = sum(vals) / len(vals) if vals else None
+0510 |                 entry[f"gpu_{key}_max"] = max(vals) if vals else None
+0511 |                 if key in {"used_mib", "used_gib", "vram_used_pct"}:
+0512 |                     entry[f"gpu_{key}_min"] = min(vals) if vals else None
+0513 |             entry["gpu_samples"] = len(grows)
+0514 |             srows = [r for r in sources["system"] if r.get("phase") == phase]
+0515 |             for key in ("cpu_util_pct", "ram_used_mib", "ram_available_mib", "root_disk_used_mib", "root_disk_free_mib"):
+0516 |                 vals = []
+0517 |                 for r in srows:
+0518 |                     try: vals.append(float(r[key]))
+0519 |                     except (ValueError, TypeError, KeyError): pass
+0520 |                 entry[f"{key}_mean"] = sum(vals) / len(vals) if vals else None
+0521 |                 entry[f"{key}_max"] = max(vals) if vals else None
+0522 |             entry["system_samples"] = len(srows)
+0523 |             krows = [r for r in sources["kv"] if r.get("phase") == phase]
+0524 |             vals = []
+0525 |             for r in krows:
+0526 |                 try: vals.append(float(r["fraction"]) * 100)
+0527 |                 except (ValueError, TypeError, KeyError): pass
+0528 |             entry["kv_occupancy_pct_mean"] = sum(vals) / len(vals) if vals else None
+0529 |             entry["kv_occupancy_pct_max"] = max(vals) if vals else None
+0530 |             entry["kv_samples"] = len(vals)
+0531 |             output["phases"][phase] = entry
+0532 |         write_json(artifact(self.output, "telemetry-summary.json"), output)
+0533 |
+0534 |
+0535 | def percentile(values, q):
+0536 |     values = sorted(v for v in values if v is not None and math.isfinite(v))
+0537 |     if not values:
+0538 |         return None
+0539 |     pos = (len(values) - 1) * q
+0540 |     lo, hi = math.floor(pos), math.ceil(pos)
+0541 |     return values[lo] + (values[hi] - values[lo]) * (pos - lo)
+0542 |
+0543 |
+0544 | def summarize(report):
+0545 |     """Métricas por requisição, sem misturar warmup ou erros com sucessos."""
+0546 |     benchmarks = report["benchmarks"]
+0547 |     if len(benchmarks) != 1:
+0548 |         raise ValueError("Esperado exatamente um benchmark sequencial.")
+0549 |     requests = benchmarks[0]["requests"]
+0550 |     from reporting import derived
+0551 |     good = [{**r, **derived(r)} for r in requests["successful"]]
+0552 |     result = {
+0553 |         "successful_request_count": len(good),
+0554 |         "errored_request_count": len(requests["errored"]),
+0555 |         "incomplete_request_count": len(requests["incomplete"]),
+0556 |     }
+0557 |     # Os nomes são deliberadamente longos: summary.json é um artefato de
+0558 |     # análise, e não uma API em que economizar alguns bytes melhora algo.
+0559 |     metrics = {
+0560 |         "request_first_token_latency_milliseconds": "time_to_first_token_ms",
+0561 |         "request_latency_seconds": "request_latency",
+0562 |         "within_response_next_token_latency_milliseconds": "inter_token_latency_ms",
+0563 |         "output_completion_token_count": "output_tokens",
+0564 |         "input_prompt_token_count": "prompt_tokens",
+0565 |         "decode_generation_tokens_per_second": "decode_tokens_s",
+0566 |         "effective_output_tokens_per_second": "effective_tokens_s",
+0567 |     }
+0568 |     for label, key in metrics.items():
+0569 |         vals = [r.get(key) for r in good]
+0570 |         result[label + "_sample_count"] = sum(v is not None for v in vals)
+0571 |         result[label + "_p50"] = percentile(vals, .5)
+0572 |         result[label + "_p95"] = percentile(vals, .95)
+0573 |         result[label + "_p99"] = percentile(vals, .99)
+0574 |     # Nomes canônicos para a comparação entre runtimes. Os campos históricos
+0575 |     # acima permanecem para compatibilidade com relatórios já gerados.
+0576 |     ttft = [r.get("time_to_first_token_ms") for r in good]
+0577 |     tokens_s = [r.get("decode_tokens_s") for r in good]
+0578 |     result["time_to_first_token_milliseconds_sample_count"] = sum(v is not None for v in ttft)
+0579 |     result["tokens_per_second_sample_count"] = sum(v is not None for v in tokens_s)
+0580 |     for suffix, q in (("p50", .50), ("p95", .95), ("p99", .99)):
+0581 |         result[f"time_to_first_token_milliseconds_{suffix}"] = percentile(ttft, q)
+0582 |         result[f"tokens_per_second_{suffix}"] = percentile(tokens_s, q)
+0583 |     for label, key in {
+0584 |         "time_to_first_token_seconds": "time_to_first_token_seconds",
+0585 |         "generation_time_seconds": "generation_time_seconds",
+0586 |         "end_to_end_latency_seconds": "end_to_end_latency_seconds",
+0587 |         "decode_tokens_per_second": "decode_tokens_per_second",
+0588 |         "end_to_end_tokens_per_second": "end_to_end_tokens_per_second",
+0589 |     }.items():
+0590 |         values = [r.get(key) for r in good]
+0591 |         result[label + "_sample_count"] = sum(v is not None for v in values)
+0592 |         result[label + "_p50"] = percentile(values, .50)
+0593 |         result[label + "_p95"] = percentile(values, .95)
+0594 |         result[label + "_p99"] = percentile(values, .99)
+0595 |     result["metric_definitions"] = {
+0596 |         "Time To First Token": "milissegundos entre o envio da requisição e o primeiro token/conteúdo observado; há um valor por requisição.",
+0597 |         "Tokens/s": "tokens de saída por segundo durante o decode, calculado por requisição a partir do intervalo entre tokens; não inclui TTFT.",
+0598 |     }
+0599 |     result["requests_sha256"] = requests_digest(report)
+0600 |     turns = sorted({r.get("turn_index") for r in good if r.get("turn_index") is not None})
+0601 |     result["turn_indices"] = turns
+0602 |     result["history_tokens_by_turn"] = [{"turn_index": turn,
+0603 |                                          "history_tokens_p50": percentile([r.get("history_tokens") for r in good if r.get("turn_index") == turn], .50),
+0604 |                                          "history_tokens_p95": percentile([r.get("history_tokens") for r in good if r.get("turn_index") == turn], .95)}
+0605 |                                         for turn in turns]
+0606 |     result["percentiles_are_exploratory"] = len(good) < 100
+0607 |     result["percentile_definition"] = "Empirical linear interpolation over successful requests in this phase/scenario/repetition block."
+0608 |     return result
+0609 |
+0610 |
+0611 | def requests_digest(report):
+0612 |     # O hash exclui aliases do modelo e chaves: apenas carga de entrada e limite de saída.
+0613 |     bodies = []
+0614 |     for row in report["benchmarks"][0]["requests"]["successful"]:
+0615 |         args = json.loads(row["request_args"])
+0616 |         body = args.get("body", {})
+0617 |         bodies.append({k: body.get(k) for k in ("messages", "max_tokens")})
+0618 |     return hashlib.sha256(json.dumps(bodies, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+0619 |
+0620 |
+0621 | def turn_manifest(report):
+0622 |     rows = report["benchmarks"][0]["requests"]["successful"]
+0623 |     turns = []
+0624 |     for row in rows:
+0625 |         turns.append({"request_id": row.get("request_id"), "conversation_index": row.get("conversation_index"),
+0626 |                       "turn_index": row.get("turn_index"), "mode": row.get("mode"),
+0627 |                       "fixture_sha256": row.get("fixture_sha256"), "history_tokens": row.get("history_tokens"),
+0628 |                       "history_tokens_estimate": row.get("history_tokens_estimate"),
+0629 |                       "prompt_tokens": row.get("prompt_tokens"), "total_tokens": row.get("total_tokens"),
+0630 |                       "request_sha256": row.get("request_sha256")})
+0631 |     return turns
+0632 |
+0633 |
+0634 | def conversation_artifact(report, fixture=None):
+0635 |     requests = report["benchmarks"][0]["requests"]
+0636 |     rows = []
+0637 |     for status in ("successful", "errored", "incomplete"):
+0638 |         for row in requests[status]:
+0639 |             body = {}
+0640 |             if row.get("request_args"):
+0641 |                 body = json.loads(row["request_args"]).get("body", {})
+0642 |             rows.append({"status": status, "request_id": row.get("request_id"),
+0643 |                          "conversation_index": row.get("conversation_index"),
+0644 |                          "turn_index": row.get("turn_index"), "mode": row.get("mode"),
+0645 |                          "messages": body.get("messages"),
+0646 |                          "assistant_output": row.get("output") if status == "successful" else None,
+0647 |                          "error": row.get("error") if status != "successful" else None,
+0648 |                          "request_sha256": row.get("request_sha256"),
+0649 |                          "history_tokens": row.get("history_tokens"),
+0650 |                          "history_tokens_estimate": row.get("history_tokens_estimate")})
+0651 |     artifact = {"mode": rows[0].get("mode") if rows else None, "turns": rows}
+0652 |     if fixture:
+0653 |         artifact["fixture"] = {"path": fixture["path"], "sha256": fixture["sha256"],
+0654 |                                "name": fixture["data"].get("name"),
+0655 |                                "version": fixture["data"].get("version")}
+0656 |     return artifact
+0657 |
+0658 |
+0659 | def write_requests_csv(path, report):
+0660 |     """Amostras individuais para análise no R/Python, incluindo status de erro."""
+0661 |     from reporting import derived
+0662 |     fields = ["status", "error", "mode", "request_id", "conversation_index", "turn_index",
+0663 |               "fixture_name", "fixture_sha256", "workload_seed",
+0664 |               "history_tokens", "history_tokens_estimate", "target_history_tokens", "messages_count",
+0665 |               "request_sha256", "request_start_time", "first_token_time", "request_end_time",
+0666 |               "time_to_first_token_seconds", "generation_time_seconds", "end_to_end_latency_seconds",
+0667 |               "completion_tokens", "prompt_tokens", "total_tokens", "decode_tokens_per_second",
+0668 |               "end_to_end_tokens_per_second", "inter_token_latency_seconds", "request_latency",
+0669 |               "time_to_first_token_ms", "inter_token_latency_ms", "output_tokens", "decode_tokens_s", "effective_tokens_s",
+0670 |               "context_start_tokens", "context_end_tokens", "context_band"]
+0671 |     with Path(path).open("w", newline="", encoding="utf-8") as handle:
+0672 |         writer = csv.DictWriter(handle, fieldnames=fields)
+0673 |         writer.writeheader()
+0674 |         for status in ("successful", "errored", "incomplete"):
+0675 |             for row in report["benchmarks"][0]["requests"][status]:
+0676 |                 if status == "successful":
+0677 |                     row = {**row, **derived(row)}
+0678 |                 writer.writerow({"status": status, **{key: row.get(key) for key in fields[1:]}})
+0679 |
+0680 |
+0681 | def write_summary(output, rows):
+0682 |     from reporting import render
+0683 |     write_json(artifact(output, "summary.json"), rows)
+0684 |     if not rows:
+0685 |         render(output, rows)
+0686 |         return
+0687 |     with artifact(output, "summary.csv").open("w", newline="", encoding="utf-8") as handle:
+0688 |         writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
+0689 |         writer.writeheader()
+0690 |         writer.writerows(rows)
+0691 |     render(output, rows)
+0692 |
+0693 |
+0694 | def run(args):
+0695 |     import fcntl
+0696 |     from lifecycle import DEFAULT_PROMPT, Launch, lifecycle_report, timed_request, wait_models
+0697 |     if importlib.metadata.version("guidellm") != GUIDELLM_VERSION:
+0698 |         raise ValueError(f"Este projeto exige guidellm=={GUIDELLM_VERSION}; reinstale requirements.txt.")
+0699 |     cfg = load_config(args.config)
+0700 |     validate_run(cfg, args.scenarios, args.smoke)
+0701 |     availability = local_model_check(args.local_model_path)
+0702 |     availability["kv_bytes_per_token"] = args.kv_bytes_per_token
+0703 |     availability["launch_hf_offline"] = bool(args.launch)
+0704 |     digest = tokenizer_digest(cfg["tokenizer"])
+0705 |     from transformers import AutoTokenizer
+0706 |     measurement_tokenizer = AutoTokenizer.from_pretrained(cfg["tokenizer"], local_files_only=True, trust_remote_code=False)
+0707 |     count, repetitions = (3, 1) if args.smoke else (args.requests, args.repetitions)
+0708 |     secret = os.environ.get("BENCH_API_KEY", "")
+0709 |     prompt = Path(args.first_prompt_file).read_text(encoding="utf-8") if args.first_prompt_file else DEFAULT_PROMPT
+0710 |     if not prompt.strip():
+0711 |         raise ValueError("O prompt inicial não pode estar vazio.")
+0712 |     conversation_mode = args.mode in {"closed-loop", "replay"}
+0713 |     if not conversation_mode and args.conversation_turns != 1:
+0714 |         raise ValueError("--conversation-turns só pode ser maior que 1 com --mode closed-loop ou --mode replay.")
+0715 |     conversation_fixture = load_conversation_fixture(args.conversation_fixture) if conversation_mode else None
+0716 |     if conversation_fixture:
+0717 |         validate_conversation_fixture_for_mode(conversation_fixture, args.mode, args.conversation_turns)
+0718 |     base = Path(args.results)
+0719 |     base.mkdir(parents=True, exist_ok=True)
+0720 |     with (base / ".benchmark.lock").open("a") as lock:
+0721 |         try:
+0722 |             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+0723 |         except BlockingIOError:
+0724 |             raise ValueError("Já existe um benchmark usando esta pasta results. Não execute dois ao mesmo tempo.") from None
+0725 |         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
+0726 |         label = execution_label(smoke=args.smoke, scenarios=args.scenarios,
+0727 |                                 input_tokens=args.input_tokens, result_name=args.result_name)
+0728 |         output = runtime_root(base, cfg["runtime"], stamp, label)
+0729 |         prepare(output)
+0730 |         manifest = {"project_version": VERSION, "guidellm_version": GUIDELLM_VERSION, "started_utc": stamp,
+0731 |                     "results_layout": "runtime/timestamp/human-name/{html,json,csv,logs,text}",
+0732 |                     "result_name": label, "runtime_directory": slug(cfg["runtime"]),
+0733 |                     "config": cfg, "tokenizer": digest, "smoke": args.smoke, "requests": count,
+0734 |                     "repetitions": repetitions, "warmup_requests_per_case": args.warmup,
+0735 |                     "scenarios": args.scenarios, "seed": args.seed, "profile": "synchronous",
+0736 |                     "mode": args.mode, "conversation_turns": args.conversation_turns,
+0737 |                     "prompt_policy": ("deterministic unique prompt per request; warmup and measure use disjoint seeds"
+0738 |                                       if not conversation_mode else "fixed conversation fixture"),
+0739 |                     "conversation_fixture": {"path": conversation_fixture["path"], "sha256": conversation_fixture["sha256"],
+0740 |                                              "name": conversation_fixture["data"].get("name"),
+0741 |                                              "version": conversation_fixture["data"].get("version")} if conversation_fixture else None,
+0742 |                     "conversation_first_request": "first-request.json is a separate single-turn lifecycle probe; closed-loop/replay measured histories start empty per conversation and per block",
+0743 |                     "blocks": [],
+0744 |                     "model_availability": availability,
+0745 |                     "guidellm_compat": "0.7.4 bounded drain of real late completion updates (5s); no request retry",
+0746 |                     "telemetry": {"gpu_source": "local nvidia-smi", "system_source": "psutil host CPU/RAM/disk counters",
+0747 |                                   "event_source": "events.csv phase markers", "kv_metrics_requested": args.collect_kv_metrics,
+0748 |                                   "sampling": "approximately 1 Hz; not per-token; PCIe copy time is not directly measured"},
+0749 |                     "python": sys.version, "platform": platform.platform(),
+0750 |                     "git": capture(["git", "rev-parse", "HEAD"]), "status": "running"}
+0751 |         write_json(artifact(output, "manifest.json"), redact(manifest, secret))
+0752 |         write_json(artifact(output, "client-packages.json"), {d.metadata["Name"]: d.version for d in importlib.metadata.distributions()})
+0753 |         write_json(artifact(output, "gpu-before.json"), capture(["nvidia-smi"]))
+0754 |         monitor, rows = Monitor(output, cfg, secret, args.collect_kv_metrics), []
+0755 |         launch, origin, cleanup_error = None, None, None
+0756 |         lifecycle = {"mode": "new-process" if args.launch else "existing-server-state-unknown",
+0757 |                      "status": "running", "initial_state_note": args.initial_state,
+0758 |                      "startup_timeout_s": args.startup_timeout}
+0759 |         print(f"Resultados: {output.resolve()}", flush=True)
+0760 |         try:
+0761 |             monitor.start()
+0762 |             if args.launch:
+0763 |                 launch = Launch(cfg, args.launch, output, args.launch_extra_args, args.launch_executable)
+0764 |                 lifecycle["argv"] = redact(launch.argv, secret)
+0765 |                 monitor.set_phase("process_startup")
+0766 |                 origin = launch.start()
+0767 |                 lifecycle["pid"] = launch.process.pid
+0768 |             lifecycle_report(output, redact(lifecycle, secret))
+0769 |             monitor.set_phase("server_readiness")
+0770 |             lifecycle["readiness"] = wait_models(cfg, secret, args.startup_timeout, launch)
+0771 |             lifecycle_report(output, redact(lifecycle, secret))
+0772 |             monitor.set_phase("first_request")
+0773 |             print("Primeiro POST: medição da primeira resposta (nenhuma geração prévia enviada pelo cliente).", flush=True)
+0774 |             lifecycle["first_request"] = timed_request(cfg, secret, args.timeout, prompt,
+0775 |                                                        artifact(output, "first-request.json"), origin)
+0776 |             lifecycle_report(output, redact(lifecycle, secret))
+0777 |             for rep in range(repetitions):
+0778 |                 # Rotação balanceia parcialmente a posição dos cenários entre repetições.
+0779 |                 names = args.scenarios[rep % len(args.scenarios):] + args.scenarios[:rep % len(args.scenarios)]
+0780 |                 for name in names:
+0781 |                     for phase, n in (("warmup", args.warmup), ("measure", count)):
+0782 |                         if not n:
+0783 |                             continue
+0784 |                         seed = args.seed + rep * 100 + list(WORKLOADS).index(name)
+0785 |                         if phase == "warmup":
+0786 |                             seed += 1_000_000
+0787 |                         prefix = f"r{rep+1}-{name}-{phase}"
+0788 |                         monitor.set_phase(prefix)
+0789 |                         config = scenario_config(cfg, name, n, seed, secret, args.timeout)
+0790 |                         config["mode"] = args.mode
+0791 |                         config["prompt_policy"] = ("deterministic unique prompt per request; exact target content tokens; "
+0792 |                                                    "block seed plus request index") if not conversation_mode else "fixed conversation fixture"
+0793 |                         if conversation_mode:
+0794 |                             config["conversation_turns"] = args.conversation_turns
+0795 |                             config["conversation_fixture_sha256"] = conversation_fixture["sha256"]
+0796 |                             config["spec_note"] = "GuideLLM synthetic data spec is retained for independent baseline context only; measured conversational requests are generated from the fixed fixture with accumulated chat history."
+0797 |                         write_json(artifact(output, f"{prefix}-config.json"), redact(config, secret))
+0798 |                         expected = n * args.conversation_turns if conversation_mode else n
+0799 |                         unit = "conversas" if conversation_mode else "requisições"
+0800 |                         print(f"{prefix}: {n} {unit}, uma chamada por vez", flush=True)
+0801 |                         if conversation_mode:
+0802 |                             report = run_conversational_batch(cfg, measurement_tokenizer, name, n, args.conversation_turns,
+0803 |                                                               args.timeout, secret, conversation_fixture, args.mode)
+0804 |                         else:
+0805 |                             report = run_stream_batch(cfg, measurement_tokenizer, name, n, args.timeout, secret, seed)
+0806 |                         raw = redact(report, secret)
+0807 |                         write_json(artifact(output, f"{prefix}.json"), raw)
+0808 |                         turns = turn_manifest(raw) if conversation_mode else []
+0809 |                         conversation_file = None
+0810 |                         if conversation_mode:
+0811 |                             write_json(artifact(output, f"{prefix}-turns.json"), turns)
+0812 |                             conversation_file = f"{prefix}-conversation.json"
+0813 |                             write_json(artifact(output, conversation_file), conversation_artifact(raw, conversation_fixture))
+0814 |                         write_requests_csv(artifact(output, f"{prefix}-requests.csv"), raw)
+0815 |                         summary = summarize(raw)
+0816 |                         summary["expected"] = expected
+0817 |                         summary["missing_request_count"] = max(0, expected - sum(summary[k] for k in ("successful_request_count", "errored_request_count", "incomplete_request_count")))
+0818 |                         manifest["blocks"].append({"prefix": prefix, "mode": args.mode, "phase": phase,
+0819 |                                                    "scenario": name, "repetition": rep+1, "seed": seed,
+0820 |                                                    "conversations": n if conversation_mode else None,
+0821 |                                                    "conversation_turns": args.conversation_turns if conversation_mode else None,
+0822 |                                                    "expected_requests": expected,
+0823 |                                                    "requests_sha256": summary["requests_sha256"],
+0824 |                                                    "conversation_artifact": conversation_file,
+0825 |                                                    "turns": turns if conversation_mode else None})
+0826 |                         write_json(artifact(output, "manifest.json"), redact(manifest, secret))
+0827 |                         rows.append({"runtime": cfg["runtime"], "model": cfg["model"],
+0828 |                                      "cache_policy": cfg["cache_policy"], "tokenizer_sha256": digest["sha256"],
+0829 |                                      "mode": args.mode, "phase": phase, "scenario": name, "repetition": rep+1, **summary})
+0830 |                         write_summary(output, rows)
+0831 |                         if summary["successful_request_count"] != expected or summary["errored_request_count"] or summary["incomplete_request_count"]:
+0832 |                             raise RuntimeError(f"{prefix}: requisições falharam ou execução incompleta. Veja o JSON; não compare como sucesso.")
+0833 |             monitor.set_phase("warm_reference")
+0834 |             lifecycle["warm_reference"] = timed_request(cfg, secret, args.timeout, prompt,
+0835 |                                                          artifact(output, "warm-reference.json"))
+0836 |             manifest["status"] = lifecycle["status"] = "complete"
+0837 |         except BaseException as exc:
+0838 |             manifest["status"] = "interrupted" if isinstance(exc, KeyboardInterrupt) else "failed"
+0839 |             manifest["error"] = redact(str(exc), secret)
+0840 |             lifecycle["status"] = manifest["status"]
+0841 |             lifecycle["error"] = manifest["error"]
+0842 |             raise
+0843 |         finally:
+0844 |             for key, filename in (("first_request", "first-request.json"), ("warm_reference", "warm-reference.json")):
+0845 |                 if artifact(output, filename).exists():
+0846 |                     lifecycle[key] = json.loads(artifact(output, filename).read_text(encoding="utf-8"))
+0847 |             if launch is not None:
+0848 |                 monitor.set_phase("server_shutdown")
+0849 |                 try:
+0850 |                     launch.close()
+0851 |                     lifecycle["server_cleanup"] = "stopped owned process group only"
+0852 |                 except Exception as exc:
+0853 |                     cleanup_error = redact(str(exc), secret)
+0854 |                     lifecycle["server_cleanup_error"] = cleanup_error
+0855 |                     lifecycle["status"] = manifest["status"] = "failed"
+0856 |             lifecycle_report(output, redact(lifecycle, secret))
+0857 |             monitor.stop()
+0858 |             manifest["ended_utc"] = datetime.now(timezone.utc).isoformat()
+0859 |             write_json(artifact(output, "manifest.json"), redact(manifest, secret))
+0860 |             write_json(artifact(output, "gpu-after.json"), capture(["nvidia-smi"]))
+0861 |             write_summary(output, rows)
+0862 |         if cleanup_error:
+0863 |             raise RuntimeError(f"Falha ao encerrar processo criado: {cleanup_error}. Confira o PID no lifecycle.json.")
+0864 |         print(f"Concluído. Abra {artifact(output, 'lifecycle.html')} e {artifact(output, 'summary.html')}")
+0865 |
+0866 |
+0867 | def positive(value):
+0868 |     number = int(value)
+0869 |     if number <= 0:
+0870 |         raise argparse.ArgumentTypeError("Use um inteiro positivo.")
+0871 |     return number
+0872 |
+0873 |
+0874 | def nonnegative(value):
+0875 |     number = int(value)
+0876 |     if number < 0:
+0877 |         raise argparse.ArgumentTypeError("Use zero ou um inteiro positivo.")
+0878 |     return number
+0879 |
+0880 |
+0881 | def rebuild_report(args):
+0882 |     """Atualiza apenas derivados, preservando relatórios brutos e manifesto original."""
+0883 |     output = Path(args.output)
+0884 |     rows = json.loads(locate(output, "summary.json").read_text())
+0885 |     manifest = json.loads(locate(output, "manifest.json").read_text())
+0886 |     for row in rows:
+0887 |         prefix = f"r{row['repetition']}-{row['scenario']}-{row['phase']}"
+0888 |         raw = json.loads(locate(output, f"{prefix}.json").read_text())
+0889 |         row.update(summarize(raw))
+0890 |         expected = manifest.get("warmup_requests_per_case") if row["phase"] == "warmup" else manifest.get("requests")
+0891 |         row["expected"] = expected
+0892 |         row["missing_request_count"] = max(0, expected - sum(row[k] for k in ("successful_request_count", "errored_request_count", "incomplete_request_count"))) if expected is not None else None
+0893 |         write_requests_csv(artifact(output, f"{prefix}-requests.csv"), raw)
+0894 |     write_summary(output, rows)
+0895 |     print(f"Relatório atualizado: {artifact(output, 'summary.html')}; dados brutos preservados.")
+0896 |
+0897 |
+0898 | def main():
+0899 |     parser = argparse.ArgumentParser(description=__doc__)
+0900 |     commands = parser.add_subparsers(dest="command", required=True)
+0901 |     report = commands.add_parser("report", help="Regenera derivados de uma execução existente, sem nova inferência.")
+0902 |     report.add_argument("--output", required=True)
+0903 |     report.set_defaults(func=rebuild_report)
+0904 |     prep = commands.add_parser("prepare-tokenizer", help="Baixa apenas tokenizer; fixa revisão e guarda origem.")
+0905 |     prep.add_argument("--model", default="Qwen/Qwen2.5-14B-Instruct")
+0906 |     prep.add_argument("--revision", default="main")
+0907 |     prep.add_argument("--output", default="tokenizer")
+0908 |     prep.set_defaults(func=prepare_tokenizer)
+0909 |     cmd = commands.add_parser("run", help="Mede primeiro acesso, aquecimento e GuideLLM; lançamento do servidor é opcional.")
+0910 |     cmd.add_argument("--config", required=True)
+0911 |     cmd.add_argument("--local-model-path", required=True, help="Pesos já no SSD: pasta HF, arquivo GGUF ou blob local do Ollama. Não baixa arquivos.")
+0912 |     cmd.add_argument("--collect-kv-metrics", action="store_true", help="Amostra /metrics do vLLM (~1 Hz); ocupação do pool KV, não bytes.")
+0913 |     cmd.add_argument("--kv-bytes-per-token", type=positive, help="Opcional: bytes de KV lógico por token, calculados para arquitetura/dtype reais. Estimativa, não VRAM medida.")
+0914 |     cmd.add_argument("--input-tokens", nargs="+", type=positive, help="Substitui --scenarios por uma grade de comprimentos sintéticos, ex.: 256 512 1024 2048 3072.")
+0915 |     cmd.add_argument("--scenarios", nargs="+", choices=list(WORKLOADS), default=["short", "medium", "long"])
+0916 |     cmd.add_argument("--requests", type=positive, default=50, help="Requisições de medição por cenário e repetição; 50×3 dá 150 sucessos para percentis.")
+0917 |     cmd.add_argument("--repetitions", type=positive, default=3)
+0918 |     cmd.add_argument("--warmup", type=nonnegative, default=3)
+0919 |     cmd.add_argument("--mode", choices=["independent", "closed-loop", "replay"], default="independent",
+0920 |                      help="independent preserva uma requisição sem histórico; closed-loop acumula respostas reais; replay usa assistant fixo do fixture.")
+0921 |     cmd.add_argument("--conversation-turns", type=positive, default=1,
+0922 |                      help="Turnos por conversa em --mode closed-loop ou replay; cada turno envia o histórico completo.")
+0923 |     cmd.add_argument("--conversation-fixture", default=str(DEFAULT_CONVERSATION_FIXTURE),
+0924 |                      help="Fixture JSON versionado com system e lista fixa de user turns; replay tambem exige assistant nos turnos anteriores.")
+0925 |     cmd.add_argument("--seed", type=positive, default=42)
+0926 |     cmd.add_argument("--timeout", type=positive, default=300)
+0927 |     cmd.add_argument("--results", default="results")
+0928 |     cmd.add_argument("--result-name", help="Nome humano da execução na pasta timestamp; sem isso é derivado do modo/cenário.")
+0929 |     cmd.add_argument("--smoke", action="store_true", help="3 medições e 1 repetição; não vale como resultado final.")
+0930 |     cmd.add_argument("--launch", help="Arquivo JSON com argv para iniciar um runtime LOCAL; encerra só esse processo ao final.")
+0931 |     cmd.add_argument("--launch-extra-args", nargs="*", default=[],
+0932 |                      help="Argumentos experimentais acrescentados ao argv do launch, sem editar o JSON; registrados no lifecycle.")
+0933 |     cmd.add_argument("--launch-executable", help="Substitui argv[0] do launch pelo executável resolvido no ambiente do runtime.")
+0934 |     cmd.add_argument("--launch-extra-args-json", default="[]", help="Array JSON de argumentos do runtime, preservando flags e espaços.")
+0935 |     cmd.add_argument("--startup-timeout", type=positive, default=1800, help="Limite da espera pela API com --launch, em segundos.")
+0936 |     cmd.add_argument("--first-prompt-file", help="Texto UTF-8 para a primeira requisição e referência final; default: pergunta sobre RAM/VRAM.")
+0937 |     cmd.add_argument("--initial-state", default="weights local; OS/compilation caches not controlled", help="Descreva SSD e caches existentes; apenas registra, não limpa.")
+0938 |     cmd.set_defaults(func=run)
+0939 |     args = parser.parse_args()
+0940 |     if hasattr(args, "launch_extra_args_json"):
+0941 |         extra = json.loads(args.launch_extra_args_json)
+0942 |         if not isinstance(extra, list) or any(not isinstance(x, str) for x in extra):
+0943 |             parser.error("--launch-extra-args-json deve ser array de strings")
+0944 |         args.launch_extra_args.extend(extra)
+0945 |     if getattr(args, "input_tokens", None):
+0946 |         if len(set(args.input_tokens)) != len(args.input_tokens):
+0947 |             parser.error("Não repita comprimentos em --input-tokens.")
+0948 |         args.scenarios = []
+0949 |         for size in args.input_tokens:
+0950 |             name = f"ctx{size}"
+0951 |             WORKLOADS[name] = size
+0952 |             args.scenarios.append(name)
+0953 |     if hasattr(args, "scenarios") and len(set(args.scenarios)) != len(args.scenarios):
+0954 |         parser.error("Não repita cenários na lista.")
+0955 |     try:
+0956 |         args.func(args)
+0957 |     except KeyboardInterrupt:
+0958 |         print("Interrompido; resultados já concluídos foram preservados.", file=sys.stderr)
+0959 |         return 130
+0960 |     except Exception as exc:
+0961 |         print(f"ERRO: {redact(str(exc), os.environ.get('BENCH_API_KEY', ''))}", file=sys.stderr)
+0962 |         return 1
+0963 |     return 0
+0964 |
+0965 |
+0966 | if __name__ == "__main__":
+0967 |     raise SystemExit(main())
 ```
 
 ## lifecycle.py
