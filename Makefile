@@ -181,9 +181,14 @@ download-tokenizer:
 	@echo '[PREPARE] baixando tokenizer local: $(HF_TOKENIZER_MODEL)'
 	mkdir -p "$(TOKENIZER_DIR)"
 	HF_HUB_OFFLINE=0 TRANSFORMERS_OFFLINE=0 HF_HUB_ENABLE_HF_TRANSFER="$(HF_HUB_ENABLE_HF_TRANSFER)" \
-		$(HF) download "$(HF_TOKENIZER_MODEL)" --revision "$(HF_REVISION)" \
-		--include 'config.json' 'tokenizer*' 'special_tokens_map.json' 'chat_template.jinja' \
+		$(HF) download "$(HF_TOKENIZER_MODEL)" config.json --revision "$(HF_REVISION)" \
 		--local-dir "$(TOKENIZER_DIR)"
+	HF_HUB_OFFLINE=0 TRANSFORMERS_OFFLINE=0 HF_HUB_ENABLE_HF_TRANSFER="$(HF_HUB_ENABLE_HF_TRANSFER)" \
+		$(HF) download "$(HF_TOKENIZER_MODEL)" --revision "$(HF_REVISION)" \
+		--include 'tokenizer*' 'special_tokens_map.json' 'chat_template.jinja' \
+		--local-dir "$(TOKENIZER_DIR)"
+	@test -f "$(TOKENIZER_DIR)/config.json" || { echo "config.json do tokenizer não foi baixado" >&2; exit 1; }
+	@test -f "$(TOKENIZER_DIR)/tokenizer_config.json" || { echo "tokenizer_config.json não foi baixado" >&2; exit 1; }
 
 prepare-benchmark: install-benchmark download-model download-tokenizer verify-gguf
 	@echo '[PREPARE] criando diretório de resultados'
