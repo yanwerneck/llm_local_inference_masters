@@ -74,13 +74,18 @@ BENCH_REQUESTS ?= 50
 BENCH_REPETITIONS ?= 3
 BENCH_WARMUP ?= 3
 BENCH_STARTUP_TIMEOUT ?= 1800
+POD_SSH ?=
+POD_PORT ?= 22
+REMOTE_BENCH_DIR ?= /workspace/chatbot-runtime-bench
+REMOTE_RESULTS_DIR ?= $(REMOTE_BENCH_DIR)/results
+LOCAL_RESULTS_DIR ?= results-from-pod
 
 QUANTIZE_BIN := $(LLAMA_CPP_BUILD_DIR)/bin/llama-quantize
 QUANTIZE_SCRIPT := scripts/quantize_hf_to_gguf_q8_0.sh
 
 .PHONY: help check-tools clone-llama build-llama install-llama-python \
         download-source inspect-source quantize-q8 verify-gguf upload-hf \
-        install-benchmark download-model download-tokenizer check-runtimes prepare-benchmark prepare-vllm prepare-llama prepare-ollama smoke-vllm bench-vllm bench-llama bench-ollama bench-all bench kv-sweep docs clean-info
+        install-benchmark download-model download-tokenizer check-runtimes prepare-benchmark prepare-vllm prepare-llama prepare-ollama smoke-vllm bench-vllm bench-llama bench-ollama bench-all bench kv-sweep pull-results check-profilers docs clean-info
 
 help:
 	@printf '%s\n' \
@@ -110,6 +115,8 @@ help:
 		'  make bench-all             executa vLLM, llama.cpp e Ollama; continua e resume falhas' \
 		'  make kv-sweep              compatibilidade: KV sweep do vLLM (já incluído em bench-vllm)' \
 		'  make docs                 regenera os HTMLs dos documentos' \
+		'  make pull-results POD_SSH=root@host  copia results do pod via SCP' \
+		'  make check-profilers      verifica nsys/ncu para profiling dedicado' \
 		'' \
 		'Variáveis úteis:' \
 		'  MODEL_SIZE=7B|14B, MODEL_7B_GGUF, MODEL_14B_GGUF' \
@@ -117,7 +124,8 @@ help:
 		'  LLAMA_CPP_DIR, HF_MODEL_DIR, GGUF_OUTPUT_DIR, QUANTIZE_THREADS' \
 		'  VLLM_MODEL_DIR, VLLM_CONFIG, VLLM_LAUNCH' \
 		'  LLAMA_MODEL_DIR, LLAMA_CONFIG, LLAMA_LAUNCH' \
-		'  OLLAMA_MODEL_DIR, OLLAMA_CONFIG, OLLAMA_LAUNCH'
+		'  OLLAMA_MODEL_DIR, OLLAMA_CONFIG, OLLAMA_LAUNCH' \
+		'  POD_SSH, POD_PORT, REMOTE_RESULTS_DIR, LOCAL_RESULTS_DIR'
 
 
 check-tools:
@@ -341,6 +349,18 @@ kv-sweep: verify-gguf
 		--local-model-path "$(VLLM_MODEL_DIR)" --python "$(PYTHON)" \
 		--requests "$(BENCH_REQUESTS)" --repetitions "$(BENCH_REPETITIONS)" \
 		--warmup "$(BENCH_WARMUP)" --startup-timeout "$(BENCH_STARTUP_TIMEOUT)"
+
+pull-results:
+	@test -n "$(POD_SSH)" || { echo 'Informe POD_SSH, por exemplo: POD_SSH=root@pod-host'; exit 1; }
+	@command -v scp >/dev/null || { echo 'scp ausente no computador local'; exit 1; }
+	mkdir -p "$(LOCAL_RESULTS_DIR)"
+	echo "[DOWNLOAD] $(POD_SSH):$(REMOTE_RESULTS_DIR) -> $(LOCAL_RESULTS_DIR)"
+	scp -r -P "$(POD_PORT)" "$(POD_SSH):$(REMOTE_RESULTS_DIR)/." "$(LOCAL_RESULTS_DIR)/"
+	echo "[DOWNLOAD] concluído; arquivos em $(LOCAL_RESULTS_DIR)"
+
+check-profilers:
+	@command -v nsys >/dev/null 2>&1 && nsys --version || echo '[PROFILE] nsys não encontrado: instale Nsight Systems no pod ou use o pacote NVIDIA correspondente.'
+	@command -v ncu >/dev/null 2>&1 && ncu --version || echo '[PROFILE] ncu não encontrado: instale Nsight Compute no pod ou use o pacote NVIDIA correspondente.'
 
 docs:
 	$(PYTHON) scripts/build_docs.py

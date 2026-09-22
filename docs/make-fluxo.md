@@ -102,10 +102,13 @@ Cada execução tem um timestamp em `results/`. Os arquivos importantes são:
 | `kv-cache.csv` | gauge KV do servidor, se existir |
 | `server.log` | log do runtime iniciado |
 | `lifecycle.json` | readiness, primeira resposta, argv e encerramento |
+| `telemetry-timeseries.csv` | série temporal da GPU com `elapsed_s`, VRAM ocupada e utilização |
 
 ## 8. O que não é medido diretamente
 
 `nvidia-smi` mostra VRAM total usada pela GPU, não bytes exclusivamente do KV. CPU/RAM/SSD são contadores observacionais do host. O benchmark não mede o tempo de cada cópia PCIe ou RAM↔VRAM; isso exige Nsight Systems/Compute ou instrumentação CUDA no runtime.
+
+Para copiar os resultados do pod para o computador local, execute localmente: `make pull-results POD_SSH=root@HOST_DO_POD`. O alvo usa `scp`, aceita `POD_PORT`, `REMOTE_RESULTS_DIR` e `LOCAL_RESULTS_DIR`, e não apaga resultados locais. `make check-profilers` verifica `nsys` e `ncu`; profiling é complementar e deve ser executado separadamente, pois altera a latência.
 
 ## 9. Sequência recomendada
 

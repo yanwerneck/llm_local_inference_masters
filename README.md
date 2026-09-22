@@ -197,6 +197,7 @@ Cada execução cria `results/<timestamp>/` com:
 - `summary.json`, `summary.csv`, `summary.html`: resultados por fase, cenário e repetição;
 - JSONs brutos e CSVs por requisição;
 - `gpu.csv`: VRAM, utilização, temperatura e potência aproximadamente a cada segundo;
+- `telemetry-timeseries.csv`: série temporal da GPU com `elapsed_s`, percentual de VRAM ocupada e fases, pronta para gráficos;
 - `system.csv`: CPU, RAM, espaço e I/O host-wide;
 - `events.csv`: timestamps das fases;
 - `telemetry-summary.json`: médias e máximos por fase;
@@ -205,6 +206,34 @@ Cada execução cria `results/<timestamp>/` com:
 - `manifest.json` e `lifecycle.json`: versões, argumentos, modelo e falhas.
 
 Os eventos relacionam picos de VRAM/CPU a startup, primeira requisição, aquecimento, medição ou encerramento. O instrumento não mede diretamente o tempo de cada transferência PCIe/RAM↔VRAM; isso exige Nsight/CUDA instrumentation.
+
+### Baixar resultados do pod
+
+Execute no computador local, não dentro do pod:
+
+```bash
+make pull-results POD_SSH=root@HOST_DO_POD
+```
+
+Com uma porta SSH diferente:
+
+```bash
+make pull-results POD_SSH=root@HOST_DO_POD POD_PORT=2222 \
+  REMOTE_RESULTS_DIR=/workspace/chatbot-runtime-bench/results \
+  LOCAL_RESULTS_DIR=results-pod
+```
+
+O alvo usa `scp` e copia todas as execuções para `LOCAL_RESULTS_DIR`. Ele não apaga arquivos locais.
+
+### Profiling para memory-bound/compute-bound
+
+`gpu.csv` é uma série temporal de baixa intrusão. Para um roofline quantitativo, use uma execução separada com Nsight Systems (`nsys`) e Nsight Compute (`ncu`), pois eles medem kernels, FLOPs, bytes e duração com overhead. Verifique a instalação no pod com:
+
+```bash
+make check-profilers
+```
+
+Não misture Nsight com a bateria oficial de TTFT/Tokens/s: o profiler altera o tempo observado. Registre esse profiling como experimento complementar, com o mesmo modelo, prompt e contexto.
 
 ## Regras de validade
 
