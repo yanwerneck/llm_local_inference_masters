@@ -52,6 +52,7 @@
     {"user": "Como o sweep de 256 MB se traduz em tokens no 7B?", "assistant": "Com 57.344 bytes de KV por token, 256.000.000 bytes equivalem a 4.464,3 tokens; o sweep arredonda para 4.465 tokens por salto."},
     {"user": "O que eu devo comparar primeiro entre dois runtimes?", "assistant": "Compare o mesmo prompt, tokenizer, modelo, limite, temperatura, max_tokens e estado de startup. Depois observe TTFT, decode, VRAM, GPU utilization e falhas."},
     {"user": "Por que resultados de 7B e 14B nao devem ser misturados?", "assistant": "Eles possuem arquiteturas, pesos, dimensoes de KV e demandas de memoria diferentes. Uma tabela conjunta sem separar artefato perde significado experimental."},
-    {"user": "Qual e a pergunta central deste benchmark?", "assistant": "Como cada runtime transforma a mesma carga conversacional deterministica em TTFT, throughput, uso de memoria e limite de contexto sob um ambiente controlado?"}
+    {"user": "Qual e a pergunta central deste benchmark?", "assistant": "Como cada runtime transforma a mesma carga conversacional deterministica em TTFT, throughput, uso de memoria e limite de contexto sob um ambiente controlado?"},
+    {"user": "Que evidencia deve acompanhar uma conclusao de desempenho?", "assistant": "A conclusao deve apontar para requests, summary, telemetria, logs, configuracao, versoes e hash da fixture que sustentam a comparacao."}
   ]
 }
