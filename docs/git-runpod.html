@@ -29,14 +29,14 @@ git --version
 <h2 id="2-clonar-um-repositorio-publico">2. Clonar um repositório público</h2>
 <p>O repositório deste projeto é <code>yanwerneck/llm_local_inference_masters</code>. O último argumento de <code>clone</code> escolhe o nome da pasta local:</p>
 <pre><code class="language-bash">cd /workspace
-git clone https://github.com/yanwerneck/llm_local_inference_masters.git chatbot-runtime-bench
-cd chatbot-runtime-bench
+git clone https://github.com/yanwerneck/llm_local_inference_masters.git llm_local_inference_masters
+cd llm_local_inference_masters
 git status
 </code></pre>
 <p><code>clone</code> baixa código e histórico para uma pasta nova. <code>status</code> mostra a situação local; não envia nada à internet. Use uma pasta persistente do pod, mas confirme as regras de retenção e cobrança do volume: código e resultados podem desaparecer ao encerrar um pod sem armazenamento persistente.</p>
 <p>Você <strong>não precisa configurar nome/e-mail para apenas baixar e executar</strong>. Agora siga a instalação do <a href="../README.md">README</a>, criando um venv separado.</p>
 <h2 id="3-atualizar-depois">3. Atualizar depois</h2>
-<pre><code class="language-bash">cd /workspace/chatbot-runtime-bench
+<pre><code class="language-bash">cd /workspace/llm_local_inference_masters
 git status
 git pull --ff-only
 </code></pre>
@@ -54,11 +54,11 @@ cat /workspace/chatbench-ssh/id_ed25519.pub
 </code></pre>
 <p>O diretório guarda a chave; <code>chmod 700</code> limita seu acesso ao usuário proprietário. <code>ssh-keygen</code> cria o par de chaves e pergunta uma senha opcional. Se o arquivo já existir, <strong>não sobrescreva</strong>: escolha outro nome. O <code>cat</code> mostra somente a chave <strong>pública</strong>, terminada em <code>.pub</code>.</p>
 <p>No GitHub, abra o repositório → Settings → Deploy keys → Add deploy key. Cole a chave pública e deixe <strong>Allow write access desmarcado</strong>. Nunca cole ou compartilhe <code>id_ed25519</code> sem <code>.pub</code>.</p>
-<pre><code class="language-bash">git -c core.sshCommand='ssh -i /workspace/chatbench-ssh/id_ed25519 -o IdentitiesOnly=yes' clone git@github.com:yanwerneck/llm_local_inference_masters.git /workspace/chatbot-runtime-bench
+<pre><code class="language-bash">git -c core.sshCommand='ssh -i /workspace/chatbench-ssh/id_ed25519 -o IdentitiesOnly=yes' clone git@github.com:yanwerneck/llm_local_inference_masters.git /workspace/llm_local_inference_masters
 </code></pre>
 <p>Na primeira conexão, confira a impressão digital apresentada com a <a href="https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/githubs-ssh-key-fingerprints">lista oficial do GitHub</a> antes de aceitar. Não desative a verificação do host.</p>
 <p>Para que os próximos pulls usem a mesma chave:</p>
-<pre><code class="language-bash">cd /workspace/chatbot-runtime-bench
+<pre><code class="language-bash">cd /workspace/llm_local_inference_masters
 git config core.sshCommand 'ssh -i /workspace/chatbench-ssh/id_ed25519 -o IdentitiesOnly=yes'
 </code></pre>
 <p>Isso modifica apenas a configuração desse repositório. Se a chave tiver senha, o SSH poderá solicitá-la. Quando terminar de usar o pod, revogue a deploy key no GitHub. Um volume persistente também pode reter a chave privada: trate-o como sensível.</p>

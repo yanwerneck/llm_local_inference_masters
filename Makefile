@@ -5,7 +5,9 @@ SHELL := /bin/bash
 
 # Caminhos podem ser sobrescritos na chamada:
 # make quantize-q8 LLAMA_CPP_DIR=/mnt/llama.cpp HF_MODEL_DIR=/mnt/qwen
-BENCH_VENV ?= /workspace/chatbot-runtime-bench/.venv
+# O repositório é autocontido. Usar CURDIR evita assumir que ele foi clonado
+# em um nome específico dentro de /workspace.
+BENCH_VENV ?= $(CURDIR)/.venv
 SYSTEM_PYTHON ?= python3
 PYTHON ?= $(BENCH_VENV)/bin/python
 HF ?= $(BENCH_VENV)/bin/hf
@@ -76,7 +78,7 @@ BENCH_WARMUP ?= 3
 BENCH_STARTUP_TIMEOUT ?= 1800
 POD_SSH ?=
 POD_PORT ?= 22
-REMOTE_BENCH_DIR ?= /workspace/chatbot-runtime-bench
+REMOTE_BENCH_DIR ?= $(CURDIR)
 REMOTE_RESULTS_DIR ?= $(REMOTE_BENCH_DIR)/results
 LOCAL_RESULTS_DIR ?= results-from-pod
 

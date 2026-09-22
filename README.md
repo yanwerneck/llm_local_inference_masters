@@ -19,17 +19,17 @@ python3 --version
 mkdir -p /workspace
 cd /workspace
 git clone https://github.com/yanwerneck/llm_local_inference_masters.git
-cd /workspace/llm_local_inference_masters/chatbot-runtime-bench
+cd /workspace/llm_local_inference_masters
 ```
 
-O repositório é público, portanto HTTPS é o caminho mais simples para clonar no Pod e não exige chave SSH. O `hf` é instalado dentro do venv pelo `make install-benchmark`; não é necessário instalar um `hf` separado no sistema. Depois da instalação, verifique com `/workspace/chatbot-runtime-bench/.venv/bin/hf --help` ou deixe o Make chamá-lo automaticamente.
+O repositório é público, portanto HTTPS é o caminho mais simples para clonar no Pod e não exige chave SSH. O `hf` é instalado dentro do venv pelo `make install-benchmark`; não é necessário instalar um `hf` separado no sistema. Depois da instalação, verifique com `./.venv/bin/hf --help` ou deixe o Make chamá-lo automaticamente.
 
 ### SSH no Pod (somente se precisar fazer push)
 
 O erro `Permission denied (publickey)` significa que o Pod não tem uma chave SSH autorizada na sua conta GitHub. Para configurar uma chave própria no Pod:
 
 ```bash
-ssh-keygen -t ed25519 -C "43014591+yanwerneck@users.noreply.github.com"
+ssh-keygen -t ed25519 -C "runpod-github-key"
 cat ~/.ssh/id_ed25519.pub
 ```
 
@@ -52,7 +52,7 @@ Não copie a chave privada do seu computador pessoal para um Pod descartável. A
 
 ```bash
 git clone https://github.com/yanwerneck/llm_local_inference_masters.git
-cd llm_local_inference_masters/chatbot-runtime-bench
+cd llm_local_inference_masters
 make prepare-benchmark MODEL_SIZE=7B
 make prepare-ollama MODEL_SIZE=7B
 make bench MODEL_SIZE=7B
@@ -120,7 +120,7 @@ make prepare-benchmark MODEL_SIZE=7B
 make prepare-benchmark MODEL_SIZE=14B
 ```
 
-O cliente usa por padrão `/workspace/chatbot-runtime-bench/.venv`. A criação e instalação podem ser executadas isoladamente:
+O cliente usa por padrão `.venv` na raiz do repositório. A criação e instalação podem ser executadas isoladamente:
 
 ```bash
 make install-benchmark
@@ -251,7 +251,7 @@ Com uma porta SSH diferente:
 
 ```bash
 make pull-results POD_SSH=root@HOST_DO_POD POD_PORT=2222 \
-  REMOTE_RESULTS_DIR=/workspace/chatbot-runtime-bench/results \
+  REMOTE_RESULTS_DIR=/workspace/llm_local_inference_masters/results \
   LOCAL_RESULTS_DIR=results-pod
 ```
 
