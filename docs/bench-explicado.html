@@ -1,0 +1,216 @@
+<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Bench explicado: base, replay e sweep</title><style>
+:root{color-scheme:light}*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:#f6f3ec;color:#193835;font:17px/1.8 system-ui,sans-serif}main{max-width:1020px;margin:auto;padding:48px 28px}h1{font-size:clamp(36px,6vw,66px);line-height:1.1;letter-spacing:-1.8px}h2{font-size:28px;line-height:1.3;border-top:1px solid #cdd8ce;padding-top:32px;margin-top:44px;scroll-margin-top:20px}h3{font-size:22px}a{color:#136d58;text-underline-offset:4px}a:focus-visible{outline:3px solid #b54e27;outline-offset:3px}pre{overflow:auto;background:#193835;color:#f4f7ee;padding:22px;border-radius:12px;font-size:14px;line-height:1.6}code{font-family:ui-monospace,monospace;overflow-wrap:anywhere}p code,li code,td code{background:#e0e9df;padding:2px 5px;border-radius:4px}table{border-collapse:collapse;width:100%;font-size:14px}td,th{border-bottom:1px solid #cdd8ce;padding:12px;text-align:left;vertical-align:top}th{background:#e1eade}li{margin:9px 0}.table-wrap{overflow:auto}.eyebrow{font-size:12px;letter-spacing:2px;color:#136d58;font-weight:750}.toc{background:#fffdf7;border:1px solid #d3ddd0;padding:15px 25px;border-radius:12px;font-size:14px}.toc ul{list-style:none;padding-left:18px}blockquote{border-left:4px solid #b54e27;background:#fff0de;padding:8px 22px;margin:25px 0}footer{border-top:1px solid #cdd8ce;margin-top:40px;padding-top:20px;font-size:13px}.nav{display:flex;flex-wrap:wrap;gap:20px;font-size:14px}@media(max-width:650px){main{padding:25px 18px}body{font-size:16px}h2{font-size:25px}}@media print{body{background:white;font-size:11pt}h1{font-size:32pt}nav,.toc{display:none}pre{white-space:pre-wrap;color:black;background:#eee}.table-wrap{overflow:visible}}@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+</style></head><body><main><div class="eyebrow">CHATBOT RUNTIME BENCH · GUIDELLM · UM USUÁRIO</div><nav class="nav"><a href="bench-explicado.html">Bench explicado</a><a href="metodologia.html">Método</a><a href="git-runpod.html">Git no pod</a><a href="../README.md">Instalação e execução</a></nav><div class="toc">
+<ul>
+<li><a href="#bench-explicado">Bench explicado</a><ul>
+<li><a href="#a-ideia-em-uma-frase">A ideia em uma frase</a></li>
+<li><a href="#o-mapa-completo">O mapa completo</a></li>
+<li><a href="#nao-confunda-os-tres-conceitos">Não confunda os três conceitos</a></li>
+<li><a href="#o-que-acontece-em-uma-execucao">O que acontece em uma execução</a><ul>
+<li><a href="#1-preparacao-fora-do-relogio">1. Preparação — fora do relógio</a></li>
+<li><a href="#2-partida-e-readiness">2. Partida e readiness</a></li>
+<li><a href="#3-primeira-resposta">3. Primeira resposta</a></li>
+<li><a href="#4-warmup">4. Warmup</a></li>
+<li><a href="#5-medicao-oficial">5. Medição oficial</a></li>
+<li><a href="#6-referencia-final-e-cleanup">6. Referência final e cleanup</a></li>
+</ul>
+</li>
+<li><a href="#o-que-e-ttft-decode-e-latencia-total">O que é TTFT, decode e latência total?</a></li>
+<li><a href="#o-segundo-bench-sweep-de-contextokv">O segundo bench: sweep de contexto/KV</a></li>
+<li><a href="#smoke-base-e-sweep-quando-usar-cada-um">Smoke, base e sweep: quando usar cada um</a></li>
+<li><a href="#como-ler-os-resultados">Como ler os resultados</a></li>
+<li><a href="#perguntas-que-o-benchmark-responde">Perguntas que o benchmark responde</a></li>
+</ul>
+</li>
+</ul>
+</div>
+<h1 id="bench-explicado">Bench explicado</h1>
+<h2 id="a-ideia-em-uma-frase">A ideia em uma frase</h2>
+<p>O benchmark mede a experiência de <strong>uma pessoa usando um chatbot</strong>, uma requisição por vez, observando o servidor por HTTP/SSE e registrando latência, tokens, memória e utilização da GPU.</p>
+<p>Ele não é um teste de usuários simultâneos, não mede qualidade das respostas e não executa a rede neural diretamente. Quem executa a inferência é o runtime: vLLM, llama.cpp ou Ollama. O projeto prepara o ambiente, inicia o runtime quando solicitado, envia a carga e organiza as evidências.</p>
+<h2 id="o-mapa-completo">O mapa completo</h2>
+<pre><code class="language-text">prepare-&lt;runtime&gt;
+        │ modelo + tokenizer + configs + runtime validado
+        ▼
+smoke-&lt;runtime&gt; ── diagnóstico rápido
+        │
+        ▼
+bench-&lt;runtime&gt;
+        ├── bateria base: short / medium / long
+        │     └── independent, replay ou closed-loop
+        └── sweep de contexto/KV: 1024, 2048, 3072, ...
+</code></pre>
+<p><code>bench-all</code> executa essa combinação para vLLM, llama.cpp e Ollama. <code>smoke-all</code> executa somente o diagnóstico rápido dos três.</p>
+<h2 id="nao-confunda-os-tres-conceitos">Não confunda os três conceitos</h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Conceito</th>
+<th>O que é</th>
+<th>O que muda</th>
+<th>Para que serve</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Bateria base</td>
+<td><code>bench-&lt;runtime&gt;</code> chamando <code>bench.py</code></td>
+<td>cenários, repetições e fases no mesmo processo</td>
+<td>medir TTFT, decode e latência ponta a ponta</td>
+</tr>
+<tr>
+<td><code>replay</code></td>
+<td>modo <code>BENCH_MODE=replay</code> da bateria base</td>
+<td>envia histórico com respostas fixas do fixture</td>
+<td>repetir exatamente uma conversa conhecida</td>
+</tr>
+<tr>
+<td><code>closed-loop</code></td>
+<td>modo conversacional da bateria base</td>
+<td>coloca a resposta real no turno seguinte</td>
+<td>estudar crescimento de histórico com respostas reais</td>
+</tr>
+<tr>
+<td>Sweep de contexto/KV</td>
+<td><code>kv-sweep-&lt;runtime&gt;</code>, incluído no alvo formal</td>
+<td>reinicia o servidor e aumenta o contexto a cada ponto</td>
+<td>observar custo de contexto, VRAM, TTFT e falhas</td>
+</tr>
+</tbody>
+</table></div>
+<p><code>replay</code> não é o sweep. Replay é uma política de mensagens; sweep é uma série de execuções com tamanhos de contexto diferentes. É possível usar <code>SWEEP_MODE=replay</code>, mas ainda serão dois eixos experimentais diferentes.</p>
+<h2 id="o-que-acontece-em-uma-execucao">O que acontece em uma execução</h2>
+<h3 id="1-preparacao-fora-do-relogio">1. Preparação — fora do relógio</h3>
+<p><code>prepare-vllm</code>, <code>prepare-llama</code> e <code>prepare-ollama</code> dependem da etapa comum <code>prepare-benchmark</code>. Ela confere modelo, tokenizer, configs, imports, assinatura e arquivos locais. A preparação não inicia uma medição e não entra na latência.</p>
+<pre><code class="language-bash">make prepare-all MODEL_SIZE=7B
+</code></pre>
+<p>O alvo por runtime já chama a etapa comum. Não é necessário executar <code>prepare-benchmark</code> manualmente antes.</p>
+<h3 id="2-partida-e-readiness">2. Partida e readiness</h3>
+<p>Com <code>--launch</code>, o benchmark inicia o processo do runtime em foreground e registra o grupo criado. Em seguida consulta <code>/v1/models</code> até encontrar o alias esperado. Isso mede <code>process_to_api_observed_s</code>, mas <strong>API disponível não significa necessariamente modelo já residente na GPU</strong>.</p>
+<p>Se o servidor já existia e <code>--launch</code> não foi usado, a idade do processo e o carregamento dos pesos são desconhecidos. O cliente mede apenas a primeira requisição que ele observou.</p>
+<h3 id="3-primeira-resposta">3. Primeira resposta</h3>
+<p>O primeiro POST é enviado sem uma geração anterior escondida. O cliente mede:</p>
+<ul>
+<li>tempo do processo até o primeiro conteúdo;</li>
+<li>TTFT da requisição;</li>
+<li>tempo total até o fim do stream;</li>
+<li><code>usage</code>, quando o servidor fornece contagem de tokens.</li>
+</ul>
+<p>Essa é uma <strong>sonda de primeira resposta</strong>, registrada em <code>first-request.json</code> e no lifecycle. Ela não é misturada ao p50 da fase <code>measure</code>.</p>
+<h3 id="4-warmup">4. Warmup</h3>
+<p>O warmup envia requisições reais antes da medição formal. Elas podem aquecer compilação, buffers, alocadores, HTTP/SSE, tokenizer, prefixos e estruturas KV. Por padrão são três por cenário e repetição.</p>
+<p>Warmup não é TTFT:</p>
+<pre><code class="language-text">TTFT  = uma métrica: POST → primeiro conteúdo daquela requisição
+warmup = uma fase: requisições usadas para preparar o estado do processo
+</code></pre>
+<p>O warmup não limpa caches, não prova estabilidade e não entra na fase <code>measure</code>. Seus dados ficam registrados como <code>phase=warmup</code> para investigar tendência. Com <code>BENCH_WARMUP=0</code>, a execução fica mais barata, mas mais dependente do estado inicial.</p>
+<h3 id="5-medicao-oficial">5. Medição oficial</h3>
+<p>Na fase <code>measure</code>, o cliente envia uma requisição por vez. Para cada resposta bem-sucedida calcula TTFT, intervalo entre tokens, tokens/s de decode, tokens/s efetivos e latência total. A bateria formal padrão usa 50 requisições, três repetições e três warmups por cenário.</p>
+<p><code>short</code>, <code>medium</code> e <code>long</code> representam aproximadamente 256, 2048 e 8192 tokens de entrada, com teto de 128 tokens de saída. O servidor informa os comprimentos reais; esses valores devem ser conferidos antes da comparação.</p>
+<h3 id="6-referencia-final-e-cleanup">6. Referência final e cleanup</h3>
+<p>O prompt inicial é repetido no final como referência aquecida. Depois, o launcher encerra somente o processo criado pelo benchmark e fecha os coletores. A referência ajuda a comparar o primeiro acesso com um estado posterior, mas pode aproveitar cache de prefixo; não isola sozinha um único custo.</p>
+<h2 id="o-que-e-ttft-decode-e-latencia-total">O que é TTFT, decode e latência total?</h2>
+<pre><code class="language-text">envio do POST ───── primeiro conteúdo ───── últimos tokens ───── fim HTTP
+                  ←──── TTFT ────→
+                  ←──────── geração/decode ────────→
+←──────────────── latência ponta a ponta ───────────────────────→
+</code></pre>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Métrica</th>
+<th>Fórmula conceitual</th>
+<th style="text-align: right;">Inclui TTFT?</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>TTFT</td>
+<td>primeiro conteúdo − início do POST</td>
+<td style="text-align: right;">é o próprio intervalo</td>
+</tr>
+<tr>
+<td>Decode tokens/s</td>
+<td>tokens de saída ÷ tempo entre primeiro e último token</td>
+<td style="text-align: right;">não</td>
+</tr>
+<tr>
+<td>Tokens/s efetivos</td>
+<td>tokens de saída ÷ latência total</td>
+<td style="text-align: right;">sim</td>
+</tr>
+<tr>
+<td>Latência ponta a ponta</td>
+<td>fim da resposta − início do POST</td>
+<td style="text-align: right;">sim</td>
+</tr>
+</tbody>
+</table></div>
+<p>Uma configuração pode ter TTFT menor e decode mais lento. Também pode gerar menos tokens e parecer mais rápida na taxa efetiva. Por isso o relatório preserva contagens de entrada/saída e não compara uma métrica isolada.</p>
+<h2 id="o-segundo-bench-sweep-de-contextokv">O segundo bench: sweep de contexto/KV</h2>
+<p>O sweep não continua a mesma amostra estatística da bateria base. Ele reinicia o runtime em cada ponto para alterar o limite de contexto e medir o efeito de cargas crescentes:</p>
+<pre><code class="language-text">contexto 1024 → inicia servidor → executa bench.py → encerra
+contexto 2048 → inicia servidor → executa bench.py → encerra
+contexto 3072 → inicia servidor → executa bench.py → encerra
+</code></pre>
+<p>Cada ponto tem startup, primeira resposta, warmup, medição, telemetria e diretório próprio. Por isso o sweep é mais lento: o custo dominante é reiniciar e carregar o runtime repetidamente, não apenas incrementar 1024 tokens.</p>
+<p>Para exploração rápida:</p>
+<pre><code class="language-bash">make quick-sweep-vllm MODEL_SIZE=7B SWEEP_MAX_CONTEXT=1024
+</code></pre>
+<p>Para uma grade mais espaçada, altere <code>SWEEP_STEP=2048</code> ou <code>4096</code>. Para investigar uma região específica, use passo menor. O ponto falho não vira zero nem é substituído por outro modelo.</p>
+<h2 id="smoke-base-e-sweep-quando-usar-cada-um">Smoke, base e sweep: quando usar cada um</h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Comando</th>
+<th style="text-align: right;">Duração</th>
+<th>O que valida</th>
+<th style="text-align: right;">É resultado formal?</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>smoke-&lt;runtime&gt;</code></td>
+<td style="text-align: right;">curta</td>
+<td>processo, readiness, API, tokenizer, streaming e cleanup</td>
+<td style="text-align: right;">não</td>
+</tr>
+<tr>
+<td><code>bench-&lt;runtime&gt;</code></td>
+<td style="text-align: right;">longa</td>
+<td>bateria base + sweep do runtime</td>
+<td style="text-align: right;">sim, se todos os blocos forem completos</td>
+</tr>
+<tr>
+<td><code>quick-sweep-&lt;runtime&gt;</code></td>
+<td style="text-align: right;">curta por ponto</td>
+<td>integração do launcher e contexto</td>
+<td style="text-align: right;">não; é exploratório</td>
+</tr>
+<tr>
+<td><code>bench-all</code></td>
+<td style="text-align: right;">mais longa</td>
+<td>os três runtimes, continuando após falhas</td>
+<td style="text-align: right;">sim, por runtime e protocolo</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="como-ler-os-resultados">Como ler os resultados</h2>
+<p>Cada execução nova fica em:</p>
+<pre><code class="language-text">results/&lt;runtime&gt;/&lt;timestamp&gt;/&lt;nome-humano&gt;/
+├── html/   summary.html, lifecycle.html e gráficos SVG
+├── json/   manifestos, métricas e respostas brutas
+├── csv/    GPU, CPU/RAM, eventos e requests
+└── logs/   server.log e telemetry.log
+</code></pre>
+<p>Comece por <code>html/summary.html</code>. Depois confira <code>json/manifest.json</code> para status, configuração e contagens; <code>csv/gpu.csv</code> para memória/utilização; e <code>logs/server.log</code> para startup e erros. Uma mensagem no log de shutdown depois de HTTP 200 não deve ser classificada automaticamente como falha: confira o status do manifesto e o código do alvo.</p>
+<h2 id="perguntas-que-o-benchmark-responde">Perguntas que o benchmark responde</h2>
+<ul>
+<li>O runtime está pronto e serve o alias esperado?</li>
+<li>Qual é o TTFT da primeira resposta e das requisições aquecidas?</li>
+<li>Como o tempo entre tokens e a latência total mudam com o cenário?</li>
+<li>O histórico conversacional real ou reproduzido muda a carga?</li>
+<li>Como memória GPU, GPU-utilização e TTFT se comportam quando o contexto cresce?</li>
+<li>Em qual ponto o runtime falha por startup, contexto ou memória?</li>
+</ul>
+<p>Ele não responde sozinho quanto tempo cada kernel CUDA levou, se a GPU está memory-bound, qual runtime tem melhor qualidade de resposta ou como o sistema atende muitos usuários simultâneos. Essas perguntas exigem profiling, avaliação de qualidade ou um benchmark concorrente separado.</p><footer>HTML autônomo, sem telemetria ou dependências externas. Fontes e limitações no texto. Editável em Markdown; gere novamente com python scripts/build_docs.py.</footer></main></body></html>

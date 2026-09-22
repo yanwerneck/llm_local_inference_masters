@@ -4,7 +4,7 @@ Benchmark acadêmico de inferência local para comparar **vLLM, llama.cpp e Olla
 
 O fluxo oficial é baseado no `Makefile`. O benchmark não baixa modelos, não troca artefatos automaticamente e não faz fallback quando um runtime falha. Download, criação de diretórios e instalação são preparação; não entram nos tempos medidos.
 
-Documentação detalhada: [fluxo completo do Make](docs/make-fluxo.md) · [metodologia](docs/metodologia.html) · [código explicado](docs/codigo-explicado.html) · [resultados reais do Pod de 22/09/2026](docs/resultados-pod-20260922.md).
+Documentação detalhada: [bench explicado](docs/bench-explicado.html) · [fluxo completo do Make](docs/make-fluxo.md) · [metodologia](docs/metodologia.html) · [código explicado](docs/codigo-explicado.html) · [resultados reais do Pod de 22/09/2026](docs/resultados-pod-20260922.md).
 
 ## Preparar um pod novo
 
