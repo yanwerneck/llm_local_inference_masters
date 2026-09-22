@@ -42,6 +42,7 @@ Verifica presença, tamanho, assinatura binária `GGUF` e imprime SHA-256. Não 
 ### Validações finais
 
 O alvo instala `requirements.txt` no `PYTHON` escolhido, importa as bibliotecas do cliente e valida JSONs. A presença do runtime é verificada separadamente por `prepare-vllm`, `prepare-llama` ou `prepare-ollama`; assim, preparar o modelo não é bloqueado por um runtime que ainda não foi instalado. No caso do llama.cpp, `prepare-llama` procura o `llama-server` já instalado no `PATH`, como ocorre na imagem do pod, e o launch JSON usa o comando `llama-server`. A compilação local fica disponível somente quando necessária, via `make build-llama`.
+Os três templates seguem esse mesmo contrato: chamam `vllm`, `llama-server` e `ollama` pelo `PATH`, sem assumir caminhos internos de venv ou `/usr/local/bin`. Use `VLLM_BIN`, `LLAMA_SERVER_BIN` ou `OLLAMA_BIN` para sobrescrever o executável quando a imagem utilizar outro local.
 
 ## 3. Preparação do Ollama
 

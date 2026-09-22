@@ -85,6 +85,8 @@ Assim, a ausência de vLLM não impede preparar o modelo para llama.cpp ou Ollam
 
 `prepare-llama` assume que a imagem do pod já fornece `llama-server` no `PATH` e valida esse executável. O template chama simplesmente `llama-server`, portanto não depende de um caminho específico de `/workspace`. Se a imagem não tiver o binário, use `make build-llama` explicitamente (com CMake e toolkit CUDA) ou instale o runtime no ambiente do pod.
 
+O mesmo princípio vale para os três runtimes: os templates chamam `vllm`, `llama-server` e `ollama` pelo `PATH`, sem assumir `/workspace/vllm-runtime/.venv` ou `/usr/local/bin/ollama`. Se a imagem usar outro local, coloque o diretório no `PATH` ou sobrescreva `VLLM_BIN`, `LLAMA_SERVER_BIN` ou `OLLAMA_BIN`.
+
 ```bash
 make prepare-benchmark MODEL_SIZE=7B
 make prepare-benchmark MODEL_SIZE=14B

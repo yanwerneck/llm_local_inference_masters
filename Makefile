@@ -62,10 +62,12 @@ OLLAMA_LAUNCH ?= configs/launch-ollama-14b-gguf.json
 else
 $(error MODEL_SIZE deve ser 7B ou 14B)
 endif
-VLLM_BIN ?= $(shell command -v vllm 2>/dev/null || printf '/workspace/vllm-runtime/.venv/bin/vllm')
+# A imagem do pod normalmente expõe vLLM no PATH. O launch JSON usa o nome
+# `vllm`, evitando depender do caminho do venv usado para construir a imagem.
+VLLM_BIN ?= $(shell command -v vllm 2>/dev/null || printf 'vllm')
 # A imagem do pod já fornece llama-server no PATH.  O build local continua
 # disponível em `make build-llama`, mas não é pré-requisito do benchmark.
-LLAMA_SERVER_BIN ?= $(shell command -v llama-server 2>/dev/null || printf 'llama-server')
+LLAMA_SERVER_BIN ?= $(shell p=$$(command -v llama-server 2>/dev/null || true); if test -x "$$p"; then printf '%s' "$$p"; else found=; for p in /usr/local/lib/ollama/llama-server /workspace/llama.cpp/build/bin/llama-server /app/llama.cpp/build/bin/llama-server; do if test -x "$$p"; then printf '%s' "$$p"; found=1; break; fi; done; test "$${found:-}" = 1 || printf 'llama-server'; fi)
 OLLAMA_BIN ?= $(shell command -v ollama 2>/dev/null || printf 'ollama')
 BENCH_SCENARIOS ?= short medium long
 BENCH_REQUESTS ?= 50
@@ -200,13 +202,13 @@ prepare-benchmark: install-benchmark download-model download-tokenizer verify-gg
 
 check-runtimes:
 	missing=0
-	if test -x "$(VLLM_BIN)"; then echo "[RUNTIME] vLLM: $(VLLM_BIN)"; "$(VLLM_BIN)" --help >/dev/null; else echo "[RUNTIME] vLLM ausente: $(VLLM_BIN)"; missing=1; fi
+	if command -v "$(VLLM_BIN)" >/dev/null 2>&1 || test -x "$(VLLM_BIN)"; then echo "[RUNTIME] vLLM: $(VLLM_BIN)"; "$(VLLM_BIN)" --help >/dev/null; else echo "[RUNTIME] vLLM ausente: $(VLLM_BIN)"; missing=1; fi
 	if test -x "$(LLAMA_SERVER_BIN)"; then echo "[RUNTIME] llama-server: $(LLAMA_SERVER_BIN)"; "$(LLAMA_SERVER_BIN)" --help >/dev/null; else echo "[RUNTIME] llama-server ausente: $(LLAMA_SERVER_BIN)"; missing=1; fi
 	if command -v "$(OLLAMA_BIN)" >/dev/null 2>&1; then echo "[RUNTIME] Ollama: $(OLLAMA_BIN)"; "$(OLLAMA_BIN)" --version; else echo "[RUNTIME] Ollama ausente: $(OLLAMA_BIN)"; missing=1; fi
 	if test "$$missing" -ne 0; then echo '[RUNTIME] instale o runtime ausente no ambiente próprio ou sobrescreva VLLM_BIN/LLAMA_SERVER_BIN/OLLAMA_BIN'; exit 1; fi
 
 prepare-vllm: prepare-benchmark
-	@test -x "$(VLLM_BIN)" || { echo "vLLM ausente: $(VLLM_BIN). Instale-o no venv do runtime ou use VLLM_BIN=..."; exit 1; }
+	@command -v "$(VLLM_BIN)" >/dev/null 2>&1 || test -x "$(VLLM_BIN)" || { echo "vLLM ausente: $(VLLM_BIN). Verifique o PATH ou use VLLM_BIN=/caminho/para/vllm"; exit 1; }
 	"$(VLLM_BIN)" --help >/dev/null
 	@echo '[PREPARE vLLM] cliente, modelo, tokenizer e executável validados'
 
@@ -265,7 +267,7 @@ bench-vllm: prepare-vllm
 
 bench-llama: prepare-llama
 	@echo '[BENCH llama.cpp] início: short/medium/long + telemetria + KV sweep embutido'
-	HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_HUB_ENABLE_HF_TRANSFER=0 \
+	PATH="$(dir $(LLAMA_SERVER_BIN)):$${PATH}" HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_HUB_ENABLE_HF_TRANSFER=0 \
 		$(PYTHON) bench.py run --config "$(LLAMA_CONFIG)" \
 		--local-model-path "$(LLAMA_MODEL_DIR)" --launch "$(LLAMA_LAUNCH)" \
 		--launch-extra-args $(LLAMA_EXTRA_ARGS) \
@@ -273,7 +275,7 @@ bench-llama: prepare-llama
 		--repetitions "$(BENCH_REPETITIONS)" --warmup "$(BENCH_WARMUP)" \
 		--collect-kv-metrics --startup-timeout "$(BENCH_STARTUP_TIMEOUT)"
 	@echo '[BENCH llama.cpp] bateria base concluída; iniciando sweep KV em passos de 1024'
-	HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_HUB_ENABLE_HF_TRANSFER=0 \
+	PATH="$(dir $(LLAMA_SERVER_BIN)):$${PATH}" HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_HUB_ENABLE_HF_TRANSFER=0 \
 		$(PYTHON) scripts/run_kv_sweep.py --runtime-label llama.cpp \
 		--config "$(LLAMA_CONFIG)" --launch "$(LLAMA_LAUNCH)" \
 		--local-model-path "$(LLAMA_MODEL_DIR)" --python "$(PYTHON)" \
