@@ -49,6 +49,7 @@ def main() -> int:
                         help="Flag do servidor que controla contexto; use none quando ele é configurado fora do argv.")
     parser.add_argument("--launch-extra-args", nargs="*", default=[],
                         help="Argumentos adicionais acrescentados ao launch em todos os pontos.")
+    parser.add_argument("--launch-executable", help="Substitui argv[0] do launch em todos os pontos.")
     args = parser.parse_args()
     config = json.loads(Path(args.config).read_text())
     root = Path(args.results)
@@ -72,6 +73,8 @@ def main() -> int:
                        "--repetitions", str(args.repetitions), "--warmup", str(args.warmup),
                        "--collect-kv-metrics", "--startup-timeout", str(args.startup_timeout),
                        "--results", str(root)]
+            if args.launch_executable:
+                command.extend(["--launch-executable", args.launch_executable])
             print(f"\n[KV-SWEEP] runtime={args.runtime_label} input_tokens={context} "
                   f"server_max_model_len={context + 128 + 256} "
                   f"requests={args.requests} repetitions={args.repetitions}", flush=True)

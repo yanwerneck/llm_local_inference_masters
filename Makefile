@@ -239,6 +239,7 @@ smoke-vllm: verify-gguf
 		--config "$(VLLM_CONFIG)" \
 		--local-model-path "$(VLLM_MODEL_DIR)" \
 		--launch "$(VLLM_LAUNCH)" \
+		--launch-executable "$(VLLM_BIN)" \
 		--launch-extra-args $(VLLM_EXTRA_ARGS) \
 		--smoke --scenarios short --startup-timeout 1800
 
@@ -249,6 +250,7 @@ bench-vllm: prepare-vllm
 		--config "$(VLLM_CONFIG)" \
 		--local-model-path "$(VLLM_MODEL_DIR)" \
 		--launch "$(VLLM_LAUNCH)" \
+		--launch-executable "$(VLLM_BIN)" \
 		--scenarios $(BENCH_SCENARIOS) \
 		--requests "$(BENCH_REQUESTS)" \
 		--repetitions "$(BENCH_REPETITIONS)" \
@@ -260,6 +262,8 @@ bench-vllm: prepare-vllm
 		$(PYTHON) scripts/run_kv_sweep.py --runtime-label vllm \
 		--config "$(VLLM_CONFIG)" --launch "$(VLLM_LAUNCH)" \
 		--local-model-path "$(VLLM_MODEL_DIR)" --python "$(PYTHON)" \
+		--launch-executable "$(VLLM_BIN)" \
+		--launch-executable "$(VLLM_BIN)" \
 		--launch-extra-args $(VLLM_EXTRA_ARGS) \
 		--requests "$(BENCH_REQUESTS)" --repetitions "$(BENCH_REPETITIONS)" \
 		--warmup "$(BENCH_WARMUP)" --startup-timeout "$(BENCH_STARTUP_TIMEOUT)" \
@@ -270,6 +274,7 @@ bench-llama: prepare-llama
 	PATH="$(dir $(LLAMA_SERVER_BIN)):$${PATH}" HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_HUB_ENABLE_HF_TRANSFER=0 \
 		$(PYTHON) bench.py run --config "$(LLAMA_CONFIG)" \
 		--local-model-path "$(LLAMA_MODEL_DIR)" --launch "$(LLAMA_LAUNCH)" \
+		--launch-executable "$(LLAMA_SERVER_BIN)" \
 		--launch-extra-args $(LLAMA_EXTRA_ARGS) \
 		--scenarios $(BENCH_SCENARIOS) --requests "$(BENCH_REQUESTS)" \
 		--repetitions "$(BENCH_REPETITIONS)" --warmup "$(BENCH_WARMUP)" \
@@ -279,6 +284,7 @@ bench-llama: prepare-llama
 		$(PYTHON) scripts/run_kv_sweep.py --runtime-label llama.cpp \
 		--config "$(LLAMA_CONFIG)" --launch "$(LLAMA_LAUNCH)" \
 		--local-model-path "$(LLAMA_MODEL_DIR)" --python "$(PYTHON)" \
+		--launch-executable "$(LLAMA_SERVER_BIN)" \
 		--launch-extra-args $(LLAMA_EXTRA_ARGS) \
 		--context-flag=--ctx-size \
 		--requests "$(BENCH_REQUESTS)" --repetitions "$(BENCH_REPETITIONS)" \
@@ -291,6 +297,7 @@ bench-ollama: prepare-ollama
 	HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_HUB_ENABLE_HF_TRANSFER=0 \
 		$(PYTHON) bench.py run --config "$(OLLAMA_CONFIG)" \
 		--local-model-path "$(OLLAMA_MODEL_DIR)" --launch "$(OLLAMA_LAUNCH)" \
+		--launch-executable "$(OLLAMA_BIN)" \
 		--launch-extra-args $(OLLAMA_EXTRA_ARGS) \
 		--scenarios $(BENCH_SCENARIOS) --requests "$(BENCH_REQUESTS)" \
 		--repetitions "$(BENCH_REPETITIONS)" --warmup "$(BENCH_WARMUP)" \
@@ -300,6 +307,7 @@ bench-ollama: prepare-ollama
 		$(PYTHON) scripts/run_kv_sweep.py --runtime-label ollama \
 		--config "$(OLLAMA_CONFIG)" --launch "$(OLLAMA_LAUNCH)" \
 		--local-model-path "$(OLLAMA_MODEL_DIR)" --python "$(PYTHON)" \
+		--launch-executable "$(OLLAMA_BIN)" \
 		--launch-extra-args $(OLLAMA_EXTRA_ARGS) \
 		--context-flag none \
 		--requests "$(BENCH_REQUESTS)" --repetitions "$(BENCH_REPETITIONS)" \
