@@ -220,7 +220,8 @@ class Monitor:
         with (self.output / "gpu.csv").open("w", newline="", encoding="utf-8") as handle, \
              (self.output / "system.csv").open("w", newline="", encoding="utf-8") as system_handle:
             writer = csv.writer(handle)
-            writer.writerow(["utc", "phase", "index", "name", "used_mib", "total_mib", "gpu_util_pct", "temperature_c", "power_w"])
+            writer.writerow(["utc", "phase", "index", "name", "used_mib", "total_mib", "used_gib", "total_gib",
+                             "gpu_util_pct", "memory_util_pct", "temperature_c", "power_w"])
             system_writer = csv.writer(system_handle)
             system_writer.writerow(["utc", "phase", "cpu_util_pct", "ram_used_mib", "ram_available_mib", "ram_total_mib",
                                     "load1", "root_disk_used_mib", "root_disk_free_mib", "disk_read_bytes", "disk_write_bytes"])
@@ -231,16 +232,19 @@ class Monitor:
                 sample_number += 1
                 phase = self.phase
                 utc = datetime.now(timezone.utc).isoformat()
-                result = capture(["nvidia-smi", "--query-gpu=index,name,memory.used,memory.total,utilization.gpu,temperature.gpu,power.draw",
+                result = capture(["nvidia-smi", "--query-gpu=index,name,memory.used,memory.total,utilization.gpu,utilization.memory,temperature.gpu,power.draw",
                                   "--format=csv,noheader,nounits"])
                 if result.get("returncode") != 0:
                     write_json(self.output / "gpu-unavailable.json", result)
                 else:
                     gpu_rows = list(csv.reader(result["stdout"].splitlines(), skipinitialspace=True))
                     for row in gpu_rows:
-                        writer.writerow([utc, phase, *row])
+                        used_mib, total_mib = float(row[2]), float(row[3])
+                        writer.writerow([utc, phase, row[0], row[1], row[2], row[3],
+                                         used_mib / 1024, total_mib / 1024, *row[4:]])
                     if sample_number == 1 or sample_number % 10 == 0:
-                        compact = "; ".join(f"GPU{row[0]} VRAM={row[2]}/{row[3]} MiB uso={row[4]}%" for row in gpu_rows)
+                        compact = "; ".join(f"GPU{row[0]} VRAM={float(row[2]) / 1024:.2f}/{float(row[3]) / 1024:.2f} GiB "
+                                             f"uso_gpu={row[4]}% uso_memoria={row[5]}%" for row in gpu_rows)
                         print(f"[telemetria] fase={phase} {compact or 'GPU sem amostra'}", flush=True)
                 handle.flush()
                 if psutil:
@@ -456,6 +460,7 @@ def run(args):
                 origin = launch.start()
                 lifecycle["pid"] = launch.process.pid
             lifecycle_report(output, redact(lifecycle, secret))
+            monitor.set_phase("server_readiness")
             lifecycle["readiness"] = wait_models(cfg, secret, args.startup_timeout, launch)
             lifecycle_report(output, redact(lifecycle, secret))
             monitor.set_phase("first_request")
