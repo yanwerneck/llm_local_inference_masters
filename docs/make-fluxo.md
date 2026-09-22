@@ -46,6 +46,8 @@ Verifica presença, tamanho, assinatura binária `GGUF` e imprime SHA-256. Não 
 O alvo instala `requirements.txt` no `PYTHON` escolhido, importa as bibliotecas do cliente e valida JSONs. A presença do runtime é verificada separadamente por `prepare-vllm`, `prepare-llama` ou `prepare-ollama`; assim, preparar o modelo não é bloqueado por um runtime que ainda não foi instalado. No caso do llama.cpp, `prepare-llama` procura o `llama-server` já instalado no `PATH`, como ocorre na imagem do pod, e o launch JSON usa o comando `llama-server`. A compilação local fica disponível somente quando necessária, via `make build-llama`.
 Os três templates seguem esse mesmo contrato: chamam `vllm`, `llama-server` e `ollama` pelo `PATH`, sem assumir caminhos internos de venv ou `/usr/local/bin`. Use `VLLM_BIN`, `LLAMA_SERVER_BIN` ou `OLLAMA_BIN` para sobrescrever o executável quando a imagem utilizar outro local.
 
+`prepare-vllm` também executa `check-vllm-gguf`, que resolve o Python do executável encontrado e importa `vllm_gguf_plugin` nesse mesmo ambiente. Sem o plugin, o vLLM pode tentar interpretar o arquivo GGUF como JSON e produzir `config file ... .gguf is not a valid JSON file`. A correção é instalar `vllm-gguf-plugin` no ambiente do vLLM; não se instala esse pacote no venv do benchmark. llama.cpp e Ollama não precisam do plugin porque carregam GGUF nativamente.
+
 ## 3. Preparação do Ollama
 
 `prepare-ollama` usa o arquivo GGUF local em um `Modelfile` temporário e executa `ollama create`. O alias é `qwen7b-q8-gguf` ou `qwen14b-q8-gguf`. Não há `ollama pull`: o modelo deve vir do SSD informado.

@@ -115,6 +115,14 @@ Assim, a ausência de vLLM não impede preparar o modelo para llama.cpp ou Ollam
 
 O mesmo princípio vale para os três runtimes: os templates chamam `vllm`, `llama-server` e `ollama` pelo `PATH`, sem assumir `/workspace/vllm-runtime/.venv` ou `/usr/local/bin/ollama`. Se a imagem usar outro local, coloque o diretório no `PATH` ou sobrescreva `VLLM_BIN`, `LLAMA_SERVER_BIN` ou `OLLAMA_BIN`.
 
+Antes de iniciar o vLLM com GGUF, `prepare-vllm` executa `make check-vllm-gguf`. Essa verificação importa `vllm` e `vllm_gguf_plugin` usando o Python pertencente ao executável `vllm`. Se o plugin não estiver nesse ambiente, a preparação para com a instrução explícita:
+
+```bash
+/caminho/do/venv-do-vllm/bin/python -m pip install vllm-gguf-plugin
+```
+
+O erro `config file ... .gguf is not a valid JSON file` significa que o plugin não foi carregado; não significa que a assinatura GGUF esteja inválida. llama.cpp não precisa desse plugin: `llama-server` lê GGUF nativamente. Ollama também lê GGUF nativamente, mas precisa do daemon e do alias criado por `prepare-ollama`.
+
 ```bash
 make prepare-benchmark MODEL_SIZE=7B
 make prepare-benchmark MODEL_SIZE=14B
@@ -146,7 +154,7 @@ make verify-gguf MODEL_SIZE=7B
 
 ### `make prepare-ollama`
 
-Cria o alias `qwen7b-q8-gguf` ou `qwen14b-q8-gguf` a partir do GGUF local usando um `Modelfile` temporário. Não executa `ollama pull`.
+Verifica que o daemon Ollama está acessível e cria o alias correspondente ao tamanho escolhido (`qwen7b-q8-gguf` ou `qwen14b-q8-gguf`) a partir do GGUF local usando um `Modelfile` temporário. Não executa `ollama pull`.
 
 ### Benchmarks individuais e agregado
 
