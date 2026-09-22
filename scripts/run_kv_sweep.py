@@ -98,19 +98,23 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="kv-sweep-") as temp:
         temp = Path(temp)
         for context in range(args.start, args.max_context + 1, token_step):
-            # O contexto declarado inclui prompt, saída e margem do template.
+            # Não imponha ao servidor um teto artificial de `context + 128 + 256`.
+            # O workload seleciona históricos que cabem no ponto; o runtime mantém
+            # pelo menos o context_window já configurado no launcher/config.
             config_copy = dict(config)
-            config_copy["context_window"] = context + 128 + 256
+            configured_context = int(config.get("context_window") or 0)
+            server_context = max(configured_context, context + 128 + 256)
+            config_copy["context_window"] = server_context
             if config.get("runtime") == "ollama":
                 subprocess.run([args.python, str(Path(__file__).with_name("prepare_ollama.py")),
                                 "--binary", args.launch_executable or "ollama",
                                 "--model", config["model"], "--gguf", args.local_model_path,
-                                "--context", str(config_copy["context_window"]),
+                                "--context", str(server_context),
                                 "--base-url", config["base_url"]], check=True)
             config_path = temp / f"config-{context}.json"
             launch_path = temp / f"launch-{context}.json"
             config_path.write_text(json.dumps(config_copy, indent=2) + "\n")
-            launch_with_context(Path(args.launch), launch_path, context + 128 + 256,
+            launch_with_context(Path(args.launch), launch_path, server_context,
                                 args.context_flag, args.launch_extra_args)
             command = [args.python, "bench.py", "run", "--config", str(config_path),
                        "--local-model-path", args.local_model_path, "--launch", str(launch_path),
@@ -127,7 +131,7 @@ def main() -> int:
             estimated_mb = context * args.kv_bytes_per_token / 1_000_000
             print(f"\n[KV-SWEEP] runtime={args.runtime_label} input_tokens={context} "
                   f"estimated_logical_kv_mb={estimated_mb:.2f} "
-                  f"server_max_model_len={context + 128 + 256} "
+                  f"server_max_model_len={server_context} "
                   f"requests={args.requests} repetitions={args.repetitions} "
                   f"mode={args.mode} turns={args.conversation_turns}", flush=True)
             completed = subprocess.run(command)

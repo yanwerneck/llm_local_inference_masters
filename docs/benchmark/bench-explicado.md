@@ -296,7 +296,7 @@ contexto 9954  → ~512 MB adicionais de KV → inicia servidor → executa benc
 contexto 14419 → ~768 MB adicionais de KV → inicia servidor → executa bench.py → encerra
 ```
 
-Cada ponto tem startup, primeira resposta, warmup, medição, telemetria e diretório próprio. Nos pontos `ctx<N>`, o replay seleciona e cicla somente os turnos cujo histórico real cabe em `N` tokens; isso evita enviar um histórico maior que o `max_model_len` daquele ponto. Por isso o sweep é mais lento: o custo dominante é reiniciar e carregar o runtime repetidamente, não apenas aumentar o orçamento de KV em 256 MB.
+Cada ponto tem startup, primeira resposta, warmup, medição, telemetria e diretório próprio. Nos pontos `ctx<N>`, o replay seleciona e cicla somente os turnos cujo histórico real cabe em `N` tokens. O servidor mantém pelo menos o `context_window` configurado no runtime, em vez de receber um teto artificial `N + 128 + 256`; assim o limite do servidor não mascara a carga que o ponto pretende observar. Por isso o sweep é mais lento: o custo dominante é reiniciar e carregar o runtime repetidamente, não apenas aumentar o orçamento de KV em 256 MB.
 
 Para exploração rápida:
 

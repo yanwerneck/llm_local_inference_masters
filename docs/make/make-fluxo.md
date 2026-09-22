@@ -128,7 +128,7 @@ Esses argumentos aparecem no `lifecycle.json`. Se o runtime rejeitar a combinaç
 
 ## 7. Sweep de KV
 
-Depois da bateria base, `run_kv_sweep.py` copia o launcher para uma pasta temporária, ajusta o limite de contexto e chama `bench.py` novamente. O padrão começa em 1024 tokens e soma 256 MB de KV lógico por ponto; no Qwen2.5 7B isso produz aproximadamente 1024, 5489, 9954 e 14419 tokens. Em modo `replay`, cada ponto seleciona e cicla apenas os históricos da fixture que cabem no limite `ctx<N>`; não envia silenciosamente a conversa completa para um ponto menor.
+Depois da bateria base, `run_kv_sweep.py` copia o launcher para uma pasta temporária e chama `bench.py` novamente. O padrão começa em 1024 tokens e soma 256 MB de KV lógico por ponto; no Qwen2.5 7B isso produz aproximadamente 1024, 5489, 9954 e 14419 tokens. Em modo `replay`, cada ponto seleciona e cicla apenas os históricos da fixture que cabem no limite `ctx<N>`. O `max_model_len` permanece pelo menos no `context_window` configurado no runtime, sem o teto artificial `N + 128 + 256`.
 
 O sweep repassa `SWEEP_MODE`, `SWEEP_CONVERSATION_TURNS` e `SWEEP_CONVERSATION_FIXTURE` para `bench.py`, permitindo varrer contexto com a mesma política conversacional da bateria base ou com uma política própria do sweep. O passo formal é `SWEEP_MEMORY_STEP_MB=256`: o script converte esse orçamento de memória em tokens com `KV_BYTES_PER_TOKEN` (57.344 bytes/token no Qwen2.5 7B em KV FP16; 196.608 no 14B) e registra os dois valores no manifesto.
 
