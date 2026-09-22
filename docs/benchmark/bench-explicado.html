@@ -51,7 +51,7 @@ smoke-&lt;runtime&gt; ── diagnóstico rápido
 bench-&lt;runtime&gt;
         ├── bateria base: short / medium / long
         │     └── independent, replay ou closed-loop
-        └── sweep de contexto/KV: 1024, 2048, 3072, ...
+        └── sweep de contexto/KV: 1024 tokens + 256 MB de KV por ponto
 </code></pre>
 <p><code>bench-all</code> executa essa combinação para vLLM, llama.cpp e Ollama. <code>smoke-all</code> executa somente o diagnóstico rápido dos três.</p>
 <h2 id="nao-confunda-os-tres-conceitos">Não confunda os três conceitos</h2>
@@ -115,8 +115,8 @@ bench-&lt;runtime&gt;
 </tr>
 <tr>
 <td><code>BENCH_REPETITIONS</code></td>
-<td style="text-align: right;"><code>3</code></td>
-<td>três blocos independentes no mesmo processo</td>
+<td style="text-align: right;"><code>1</code></td>
+<td>um bloco por cenário; aumente manualmente para estudar variabilidade</td>
 </tr>
 <tr>
 <td><code>BENCH_WARMUP</code></td>
@@ -149,9 +149,14 @@ bench-&lt;runtime&gt;
 <td>primeiro contexto do sweep</td>
 </tr>
 <tr>
-<td><code>SWEEP_STEP</code></td>
-<td style="text-align: right;"><code>1024</code></td>
-<td>incremento entre pontos formais</td>
+<td><code>SWEEP_MEMORY_STEP_MB</code></td>
+<td style="text-align: right;"><code>256</code></td>
+<td>incremento de memória lógica de KV entre pontos formais</td>
+</tr>
+<tr>
+<td><code>KV_BYTES_PER_TOKEN</code></td>
+<td style="text-align: right;"><code>57344</code> (7B)</td>
+<td>coeficiente arquitetural usado para converter MB de KV em tokens</td>
 </tr>
 <tr>
 <td><code>SWEEP_MAX_CONTEXT</code></td>
@@ -165,7 +170,7 @@ bench-&lt;runtime&gt;
 </tr>
 <tr>
 <td><code>SWEEP_REPETITIONS</code></td>
-<td style="text-align: right;"><code>3</code></td>
+<td style="text-align: right;"><code>1</code></td>
 <td>herdado de <code>BENCH_REPETITIONS</code></td>
 </tr>
 <tr>
@@ -178,17 +183,17 @@ bench-&lt;runtime&gt;
 <h3 id="quantas-requisicoes-isso-realmente-representa">Quantas requisições isso realmente representa?</h3>
 <p>Na bateria base, cada runtime faz, por cenário e repetição:</p>
 <pre><code class="language-text">3 warmup + 50 measure = 53 requisições
-3 cenários × 3 repetições × 53 = 477 requisições
+3 cenários × 1 repetição × 53 = 159 requisições
 + 1 primeira resposta
  + 1 referência final aquecida
 </code></pre>
-<p>O sweep usa um cenário de contexto por ponto. Com <code>1024..16384</code> em passos de 1024, são 16 pontos. Cada ponto faz:</p>
+<p>O sweep usa um cenário de contexto por ponto. Com <code>1024..16384</code> e passos de 256 MB de KV lógico, o Qwen2.5 7B usa aproximadamente 4 pontos: 1024, 5489, 9954 e 14419 tokens. Cada ponto faz:</p>
 <pre><code class="language-text">3 warmup + 50 measure = 53
-3 repetições × 53 = 159
-+ primeira resposta + referência final = 161 requisições/probes
-16 pontos × 161 = 2576 requisições/probes por runtime
+1 repetição × 53 = 53
++ primeira resposta + referência final = 55 requisições/probes por ponto
+4 pontos × 55 = 220 requisições/probes por runtime
 </code></pre>
-<p>É por isso que o <code>bench-&lt;runtime&gt;</code> formal é longo: ele combina a bateria base com um sweep que reinicia e carrega o servidor em cada ponto. <code>bench-all</code> repete isso três vezes, uma para cada runtime.</p>
+<p>É por isso que o <code>bench-&lt;runtime&gt;</code> formal é longo: ele combina a bateria base com um sweep que reinicia e carrega o servidor em cada ponto. <code>bench-all</code> executa isso uma vez em cada runtime.</p>
 <h2 id="exemplo-pratico-do-corpo-http">Exemplo prático do corpo HTTP</h2>
 <p>No padrão <code>independent</code>, uma requisição enviada pelo cliente se parece com:</p>
 <pre><code class="language-json">{
@@ -345,15 +350,17 @@ warmup = uma fase: requisições usadas para preparar o estado do processo
 <p>Uma configuração pode ter TTFT menor e decode mais lento. Também pode gerar menos tokens e parecer mais rápida na taxa efetiva. Por isso o relatório preserva contagens de entrada/saída e não compara uma métrica isolada.</p>
 <h2 id="o-segundo-bench-sweep-de-contextokv">O segundo bench: sweep de contexto/KV</h2>
 <p>O sweep não continua a mesma amostra estatística da bateria base. Ele reinicia o runtime em cada ponto para alterar o limite de contexto e medir o efeito de cargas crescentes:</p>
-<pre><code class="language-text">contexto 1024 → inicia servidor → executa bench.py → encerra
-contexto 2048 → inicia servidor → executa bench.py → encerra
-contexto 3072 → inicia servidor → executa bench.py → encerra
+<pre><code class="language-text">contexto 1024  → ~0 MB adicional da grade → inicia servidor → executa bench.py → encerra
+contexto 5489  → ~256 MB adicionais de KV → inicia servidor → executa bench.py → encerra
+contexto 9954  → ~512 MB adicionais de KV → inicia servidor → executa bench.py → encerra
+contexto 14419 → ~768 MB adicionais de KV → inicia servidor → executa bench.py → encerra
 </code></pre>
-<p>Cada ponto tem startup, primeira resposta, warmup, medição, telemetria e diretório próprio. Por isso o sweep é mais lento: o custo dominante é reiniciar e carregar o runtime repetidamente, não apenas incrementar 1024 tokens.</p>
+<p>Cada ponto tem startup, primeira resposta, warmup, medição, telemetria e diretório próprio. Por isso o sweep é mais lento: o custo dominante é reiniciar e carregar o runtime repetidamente, não apenas aumentar o orçamento de KV em 256 MB.</p>
 <p>Para exploração rápida:</p>
 <pre><code class="language-bash">make quick-sweep-vllm MODEL_SIZE=7B SWEEP_MAX_CONTEXT=1024
 </code></pre>
-<p>Para uma grade mais espaçada, altere <code>SWEEP_STEP=2048</code> ou <code>4096</code>. Para investigar uma região específica, use passo menor. O ponto falho não vira zero nem é substituído por outro modelo.</p>
+<p>O padrão agora é <code>SWEEP_MEMORY_STEP_MB=256</code>. Para uma grade mais espaçada e rápida, altere esse valor para <code>512</code>, <code>1024</code> ou <code>2048</code>. O código converte o valor para tokens conforme <code>KV_BYTES_PER_TOKEN</code>; o ponto falho não vira zero nem é substituído por outro modelo.</p>
+<p><code>SWEEP_MEMORY_STEP_MB</code> representa 256 MB de KV lógico, não 256 tokens. Para o Qwen2.5 7B em KV FP16, o coeficiente usado é 57.344 bytes/token (<code>2 × 28 camadas × 4 cabeças KV × 128 dimensão × 2 bytes</code>), então 256 MB correspondem a <code>256.000.000 / 57.344 = 4.464,3</code> tokens; o código arredonda para cima e usa 4.465 tokens por salto. Partindo de 1024, os pontos ficam aproximadamente em 1024, 5489, 9954 e 14419 tokens. Isso estima KV lógico, não VRAM total: pesos, buffers, blocos, overhead e política de cada runtime ficam fora dessa conta. Para 14B, o Make usa 196.608 bytes/token e recalcula a grade.</p>
 <h2 id="smoke-base-e-sweep-quando-usar-cada-um">Smoke, base e sweep: quando usar cada um</h2>
 <div class="table-wrap"><table>
 <thead>

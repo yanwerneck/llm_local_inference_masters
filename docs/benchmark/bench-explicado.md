@@ -18,7 +18,7 @@ smoke-<runtime> ── diagnóstico rápido
 bench-<runtime>
         ├── bateria base: short / medium / long
         │     └── independent, replay ou closed-loop
-        └── sweep de contexto/KV: 1024, 2048, 3072, ...
+        └── sweep de contexto/KV: 1024 tokens + 256 MB de KV por ponto
 ```
 
 `bench-all` executa essa combinação para vLLM, llama.cpp e Ollama. `smoke-all` executa somente o diagnóstico rápido dos três.
@@ -42,17 +42,18 @@ Quando você executa `make bench-vllm`, `make bench-llama` ou `make bench-ollama
 |---|---:|---|
 | `BENCH_SCENARIOS` | `short medium long` | três tamanhos de entrada na bateria base |
 | `BENCH_REQUESTS` | `50` | 50 requisições de medição por cenário e repetição |
-| `BENCH_REPETITIONS` | `3` | três blocos independentes no mesmo processo |
+| `BENCH_REPETITIONS` | `1` | um bloco por cenário; aumente manualmente para estudar variabilidade |
 | `BENCH_WARMUP` | `3` | três requisições descartadas da medição por cenário/repetição |
 | `BENCH_MODE` | `independent` | uma mensagem de usuário, sem histórico acumulado |
 | `CONVERSATION_TURNS` | `1` | só tem efeito quando o modo conversacional é usado |
 | `BENCH_STARTUP_TIMEOUT` | `1800` s | limite para readiness, não para a execução inteira |
 | saída máxima | `128` tokens | limite solicitado no corpo HTTP; o modelo pode parar antes |
 | `SWEEP_START` | `1024` | primeiro contexto do sweep |
-| `SWEEP_STEP` | `1024` | incremento entre pontos formais |
+| `SWEEP_MEMORY_STEP_MB` | `256` | incremento de memória lógica de KV entre pontos formais |
+| `KV_BYTES_PER_TOKEN` | `57344` (7B) | coeficiente arquitetural usado para converter MB de KV em tokens |
 | `SWEEP_MAX_CONTEXT` | `16384` | último contexto permitido |
 | `SWEEP_REQUESTS` | `50` | herdado de `BENCH_REQUESTS` |
-| `SWEEP_REPETITIONS` | `3` | herdado de `BENCH_REPETITIONS` |
+| `SWEEP_REPETITIONS` | `1` | herdado de `BENCH_REPETITIONS` |
 | `SWEEP_WARMUP` | `3` | herdado de `BENCH_WARMUP` |
 
 ### Quantas requisições isso realmente representa?
@@ -61,21 +62,21 @@ Na bateria base, cada runtime faz, por cenário e repetição:
 
 ```text
 3 warmup + 50 measure = 53 requisições
-3 cenários × 3 repetições × 53 = 477 requisições
+3 cenários × 1 repetição × 53 = 159 requisições
 + 1 primeira resposta
  + 1 referência final aquecida
 ```
 
-O sweep usa um cenário de contexto por ponto. Com `1024..16384` em passos de 1024, são 16 pontos. Cada ponto faz:
+O sweep usa um cenário de contexto por ponto. Com `1024..16384` e passos de 256 MB de KV lógico, o Qwen2.5 7B usa aproximadamente 4 pontos: 1024, 5489, 9954 e 14419 tokens. Cada ponto faz:
 
 ```text
 3 warmup + 50 measure = 53
-3 repetições × 53 = 159
-+ primeira resposta + referência final = 161 requisições/probes
-16 pontos × 161 = 2576 requisições/probes por runtime
+1 repetição × 53 = 53
++ primeira resposta + referência final = 55 requisições/probes por ponto
+4 pontos × 55 = 220 requisições/probes por runtime
 ```
 
-É por isso que o `bench-<runtime>` formal é longo: ele combina a bateria base com um sweep que reinicia e carrega o servidor em cada ponto. `bench-all` repete isso três vezes, uma para cada runtime.
+É por isso que o `bench-<runtime>` formal é longo: ele combina a bateria base com um sweep que reinicia e carrega o servidor em cada ponto. `bench-all` executa isso uma vez em cada runtime.
 
 ## Exemplo prático do corpo HTTP
 
@@ -285,12 +286,13 @@ Uma configuração pode ter TTFT menor e decode mais lento. Também pode gerar m
 O sweep não continua a mesma amostra estatística da bateria base. Ele reinicia o runtime em cada ponto para alterar o limite de contexto e medir o efeito de cargas crescentes:
 
 ```text
-contexto 1024 → inicia servidor → executa bench.py → encerra
-contexto 2048 → inicia servidor → executa bench.py → encerra
-contexto 3072 → inicia servidor → executa bench.py → encerra
+contexto 1024  → ~0 MB adicional da grade → inicia servidor → executa bench.py → encerra
+contexto 5489  → ~256 MB adicionais de KV → inicia servidor → executa bench.py → encerra
+contexto 9954  → ~512 MB adicionais de KV → inicia servidor → executa bench.py → encerra
+contexto 14419 → ~768 MB adicionais de KV → inicia servidor → executa bench.py → encerra
 ```
 
-Cada ponto tem startup, primeira resposta, warmup, medição, telemetria e diretório próprio. Por isso o sweep é mais lento: o custo dominante é reiniciar e carregar o runtime repetidamente, não apenas incrementar 1024 tokens.
+Cada ponto tem startup, primeira resposta, warmup, medição, telemetria e diretório próprio. Por isso o sweep é mais lento: o custo dominante é reiniciar e carregar o runtime repetidamente, não apenas aumentar o orçamento de KV em 256 MB.
 
 Para exploração rápida:
 
@@ -298,7 +300,9 @@ Para exploração rápida:
 make quick-sweep-vllm MODEL_SIZE=7B SWEEP_MAX_CONTEXT=1024
 ```
 
-Para uma grade mais espaçada, altere `SWEEP_STEP=2048` ou `4096`. Para investigar uma região específica, use passo menor. O ponto falho não vira zero nem é substituído por outro modelo.
+O padrão agora é `SWEEP_MEMORY_STEP_MB=256`. Para uma grade mais espaçada e rápida, altere esse valor para `512`, `1024` ou `2048`. O código converte o valor para tokens conforme `KV_BYTES_PER_TOKEN`; o ponto falho não vira zero nem é substituído por outro modelo.
+
+`SWEEP_MEMORY_STEP_MB` representa 256 MB de KV lógico, não 256 tokens. Para o Qwen2.5 7B em KV FP16, o coeficiente usado é 57.344 bytes/token (`2 × 28 camadas × 4 cabeças KV × 128 dimensão × 2 bytes`), então 256 MB correspondem a `256.000.000 / 57.344 = 4.464,3` tokens; o código arredonda para cima e usa 4.465 tokens por salto. Partindo de 1024, os pontos ficam aproximadamente em 1024, 5489, 9954 e 14419 tokens. Isso estima KV lógico, não VRAM total: pesos, buffers, blocos, overhead e política de cada runtime ficam fora dessa conta. Para 14B, o Make usa 196.608 bytes/token e recalcula a grade.
 
 ## Smoke, base e sweep: quando usar cada um
 

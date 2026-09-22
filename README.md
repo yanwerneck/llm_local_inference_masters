@@ -234,7 +234,7 @@ make quick-sweep-llama MODEL_SIZE=7B
 make quick-sweep-ollama MODEL_SIZE=7B
 ```
 
-Cada alvo usa por padrão início em 1024, passo 2048, máximo 8192, 1 requisição, 1 repetição e nenhum aquecimento. Para validar apenas um ponto, use `SWEEP_MAX_CONTEXT=1024`. É uma verificação de integração do launcher, API e coleta; a amostra não sustenta comparação estatística nem substitui o sweep formal.
+Cada alvo usa por padrão início em 1024, passo de 256 MB de KV lógico, máximo 16384 e uma repetição. O número equivalente de tokens é calculado pela arquitetura: aproximadamente 4465 tokens por salto no Qwen2.5 7B. Para uma verificação rápida, use `quick-sweep-<runtime>`; ela limita o contexto a 8192, usa uma requisição, uma repetição e nenhum aquecimento. Para validar apenas um ponto, use `SWEEP_MAX_CONTEXT=1024`. É uma verificação de integração do launcher, API e coleta; a amostra não sustenta comparação estatística nem substitui o sweep formal.
 
 ### Estado da validação no Pod
 
@@ -252,7 +252,7 @@ Durante uma inicialização demorada, o progresso informa o endpoint `GET /v1/mo
 
 ## O que o benchmark mede
 
-Por runtime, cenário e repetição, são executadas 50 requisições de medição, 3 repetições e 3 aquecimentos. A execução é síncrona: uma requisição ativa por vez.
+Por runtime e cenário, são executadas 50 requisições de medição, 1 repetição e 3 aquecimentos. A execução é síncrona: uma requisição ativa por vez. A repetição única é deliberada nesta rodada; percentis descrevem a distribuição das requisições, não a variância entre réplicas independentes.
 
 | Cenário | Entrada aproximada | Saída máxima |
 |---|---:|---:|
@@ -274,7 +274,7 @@ Warmup, primeira resposta, medição formal e encerramento são fases distintas.
 
 ## Sweep de KV cache
 
-O sweep faz parte de `bench-vllm`, `bench-llama` e `bench-ollama`. Para cada runtime, o servidor é reiniciado com contexto de 1024, 2048, 3072 tokens e assim por diante, até a primeira falha de inicialização ou memória.
+O sweep faz parte de `bench-vllm`, `bench-llama` e `bench-ollama`. Para cada runtime, o servidor é reiniciado começando em 1024 tokens e avançando 256 MB de KV lógico por ponto. No Qwen2.5 7B isso equivale a aproximadamente 4465 tokens por salto: 1024, 5489, 9954 e 14419, até a primeira falha de inicialização ou memória.
 
 No vLLM também é coletado o gauge de ocupação do pool KV em `/metrics`. Esse percentual não é percentual de VRAM nem bytes físicos; a VRAM é observada separadamente pelo `nvidia-smi`.
 

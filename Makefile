@@ -71,6 +71,13 @@ OLLAMA_MODEL_NAME ?= qwen14b-q8-gguf
 else
 $(error MODEL_SIZE deve ser 7B ou 14B)
 endif
+# Qwen2.5: KV em FP16/BF16: 2(K,V) × camadas × cabeças KV × dimensão da cabeça × bytes.
+# O sweep usa este coeficiente para converter o passo de memória em tokens.
+ifeq ($(MODEL_SIZE),7B)
+KV_BYTES_PER_TOKEN ?= 57344
+else
+KV_BYTES_PER_TOKEN ?= 196608
+endif
 # A imagem do pod normalmente expõe vLLM no PATH. O launch JSON usa o nome
 # `vllm`, evitando depender do caminho do venv usado para construir a imagem.
 VLLM_BIN ?= $(shell command -v vllm 2>/dev/null || printf 'vllm')
@@ -83,7 +90,7 @@ REQUIRE_GPU ?= 1
 OLLAMA_BIN ?= $(shell command -v ollama 2>/dev/null || printf 'ollama')
 BENCH_SCENARIOS ?= short medium long
 BENCH_REQUESTS ?= 50
-BENCH_REPETITIONS ?= 3
+BENCH_REPETITIONS ?= 1
 BENCH_WARMUP ?= 3
 BENCH_MODE ?= independent
 CONVERSATION_TURNS ?= 1
@@ -93,7 +100,7 @@ BENCH_STARTUP_TIMEOUT ?= 1800
 PREPARE_OFFLINE ?= 0
 SWEEP_MAX_CONTEXT ?= 16384
 SWEEP_START ?= 1024
-SWEEP_STEP ?= 1024
+SWEEP_MEMORY_STEP_MB ?= 256
 SWEEP_REQUESTS ?= $(BENCH_REQUESTS)
 SWEEP_REPETITIONS ?= $(BENCH_REPETITIONS)
 SWEEP_WARMUP ?= $(BENCH_WARMUP)
@@ -155,7 +162,7 @@ help:
 		'  VLLM_EXTRA_ARGS, LLAMA_EXTRA_ARGS, OLLAMA_EXTRA_ARGS (sintaxe shell, convertida com shlex)' \
 		'  VLLM_PYTHON, LLAMA_BACKEND_PATH, REQUIRE_GPU=1|0' \
 		'  BENCH_MODE=independent|closed-loop|replay, CONVERSATION_TURNS, CONVERSATION_FIXTURE' \
-		'  SWEEP_START, SWEEP_STEP, SWEEP_MAX_CONTEXT, SWEEP_REQUESTS, SWEEP_REPETITIONS, SWEEP_WARMUP, SWEEP_MODE, SWEEP_CONVERSATION_TURNS, SWEEP_CONVERSATION_FIXTURE' \
+		'  SWEEP_START, SWEEP_MEMORY_STEP_MB, SWEEP_MAX_CONTEXT, SWEEP_REQUESTS, SWEEP_REPETITIONS, SWEEP_WARMUP, SWEEP_MODE, SWEEP_CONVERSATION_TURNS, SWEEP_CONVERSATION_FIXTURE' \
 		'  LLAMA_CPP_DIR, HF_MODEL_DIR, GGUF_OUTPUT_DIR, QUANTIZE_THREADS' \
 		'  VLLM_MODEL_DIR, VLLM_CONFIG, VLLM_LAUNCH' \
 		'  LLAMA_MODEL_DIR, LLAMA_CONFIG, LLAMA_LAUNCH' \
@@ -371,14 +378,15 @@ bench-vllm: prepare-vllm
 		--conversation-fixture "$(CONVERSATION_FIXTURE)" \
 		--collect-kv-metrics \
 		--startup-timeout "$(BENCH_STARTUP_TIMEOUT)"
-	@echo '[BENCH vLLM] bateria base concluída; iniciando sweep KV em passos de 1024'
+	@echo '[BENCH vLLM] bateria base concluída; iniciando sweep KV em passos de $(SWEEP_MEMORY_STEP_MB) MB'
 	HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_HUB_ENABLE_HF_TRANSFER=0 \
 		$(PYTHON) scripts/run_kv_sweep.py --runtime-label vllm \
 		--config "$(VLLM_CONFIG)" --launch "$(VLLM_LAUNCH)" \
 		--local-model-path "$(VLLM_MODEL_DIR)" --python "$(PYTHON)" \
 		--launch-executable "$(VLLM_BIN)" \
 		--launch-extra-args-json "$$($(SYSTEM_PYTHON) -c 'import json,os,shlex; print(json.dumps(shlex.split(os.environ.get("VLLM_EXTRA_ARGS", ""))))')" \
-		--start "$(SWEEP_START)" --step "$(SWEEP_STEP)" --max-context "$(SWEEP_MAX_CONTEXT)" \
+		--start "$(SWEEP_START)" --memory-step-mb "$(SWEEP_MEMORY_STEP_MB)" --max-context "$(SWEEP_MAX_CONTEXT)" \
+		--kv-bytes-per-token "$(KV_BYTES_PER_TOKEN)" \
 		--requests "$(SWEEP_REQUESTS)" --repetitions "$(SWEEP_REPETITIONS)" \
 		--warmup "$(SWEEP_WARMUP)" --mode "$(SWEEP_MODE)" --conversation-turns "$(SWEEP_CONVERSATION_TURNS)" \
 		--conversation-fixture "$(SWEEP_CONVERSATION_FIXTURE)" \
@@ -398,7 +406,7 @@ bench-llama: prepare-llama
 		--mode "$(BENCH_MODE)" --conversation-turns "$(CONVERSATION_TURNS)" \
 		--conversation-fixture "$(CONVERSATION_FIXTURE)" \
 		--collect-kv-metrics --startup-timeout "$(BENCH_STARTUP_TIMEOUT)"
-	@echo '[BENCH llama.cpp] bateria base concluída; iniciando sweep KV em passos de 1024'
+	@echo '[BENCH llama.cpp] bateria base concluída; iniciando sweep KV em passos de $(SWEEP_MEMORY_STEP_MB) MB'
 	backend='$(LLAMA_BACKEND_PATH)'; if test -n "$$backend"; then export GGML_BACKEND_PATH="$$backend"; export LD_LIBRARY_PATH="$$(dirname "$$backend"):$${LD_LIBRARY_PATH:-}"; fi
 	PATH="$(dir $(LLAMA_SERVER_BIN)):$${PATH}" HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_HUB_ENABLE_HF_TRANSFER=0 \
 		$(PYTHON) scripts/run_kv_sweep.py --runtime-label llama.cpp \
@@ -407,7 +415,8 @@ bench-llama: prepare-llama
 		--launch-executable "$(LLAMA_SERVER_BIN)" \
 		--launch-extra-args-json "$$($(SYSTEM_PYTHON) -c 'import json,os,shlex; print(json.dumps(shlex.split(os.environ.get("LLAMA_EXTRA_ARGS", ""))))')" \
 		--context-flag=--ctx-size \
-		--start "$(SWEEP_START)" --step "$(SWEEP_STEP)" --max-context "$(SWEEP_MAX_CONTEXT)" \
+		--start "$(SWEEP_START)" --memory-step-mb "$(SWEEP_MEMORY_STEP_MB)" --max-context "$(SWEEP_MAX_CONTEXT)" \
+		--kv-bytes-per-token "$(KV_BYTES_PER_TOKEN)" \
 		--requests "$(SWEEP_REQUESTS)" --repetitions "$(SWEEP_REPETITIONS)" \
 		--warmup "$(SWEEP_WARMUP)" --mode "$(SWEEP_MODE)" --conversation-turns "$(SWEEP_CONVERSATION_TURNS)" \
 		--conversation-fixture "$(SWEEP_CONVERSATION_FIXTURE)" \
@@ -427,7 +436,7 @@ bench-ollama: prepare-ollama
 		--mode "$(BENCH_MODE)" --conversation-turns "$(CONVERSATION_TURNS)" \
 		--conversation-fixture "$(CONVERSATION_FIXTURE)" \
 		--collect-kv-metrics --startup-timeout "$(BENCH_STARTUP_TIMEOUT)"
-	@echo '[BENCH Ollama] bateria base concluída; iniciando sweep KV em passos de 1024'
+	@echo '[BENCH Ollama] bateria base concluída; iniciando sweep KV em passos de $(SWEEP_MEMORY_STEP_MB) MB'
 	HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_HUB_ENABLE_HF_TRANSFER=0 \
 		$(PYTHON) scripts/run_kv_sweep.py --runtime-label ollama \
 		--config "$(OLLAMA_CONFIG)" --launch "$(OLLAMA_LAUNCH)" \
@@ -435,7 +444,8 @@ bench-ollama: prepare-ollama
 		--launch-executable "$(OLLAMA_BIN)" \
 		--launch-extra-args-json "$$($(SYSTEM_PYTHON) -c 'import json,os,shlex; print(json.dumps(shlex.split(os.environ.get("OLLAMA_EXTRA_ARGS", ""))))')" \
 		--context-flag none \
-		--start "$(SWEEP_START)" --step "$(SWEEP_STEP)" --max-context "$(SWEEP_MAX_CONTEXT)" \
+		--start "$(SWEEP_START)" --memory-step-mb "$(SWEEP_MEMORY_STEP_MB)" --max-context "$(SWEEP_MAX_CONTEXT)" \
+		--kv-bytes-per-token "$(KV_BYTES_PER_TOKEN)" \
 		--requests "$(SWEEP_REQUESTS)" --repetitions "$(SWEEP_REPETITIONS)" \
 		--warmup "$(SWEEP_WARMUP)" --mode "$(SWEEP_MODE)" --conversation-turns "$(SWEEP_CONVERSATION_TURNS)" \
 		--conversation-fixture "$(SWEEP_CONVERSATION_FIXTURE)" \
@@ -464,7 +474,8 @@ kv-sweep-vllm: prepare-vllm
 		--local-model-path "$(VLLM_MODEL_DIR)" --python "$(PYTHON)" \
 		--launch-executable "$(VLLM_BIN)" \
 		--launch-extra-args-json "$$($(SYSTEM_PYTHON) -c 'import json,os,shlex; print(json.dumps(shlex.split(os.environ.get("VLLM_EXTRA_ARGS", ""))))')" \
-		--start "$(SWEEP_START)" --step "$(SWEEP_STEP)" --max-context "$(SWEEP_MAX_CONTEXT)" \
+		--start "$(SWEEP_START)" --memory-step-mb "$(SWEEP_MEMORY_STEP_MB)" --max-context "$(SWEEP_MAX_CONTEXT)" \
+		--kv-bytes-per-token "$(KV_BYTES_PER_TOKEN)" \
 		--requests "$(SWEEP_REQUESTS)" --repetitions "$(SWEEP_REPETITIONS)" \
 		--warmup "$(SWEEP_WARMUP)" --mode "$(SWEEP_MODE)" --conversation-turns "$(SWEEP_CONVERSATION_TURNS)" \
 		--conversation-fixture "$(SWEEP_CONVERSATION_FIXTURE)" \
@@ -476,7 +487,8 @@ kv-sweep-llama: prepare-llama
 		$(PYTHON) scripts/run_kv_sweep.py --runtime-label llama.cpp --config "$(LLAMA_CONFIG)" --launch "$(LLAMA_LAUNCH)" \
 		--local-model-path "$(LLAMA_MODEL_DIR)" --python "$(PYTHON)" --launch-executable "$(LLAMA_SERVER_BIN)" \
 		--launch-extra-args-json "$$($(SYSTEM_PYTHON) -c 'import json,os,shlex; print(json.dumps(shlex.split(os.environ.get("LLAMA_EXTRA_ARGS", ""))))')" --context-flag=--ctx-size \
-		--start "$(SWEEP_START)" --step "$(SWEEP_STEP)" --max-context "$(SWEEP_MAX_CONTEXT)" \
+		--start "$(SWEEP_START)" --memory-step-mb "$(SWEEP_MEMORY_STEP_MB)" --max-context "$(SWEEP_MAX_CONTEXT)" \
+		--kv-bytes-per-token "$(KV_BYTES_PER_TOKEN)" \
 		--requests "$(SWEEP_REQUESTS)" --repetitions "$(SWEEP_REPETITIONS)" \
 		--warmup "$(SWEEP_WARMUP)" --mode "$(SWEEP_MODE)" --conversation-turns "$(SWEEP_CONVERSATION_TURNS)" \
 		--conversation-fixture "$(SWEEP_CONVERSATION_FIXTURE)" \
@@ -487,7 +499,8 @@ kv-sweep-ollama: prepare-ollama
 		$(PYTHON) scripts/run_kv_sweep.py --runtime-label ollama --config "$(OLLAMA_CONFIG)" --launch "$(OLLAMA_LAUNCH)" \
 		--local-model-path "$(OLLAMA_MODEL_DIR)" --python "$(PYTHON)" --launch-executable "$(OLLAMA_BIN)" \
 		--launch-extra-args-json "$$($(SYSTEM_PYTHON) -c 'import json,os,shlex; print(json.dumps(shlex.split(os.environ.get("OLLAMA_EXTRA_ARGS", ""))))')" --context-flag none \
-		--start "$(SWEEP_START)" --step "$(SWEEP_STEP)" --max-context "$(SWEEP_MAX_CONTEXT)" \
+		--start "$(SWEEP_START)" --memory-step-mb "$(SWEEP_MEMORY_STEP_MB)" --max-context "$(SWEEP_MAX_CONTEXT)" \
+		--kv-bytes-per-token "$(KV_BYTES_PER_TOKEN)" \
 		--requests "$(SWEEP_REQUESTS)" --repetitions "$(SWEEP_REPETITIONS)" \
 		--warmup "$(SWEEP_WARMUP)" --mode "$(SWEEP_MODE)" --conversation-turns "$(SWEEP_CONVERSATION_TURNS)" \
 		--conversation-fixture "$(SWEEP_CONVERSATION_FIXTURE)" \
@@ -497,21 +510,21 @@ quick-sweep-vllm: SWEEP_REQUESTS=1
 quick-sweep-vllm: SWEEP_REPETITIONS=1
 quick-sweep-vllm: SWEEP_WARMUP=0
 quick-sweep-vllm: SWEEP_START=1024
-quick-sweep-vllm: SWEEP_STEP=2048
+quick-sweep-vllm: SWEEP_MEMORY_STEP_MB=256
 quick-sweep-vllm: SWEEP_MAX_CONTEXT=8192
 quick-sweep-vllm: kv-sweep-vllm
 quick-sweep-llama: SWEEP_REQUESTS=1
 quick-sweep-llama: SWEEP_REPETITIONS=1
 quick-sweep-llama: SWEEP_WARMUP=0
 quick-sweep-llama: SWEEP_START=1024
-quick-sweep-llama: SWEEP_STEP=2048
+quick-sweep-llama: SWEEP_MEMORY_STEP_MB=256
 quick-sweep-llama: SWEEP_MAX_CONTEXT=8192
 quick-sweep-llama: kv-sweep-llama
 quick-sweep-ollama: SWEEP_REQUESTS=1
 quick-sweep-ollama: SWEEP_REPETITIONS=1
 quick-sweep-ollama: SWEEP_WARMUP=0
 quick-sweep-ollama: SWEEP_START=1024
-quick-sweep-ollama: SWEEP_STEP=2048
+quick-sweep-ollama: SWEEP_MEMORY_STEP_MB=256
 quick-sweep-ollama: SWEEP_MAX_CONTEXT=8192
 quick-sweep-ollama: kv-sweep-ollama
 

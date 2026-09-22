@@ -88,7 +88,7 @@ Cada alvo individual:
 8. encerra somente o grupo de processos criado;
 9. executa o sweep de contexto/KV.
 
-São 50 requisições por cenário, 3 repetições e 3 aquecimentos. O perfil é síncrono, portanto não é um benchmark de concorrência.
+São 50 requisições por cenário, 1 repetição e 3 aquecimentos. O perfil é síncrono, portanto não é um benchmark de concorrência.
 
 Por padrão, `BENCH_MODE=independent` mantém uma requisição isolada por amostra, sem histórico conversacional. Para medir crescimento de histórico, use `BENCH_MODE=closed-loop` ou `BENCH_MODE=replay` com `CONVERSATION_TURNS` e `CONVERSATION_FIXTURE`. O fixture padrão é `workloads/conversations/qwen_chat_v1.json`; ele contém `system` e uma lista de `turns` com `user`. No modo `closed-loop`, a resposta real de cada turno entra no histórico seguinte. No modo `replay`, entram as respostas `assistant` fixas do fixture, por isso todos os turnos usados precisam desse campo. Os blocos conversacionais gravam `*-turns.json` e `*-conversation.json` além dos brutos e CSVs.
 
@@ -113,7 +113,7 @@ make quick-sweep-llama MODEL_SIZE=7B
 make quick-sweep-ollama MODEL_SIZE=7B
 ```
 
-O sweep rápido testa somente 1024 e 2048 tokens, com 1 requisição, 1 repetição e 1 aquecimento por ponto. É diagnóstico de integração, não resultado estatístico nem substituto do sweep formal.
+O sweep rápido testa os pontos de 1024 e 5489 tokens até o limite padrão de 8192, com 1 requisição, 1 repetição e nenhum aquecimento por ponto. É diagnóstico de integração, não resultado estatístico nem substituto do sweep formal.
 
 ## 6. Argumentos experimentais
 
@@ -128,9 +128,9 @@ Esses argumentos aparecem no `lifecycle.json`. Se o runtime rejeitar a combinaç
 
 ## 7. Sweep de KV
 
-Depois da bateria base, `run_kv_sweep.py` copia o launcher para uma pasta temporária, ajusta o limite de contexto e chama `bench.py` novamente em 1024, 2048, 3072, … tokens. Cada ponto tem seu próprio servidor e diretório de resultado.
+Depois da bateria base, `run_kv_sweep.py` copia o launcher para uma pasta temporária, ajusta o limite de contexto e chama `bench.py` novamente. O padrão começa em 1024 tokens e soma 256 MB de KV lógico por ponto; no Qwen2.5 7B isso produz aproximadamente 1024, 5489, 9954 e 14419 tokens. Cada ponto tem seu próprio servidor e diretório de resultado.
 
-O sweep repassa `SWEEP_MODE`, `SWEEP_CONVERSATION_TURNS` e `SWEEP_CONVERSATION_FIXTURE` para `bench.py`, permitindo varrer contexto com a mesma política conversacional da bateria base ou com uma política própria do sweep.
+O sweep repassa `SWEEP_MODE`, `SWEEP_CONVERSATION_TURNS` e `SWEEP_CONVERSATION_FIXTURE` para `bench.py`, permitindo varrer contexto com a mesma política conversacional da bateria base ou com uma política própria do sweep. O passo formal é `SWEEP_MEMORY_STEP_MB=256`: o script converte esse orçamento de memória em tokens com `KV_BYTES_PER_TOKEN` (57.344 bytes/token no Qwen2.5 7B em KV FP16; 196.608 no 14B) e registra os dois valores no manifesto.
 
 - vLLM: altera `--max-model-len`;
 - llama.cpp: altera `--ctx-size`;

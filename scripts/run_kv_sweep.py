@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import subprocess
 import tempfile
 from datetime import datetime, timezone
@@ -54,10 +55,13 @@ def main() -> int:
     parser.add_argument("--local-model-path", required=True)
     parser.add_argument("--python", default="python3")
     parser.add_argument("--start", type=positive, default=1024)
-    parser.add_argument("--step", type=positive, default=1024)
+    parser.add_argument("--memory-step-mb", type=positive, default=256,
+                        help="incremento de memória lógica do KV em MB decimais")
+    parser.add_argument("--kv-bytes-per-token", type=positive, required=True,
+                        help="bytes de KV lógico por token para a arquitetura/dtype do modelo")
     parser.add_argument("--max-context", type=positive, default=16384)
     parser.add_argument("--requests", type=positive, default=50)
-    parser.add_argument("--repetitions", type=positive, default=3)
+    parser.add_argument("--repetitions", type=positive, default=1)
     parser.add_argument("--warmup", type=nonnegative, default=3)
     parser.add_argument("--mode", choices=["independent", "closed-loop", "replay"], default="independent")
     parser.add_argument("--conversation-turns", type=positive, default=1)
@@ -72,6 +76,8 @@ def main() -> int:
     parser.add_argument("--launch-executable", help="Substitui argv[0] do launch em todos os pontos.")
     parser.add_argument("--launch-extra-args-json", default="[]")
     args = parser.parse_args()
+    memory_step_bytes = args.memory_step_mb * 1_000_000
+    token_step = max(1, math.ceil(memory_step_bytes / args.kv_bytes_per_token))
     extra = json.loads(args.launch_extra_args_json)
     if not isinstance(extra, list) or any(not isinstance(x, str) for x in extra):
         parser.error("--launch-extra-args-json deve ser array de strings")
@@ -80,15 +86,17 @@ def main() -> int:
     root = Path(args.results)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
     sweep_output = runtime_root(root, args.runtime_label, stamp,
-                                f"sweep-contextos-{args.start}-{args.max_context}-tokens")
+                                f"sweep-contextos-{args.start}-{args.max_context}-tokens-step-{args.memory_step_mb}MB")
     prepare(sweep_output)
-    manifest = {"runtime": args.runtime_label, "step": args.step, "start": args.start,
+    manifest = {"runtime": args.runtime_label, "memory_step_mb": args.memory_step_mb,
+                "kv_bytes_per_token": args.kv_bytes_per_token, "token_step": token_step,
+                "start": args.start,
                 "max_context": args.max_context, "mode": args.mode,
                 "conversation_turns": args.conversation_turns,
                 "conversation_fixture": args.conversation_fixture, "points": []}
     with tempfile.TemporaryDirectory(prefix="kv-sweep-") as temp:
         temp = Path(temp)
-        for context in range(args.start, args.max_context + 1, args.step):
+        for context in range(args.start, args.max_context + 1, token_step):
             # O contexto declarado inclui prompt, saída e margem do template.
             config_copy = dict(config)
             config_copy["context_window"] = context + 128 + 256
@@ -109,12 +117,14 @@ def main() -> int:
                        "--repetitions", str(args.repetitions), "--warmup", str(args.warmup),
                        "--mode", args.mode, "--conversation-turns", str(args.conversation_turns),
                        "--conversation-fixture", args.conversation_fixture,
-                       "--result-name", f"contexto-{context}-tokens",
+                       "--result-name", f"contexto-{context}-tokens-step-{args.memory_step_mb}MB",
                        "--collect-kv-metrics", "--startup-timeout", str(args.startup_timeout),
                        "--results", str(root)]
             if args.launch_executable:
                 command.extend(["--launch-executable", args.launch_executable])
+            estimated_mb = context * args.kv_bytes_per_token / 1_000_000
             print(f"\n[KV-SWEEP] runtime={args.runtime_label} input_tokens={context} "
+                  f"estimated_logical_kv_mb={estimated_mb:.2f} "
                   f"server_max_model_len={context + 128 + 256} "
                   f"requests={args.requests} repetitions={args.repetitions} "
                   f"mode={args.mode} turns={args.conversation_turns}", flush=True)
