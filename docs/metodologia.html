@@ -8,6 +8,7 @@
 <li><a href="#3-qual-carga-sera-usada">3. Qual carga será usada?</a></li>
 <li><a href="#4-como-uma-execucao-acontece">4. Como uma execução acontece</a><ul>
 <li><a href="#o-que-chamamos-de-carregamento">O que chamamos de carregamento</a></li>
+<li><a href="#o-papel-de-cada-etapa-e-a-diferenca-entre-warmup-e-ttft">O papel de cada etapa — e a diferença entre warmup e TTFT</a></li>
 <li><a href="#as-metricas-iniciais">As métricas iniciais</a></li>
 <li><a href="#processo-novo-nao-significa-todos-os-caches-frios">Processo novo não significa todos os caches frios</a></li>
 <li><a href="#repeticao-de-cold-start-e-referencia-aquecida">Repetição de cold start e referência aquecida</a></li>
@@ -36,7 +37,7 @@
 </ul>
 </div>
 <h1 id="um-usuario-tres-runtimes-um-instrumento">Um usuário. Três runtimes. Um instrumento.</h1>
-<p>O artefato desta rodada é <code>arthuravianna/Qwen2.5-14B-Instruct-Q8_0.gguf</code>, mantido idêntico entre os runtimes quando o backend o aceitar. No vLLM, GGUF exige <code>vllm-gguf-plugin</code> e deve ser tratado como experimental/subotimizado. Se o carregamento falhar, a execução falha e preserva logs; não troque silenciosamente o modelo para preencher uma tabela.</p>
+<p>O artefato da rodada validada é <code>arthuravianna/Qwen2.5-7B-Instruct-Q8_0.gguf</code>, mantido idêntico entre os runtimes quando o backend o aceitar. No vLLM, GGUF exige <code>vllm-gguf-plugin</code> e deve ser tratado como experimental/subotimizado. Se o carregamento falhar, a execução falha e preserva logs; não troque silenciosamente o modelo para preencher uma tabela.</p>
 <p>Este estudo pergunta: <strong>como o runtime e seus parâmetros mudam o tempo de resposta de um chatbot para uma pessoa?</strong> A carga de múltiplos usuários fica para o próximo trabalho.</p>
 <h2 id="1-quem-faz-o-que">1. Quem faz o quê?</h2>
 <pre><code class="language-text">Este projeto → GuideLLM → API HTTP do runtime → modelo na GPU
@@ -88,8 +89,7 @@
 <h3 id="o-que-chamamos-de-carregamento">O que chamamos de carregamento</h3>
 <p>Sem <code>--launch</code>, o servidor já existia antes do cronômetro: medimos a primeira requisição deste cliente, mas não o carregamento do processo/pesos. Com <code>--launch</code>, medimos processo → API, processo → primeiro conteúdo e processo → fim da primeira resposta. O primeiro conteúdo é o marco operacional mais importante para o carregamento, porque cobre pesos locais, alocação, inicialização de kernels e compilação tardia que ocorram antes ou durante a primeira geração. O GET <code>/v1/models</code> é apenas prontidão observada.</p>
 <p>O protocolo é comum aos três servidores, mas o comando muda: <code>vllm serve</code> para vLLM; <code>llama-server -m caminho/model.gguf</code> para llama.cpp; e <code>ollama serve</code>/preload local mantido em foreground para Ollama. No Ollama, a API pode estar viva antes do modelo ser carregado; por isso não usamos processo → API como substituto do processo → primeiro conteúdo. Cada runtime deve usar o mesmo artefato local e um arquivo <code>--launch</code> separado. Downloads antes do processo ficam fora; download iniciado pelo servidor torna a execução inválida para comparação.</p>
-<p>Há também um perfil experimental separado para <code>arthuravianna/Qwen2.5-14B-Instruct-GGUF-8bit</code>. Apesar do nome, esse repositório contém cinco shards safetensors quantizados em 8 bits, não um arquivo GGUF; seus metadados declaram <code>qweight</code>/<code>uint8</code> e <code>quant_method: gguf</code>. Ele usa <code>configs/vllm-8bit-safetensors.json</code> e <code>configs/launch-vllm-8bit-safetensors.example.json</code> e não deve ser misturado com os resultados do <code>Q8_0.gguf</code>. Falhas de loader, quantização ou memória devem ser preservadas como resultados diagnósticos, sem fallback automático.</p>
-<p>As falhas documentadas do 14B estão em <a href="relatorio-falhas.md">relatorio-falhas.md</a>. O próximo artefato será <code>arthuravianna/Qwen2.5-7B-Instruct-GGUF-8bit</code>, com configuração própria e resultados separados; o nome do repositório não basta para inferir se os arquivos são GGUF ou safetensors.</p>
+<p>Existe documentação histórica separada sobre tentativas com Qwen2.5-14B em <a href="diagnostico-qwen14b-vllm.md">diagnostico-qwen14b-vllm.md</a> e <a href="relatorio-falhas.md">relatorio-falhas.md</a>. Esses diagnósticos não fazem parte da rodada formal atual, não devem ser misturados aos resultados 7B e não alteram o modelo padrão deste protocolo.</p>
 <ol>
 <li>Validamos configuração, versão do instrumento e arquivos do tokenizer, antes de iniciar o runtime.</li>
 <li>Com <code>--launch</code>, lançamos o processo e medimos até a API listar o modelo. Sem essa opção, a partida anterior é desconhecida e não recebe um tempo inventado.</li>
@@ -100,6 +100,51 @@
 <p><strong>Nada disso é descartado:</strong> inicialização e primeira resposta ficam em <code>lifecycle.html</code>; aquecimento e blocos posteriores em <code>summary.html</code>, com a coluna <code>phase</code>. Separar fases não é excluí-las. Não as misturamos em uma única média porque respondem perguntas diferentes.</p>
 <p>O critério de validade do bloco é estrito: o relatório precisa conter o número solicitado de sucessos e nenhum erro/incompleta. Se uma execução real devolver apenas 2 de 3 amostras, ela deve ser investigada e repetida; não é evidência de que a validação do runtime passou.</p>
 <p>Uma amostra faltante permanece um diagnóstico do caminho GuideLLM/servidor; não deve ser descrita como uma correção universal já comprovada. Enquanto a causa não for reproduzida e verificada, mantenha esse bloco como falho.</p>
+<h3 id="o-papel-de-cada-etapa-e-a-diferenca-entre-warmup-e-ttft">O papel de cada etapa — e a diferença entre warmup e TTFT</h3>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Etapa</th>
+<th>O que acontece</th>
+<th>Entra na medição formal?</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Preparação</td>
+<td>Confere modelo, tokenizer, configs, imports e executáveis; <code>prepare-all</code> encadeia os três runtimes</td>
+<td>Não</td>
+</tr>
+<tr>
+<td>Partida/readiness</td>
+<td>Inicia o processo próprio, quando <code>--launch</code> foi usado, e consulta <code>/v1/models</code> até o alias esperado aparecer</td>
+<td>Os tempos ficam no lifecycle; não são TTFT</td>
+</tr>
+<tr>
+<td>Primeira resposta</td>
+<td>Envia o primeiro POST já cronometrado e mede o primeiro conteúdo e o fim do stream</td>
+<td>Sim, mas como sonda separada em <code>first-request.json</code>; não é misturada ao p50 da fase <code>measure</code></td>
+</tr>
+<tr>
+<td>Warmup</td>
+<td>Envia requisições reais para aquecer buffers, kernels, caches e caminhos do servidor</td>
+<td>Não; a fase fica registrada como <code>warmup</code>, mas seus números não entram na fase <code>measure</code></td>
+</tr>
+<tr>
+<td>Medição</td>
+<td>Envia as requisições oficiais, uma por vez, e calcula TTFT, geração, latência total e tokens/s</td>
+<td>Sim</td>
+</tr>
+<tr>
+<td>Referência final/cleanup</td>
+<td>Repete o prompt inicial aquecido, encerra apenas o processo criado e fecha telemetria</td>
+<td>A referência fica separada; cleanup não é desempenho</td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>Warmup não é TTFT.</strong> TTFT é uma métrica de uma requisição: o intervalo entre o envio do POST e o primeiro conteúdo/token observado. Warmup é uma fase de preparação do estado do processo. O warmup pode reduzir o TTFT das requisições seguintes, mas não é o valor de TTFT e não prova que o sistema atingiu estabilidade. A primeira resposta pode ter TTFT alto por cold start; as requisições após o warmup medem um estado mais próximo de operação contínua.</p>
+<p>O warmup não limpa caches nem garante um estado frio. Ele pode aquecer compilação, alocadores, buffers, HTTP/SSE, tokenizer, prefixos e estruturas KV. Por isso, <code>phase=warmup</code> deve ser analisada separadamente. O padrão formal é <code>--warmup 3</code> por cenário e repetição; use o mesmo valor em todos os runtimes. <code>--warmup 0</code> é útil para diagnóstico barato, mas deixa a medição mais dependente do estado inicial.</p>
+<p>TTFT também não é o tempo total de resposta: a geração começa depois do primeiro conteúdo, enquanto a taxa efetiva divide os tokens de saída pela latência total. Portanto, uma configuração pode melhorar TTFT e piorar decode, ou melhorar tokens/s sem melhorar a latência ponta a ponta.</p>
 <p>Para a versão fixada 0.7.4, o cliente possui um dreno limitado de compatibilidade: depois de o encerramento ser sinalizado, espera até cinco segundos por uma atualização terminal genuína que tenha chegado atrasada à fila local. Ele não repete chamadas nem fabrica contagens; sem atualização real, a guarda de completude permanece falhando. Isso reduz uma condição de corrida conhecida do adaptador, mas não equivale a validar um runtime real.</p>
 <pre><code class="language-text">PARTIDA DO PROCESSO  (--launch)
         │ leitura dos pesos locais, inicialização e compilação
@@ -220,7 +265,7 @@ AQUECIMENTO MEDIDO → BLOCOS POSTERIORES → REFERÊNCIA FINAL
 <p>O p95 de <code>mean_itl_ms</code> <strong>não é o p95 de todas as pausas individuais do streaming</strong>. Uma resposta pode ter uma pausa grande e ainda ter média aceitável. O relatório bruto preserva detalhes do instrumento para investigações posteriores; o resumo é deliberadamente menor.</p>
 <h2 id="6-o-olhar-estatistico">6. O olhar estatístico</h2>
 <p>A unidade básica é a requisição. O resumo calcula percentis empíricos com interpolação linear, usando somente sucessos, separadamente por <strong>fase</strong>, cenário e repetição. Filtre <code>phase=measure</code> para analisar os blocos posteriores e <code>phase=warmup</code> para estudar o aquecimento. Falhas são mostradas, não convertidas em latência zero nem descartadas sem aviso. A primeira resposta tem valor individual, não um p95 calculado de uma amostra única.</p>
-<p>O piloto padrão faz 30 requisições por cenário em três repetições. Serve para depurar e detectar efeitos grandes; com 30 valores, p95 depende de pouquíssimas observações. A coluna <code>p95_exploratory</code> marca blocos com menos de 100 sucessos. Isso não quer dizer que 100 garantam precisão: dependência temporal e variabilidade continuam importando.</p>
+<p>A bateria formal padrão faz 50 requisições por cenário, em três repetições e com três warmups por cenário/repetição. O smoke reduz isso para três requisições e uma repetição. Ambos servem para detectar efeitos e regressões; p95/p99 com poucos sucessos são exploratórios. Isso não quer dizer que 100 garantam precisão: dependência temporal e variabilidade continuam importando.</p>
 <p>Para a análise, examine séries temporais e dispersão, além da mediana. Não calcule o “p95 geral” tirando a média de p95 de blocos. Se combinar requisições, preserve os identificadores de cenário e repetição e explicite a população que está resumindo.</p>
 <p>Repetir requisições no mesmo pod não cria réplicas independentes de hardware. Clocks, temperatura, estado de cache e vizinhos do host podem introduzir dependência. Para inferência mais rigorosa, desenhe blocos comparáveis, alterne a ordem das configurações e use métodos que respeitem essa estrutura. Não trate centenas de tokens da mesma resposta como centenas de réplicas independentes.</p>
 <h2 id="7-o-que-precisa-ser-mantido-igual">7. O que precisa ser mantido igual?</h2>
@@ -258,7 +303,7 @@ AQUECIMENTO MEDIDO → BLOCOS POSTERIORES → REFERÊNCIA FINAL
 <p>Instale o vLLM em ambiente separado e valide <code>vllm serve --help</code>, <code>nvidia-smi</code> e <code>python -c 'import vllm'</code>. Sirva o GGUF local com o plugin/backend suportado pela versão instalada, tokenizer local correspondente e sem download implícito. Use <code>--launch</code> com argv direto, <code>--host 127.0.0.1</code>, <code>--port 8000</code>, alias fixo em <code>--served-model-name</code> e contexto documentado. Confirme <code>/v1/models</code>, <code>/v1/chat/completions</code> e <code>/metrics</code>.</p>
 <p>Registre backend de atenção, dtype de KV, prefix caching, preempções e OOM. Falha de importação, CUDA ou carregamento é diagnóstico: preserve <code>server.log</code>, <code>serve --help</code>, versões e <code>nvidia-smi</code>, e não substitua o artefato.</p>
 <h3 id="llamacpp">llama.cpp</h3>
-<p>Use <code>llama-server</code> compilado com CUDA compatível e valide <code>llama-server --help</code>. O servidor deve receber o GGUF local e seu SHA-256 documentado, por exemplo <code>llama-server -m /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf --host 127.0.0.1 --port 8000</code>. Execute em foreground pelo <code>--launch</code>, sem daemonização, shell ou wrapper que se desprenda. Confirme <code>/v1/models</code> e <code>/v1/chat/completions</code> com streaming e usage.</p>
+<p>Use <code>llama-server</code> compilado com CUDA compatível e valide <code>llama-server --help</code>. O servidor deve receber o GGUF local e seu SHA-256 documentado, por exemplo <code>llama-server -m /workspace/models/Qwen2.5-7B-Instruct-Q8_0.gguf --host 127.0.0.1 --port 8000</code>. Execute em foreground pelo <code>--launch</code>, sem daemonização, shell ou wrapper que se desprenda. Confirme <code>/v1/models</code> e <code>/v1/chat/completions</code> com streaming e usage.</p>
 <p>Registre camadas na GPU, contexto, quantização do GGUF, slots e logs de carregamento. Se a API não fornecer usage/stream compatível, marque falha de protocolo e preserve a evidência; não estime tokens nem troque de modelo.</p>
 <h3 id="ollama">Ollama</h3>
 <p>Prepare o blob local e registre digest, identificador e Modelfile. Execute <code>ollama serve</code> em foreground e carregue o artefato antes da medição; <code>ollama pull</code> durante o <code>run</code> invalida a comparação. Confirme <code>/v1/models</code> e <code>/v1/chat/completions</code>, streaming, usage e política de permanência do modelo.</p>

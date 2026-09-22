@@ -1,8 +1,8 @@
 # Diagnóstico dos Makefiles no RunPod
 
-> Estado atualizado em 22/09/2026: a validação GPU dos três runtimes foi concluída. Veja o [relatório completo da rodada](resultados-pod-20260922.md).
+> Estado atualizado em 22/09/2026: a validação GPU dos três runtimes foi concluída. Veja o [relatório completo da rodada](resultados-pod-20260922.md). Os caminhos `results/<timestamp>/...` na matriz abaixo são artefatos históricos da execução anterior ao novo layout; novas execuções usam `results/<runtime>/<timestamp>/<nome-humano>/{html,json,csv,logs}`.
 
-O projeto executável fica em `/workspace/llm_local_inference_masters` no pod e em `chatbot-runtime-bench` neste workspace. O checkout remoto estava atrás das alterações locais; a sincronização preservou um backup remoto antes de aplicar os arquivos.
+O projeto executável fica em `/workspace/llm_local_inference_masters` no pod e em `llm_local_inference_masters` neste workspace. O checkout remoto estava atrás das alterações locais; a sincronização preservou um backup remoto antes de aplicar os arquivos.
 
 ## Causas confirmadas
 

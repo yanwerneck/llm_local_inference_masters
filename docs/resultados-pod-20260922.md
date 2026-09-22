@@ -45,6 +45,8 @@ Os artefatos completos foram preservados fora do Git em:
 ~/Documents/llm_local_inference_masters-results/
 ```
 
+Esta foi a rodada executada antes da adoção do layout categorizado; novas execuções passam a separar runtime, timestamp, nome humano e tipo de arquivo conforme o README.
+
 Principais diretórios da rodada:
 
 ```text
