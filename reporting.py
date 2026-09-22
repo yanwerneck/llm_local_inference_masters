@@ -144,9 +144,10 @@ def render(output, rows):
         ("time_to_first_token_milliseconds_p50", "Time To First Token p50 (ms)"),
         ("time_to_first_token_milliseconds_p95", "Time To First Token p95 (ms)"),
         ("time_to_first_token_milliseconds_p99", "Time To First Token p99 (ms)"),
-        ("tokens_per_second_p50", "Tokens/s p50"),
-        ("effective_output_tokens_per_second_p50", "Velocidade efetiva de saída p50 (tokens/s)"),
-        ("request_latency_seconds_p50", "Latência total p50 (s)"),
+        ("generation_time_seconds_p50", "Tempo de geração p50 (s)"),
+        ("decode_tokens_per_second_p50", "Tokens/s de decodificação p50"),
+        ("end_to_end_tokens_per_second_p50", "Tokens/s ponta a ponta p50"),
+        ("end_to_end_latency_seconds_p50", "Latência ponta a ponta p50 (s)"),
         ("input_prompt_token_count_p50", "Tokens de entrada p50"),
         ("output_completion_token_count_p50", "Tokens de saída p50")])
     by_context = table(context, [("phase", "Fase"), ("repetition", "Repetição"), ("scenario", "Cenário"), ("context_band", "Faixa de entrada (tokens)"),

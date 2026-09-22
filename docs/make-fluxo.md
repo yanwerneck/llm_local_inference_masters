@@ -104,6 +104,8 @@ Cada execução tem um timestamp em `results/`. Os arquivos importantes são:
 | `lifecycle.json` | readiness, primeira resposta, argv e encerramento |
 | `telemetry-timeseries.csv` | série temporal da GPU com `elapsed_s`, VRAM ocupada e utilização |
 
+As métricas de throughput dos requests não são extraídas do `server.log`. O cliente abre SSE e registra relógios monotônicos por requisição: início, primeiro evento com conteúdo e fim. `decode_tokens_per_second` usa tokens de `usage` dividido pelo intervalo primeiro–último evento; `end_to_end_tokens_per_second` divide pela latência total. O `Avg generation throughput` periódico do vLLM permanece apenas como observabilidade agregada. Ausência de `usage` produz `null`, e uma resposta de um token não recebe inter-token latency zero.
+
 ## 8. O que não é medido diretamente
 
 `nvidia-smi` mostra VRAM total usada pela GPU, não bytes exclusivamente do KV. CPU/RAM/SSD são contadores observacionais do host. O benchmark não mede o tempo de cada cópia PCIe ou RAM↔VRAM; isso exige Nsight Systems/Compute ou instrumentação CUDA no runtime.

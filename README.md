@@ -155,6 +155,10 @@ Métricas principais:
 - **Tokens/s**: velocidade durante o decode, calculada pelos intervalos entre tokens; não inclui TTFT.
 - **Effective tokens/s**: tokens de saída divididos pela duração total, incluindo TTFT.
 
+As taxas oficiais são calculadas no cliente, por requisição, usando `time.perf_counter()` e a resposta SSE. O benchmark registra `request_start_time`, `first_token_time`, `request_end_time`, `time_to_first_token_seconds`, `generation_time_seconds`, `end_to_end_latency_seconds`, `completion_tokens`, `prompt_tokens`, `total_tokens`, `decode_tokens_per_second` e `end_to_end_tokens_per_second`. As fórmulas são: TTFT = primeiro evento de conteúdo − início; geração = último evento de conteúdo − primeiro; decode tokens/s = tokens de saída ÷ geração; tokens/s efetivos = tokens de saída ÷ latência total. O throughput periódico `Avg generation throughput` do vLLM é apenas telemetria agregada em janelas do servidor e nunca entra nessas métricas.
+
+Como a API SSE não garante um evento por token, `first_token_time` e `request_end_time` são observados no cliente e `generation_time_seconds` usa o primeiro/último evento SSE com conteúdo. A contagem de tokens vem somente de `usage`; se `usage` faltar, contagens e taxas ficam `null`, sem estimativa. Para uma saída de um token, `inter_token_latency` também fica `null`.
+
 Warmup, primeira resposta, medição formal e encerramento são fases distintas. Falhas e incompletas não entram nas velocidades válidas.
 
 ## Sweep de KV cache

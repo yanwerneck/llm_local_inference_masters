@@ -128,12 +128,19 @@ def timed_request(cfg, secret, timeout, prompt, output, process_origin=None):
     result = {"status": "running", "body": body, "stream_usage": None,
               "content_event_offsets_s": [], "output": "", "done": False,
               "ttft_ms": None, "e2e_s": None, "mean_itl_ms": None,
+              "usage_observed": False, "request_start_time": None,
+              "first_token_time": None, "request_end_time": None,
+              "time_to_first_token_seconds": None, "generation_time_seconds": None,
+              "end_to_end_latency_seconds": None, "completion_tokens": None,
+              "prompt_tokens": None, "total_tokens": None,
+              "decode_tokens_per_second": None, "end_to_end_tokens_per_second": None,
               "process_to_first_content_s": None, "process_to_response_end_s": None}
     headers = {"Authorization": f"Bearer {secret}"} if secret else {}
     started = None
     try:
         with httpx.Client(timeout=timeout, headers=headers, follow_redirects=False) as client:
             started = time.perf_counter()
+            result["request_start_time"] = started
             with client.stream("POST", cfg["base_url"] + "/v1/chat/completions", json=body) as stream:
                 result["headers_ms"] = (time.perf_counter() - started) * 1000
                 stream.raise_for_status()
@@ -155,25 +162,41 @@ def timed_request(cfg, secret, timeout, prompt, output, process_origin=None):
                         now = time.perf_counter()
                         result["content_event_offsets_s"].append(now - started)
                         result["output"] += text
+                        result["first_token_time"] = result["first_token_time"] or now
+                        result["last_token_time"] = now
                         if result["ttft_ms"] is None:
                             result["ttft_ms"] = (now - started) * 1000
                             if process_origin is not None:
                                 result["process_to_first_content_s"] = now - process_origin
             ended = time.perf_counter()
+            result["request_end_time"] = ended
             result["e2e_s"] = ended - started
+            result["end_to_end_latency_seconds"] = ended - started
             if process_origin is not None:
                 result["process_to_response_end_s"] = ended - process_origin
             if not result["done"] or not result["output"]:
                 raise ValueError("Stream incompleto ou sem conteúdo.")
             usage = result["stream_usage"]
-            if not usage or not all(type(usage.get(k)) is int and usage[k] > 0 for k in ("prompt_tokens", "completion_tokens")):
-                raise ValueError("usage ausente/inválido no stream; tempos parciais preservados, contagens não estimadas.")
-            offsets = result["content_event_offsets_s"]
-            if usage["completion_tokens"] > 1:
-                result["mean_itl_ms"] = 1000 * (offsets[-1] - offsets[0]) / (usage["completion_tokens"] - 1)
-            from reporting import derived
-            result.update(derived({"output_tokens": usage["completion_tokens"], "prompt_tokens": usage["prompt_tokens"],
-                                   "inter_token_latency_ms": result["mean_itl_ms"], "request_latency": result["e2e_s"]}))
+            valid_usage = isinstance(usage, dict) and all(
+                type(usage.get(k)) is int and usage[k] >= 0
+                for k in ("prompt_tokens", "completion_tokens", "total_tokens"))
+            result["usage_observed"] = valid_usage
+            if valid_usage:
+                result["completion_tokens"] = usage["completion_tokens"]
+                result["prompt_tokens"] = usage["prompt_tokens"]
+                result["total_tokens"] = usage["total_tokens"]
+                result["time_to_first_token_seconds"] = ((result["first_token_time"] - started)
+                                                           if result["first_token_time"] is not None else None)
+                if result["completion_tokens"] > 1 and result.get("last_token_time") is not None:
+                    result["generation_time_seconds"] = result["last_token_time"] - result["first_token_time"]
+                    result["mean_itl_ms"] = 1000 * result["generation_time_seconds"] / (result["completion_tokens"] - 1)
+                if result["generation_time_seconds"] and result["generation_time_seconds"] > 0:
+                    result["decode_tokens_per_second"] = result["completion_tokens"] / result["generation_time_seconds"]
+                if result["end_to_end_latency_seconds"] > 0:
+                    result["end_to_end_tokens_per_second"] = result["completion_tokens"] / result["end_to_end_latency_seconds"]
+                from reporting import derived
+                result.update(derived({"output_tokens": usage["completion_tokens"], "prompt_tokens": usage["prompt_tokens"],
+                                       "inter_token_latency_ms": result["mean_itl_ms"], "request_latency": result["e2e_s"]}))
             result["status"] = "complete"
     except BaseException as exc:
         result["status"] = "interrupted" if isinstance(exc, KeyboardInterrupt) else "failed"

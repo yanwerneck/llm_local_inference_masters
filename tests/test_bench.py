@@ -108,6 +108,23 @@ class UnitTests(unittest.TestCase):
 
     def test_rate_edge_cases_and_bands(self):
         from reporting import derived, context_band, gpu_summary, ratio
+        m = bench.stream_metrics(100.0, 100.5, 102.5, 103.0,
+                                 {"prompt_tokens": 256, "completion_tokens": 4, "total_tokens": 260})
+        self.assertAlmostEqual(m["time_to_first_token_seconds"], .5)
+        self.assertAlmostEqual(m["generation_time_seconds"], 2.0)
+        self.assertAlmostEqual(m["decode_tokens_per_second"], 2.0)
+        self.assertAlmostEqual(m["end_to_end_tokens_per_second"], 4 / 3)
+        # Uma janela periódica de log de 10 s não participa das fórmulas.
+        m2 = bench.stream_metrics(100.0, 100.5, 102.5, 103.0,
+                                   {"prompt_tokens": 256, "completion_tokens": 4, "total_tokens": 260})
+        self.assertEqual(m["decode_tokens_per_second"], m2["decode_tokens_per_second"])
+        missing = bench.stream_metrics(100.0, 100.5, 102.5, 103.0, None)
+        self.assertIsNone(missing["completion_tokens"])
+        self.assertIsNone(missing["decode_tokens_per_second"])
+        one = bench.stream_metrics(100.0, 100.5, 100.5, 101.0,
+                                   {"prompt_tokens": 2, "completion_tokens": 1, "total_tokens": 3})
+        self.assertIsNone(one["generation_time_seconds"])
+        self.assertIsNone(one["inter_token_latency_seconds"])
         for n, itl in ((1, 10), (3, 0), (3, None), (3, float("nan"))):
             self.assertIsNone(derived({"output_tokens": n, "inter_token_latency_ms": itl})["decode_tokens_s"])
         self.assertIsNone(derived({"output_tokens": 2, "prompt_tokens": None,

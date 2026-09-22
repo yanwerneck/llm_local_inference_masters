@@ -136,18 +136,29 @@ def main():
                                        "--local-model-path", str(folder / "mock.gguf"),
                                        "--smoke", "--scenarios", "short", "--warmup", "1", "--results", str(folder / mode)],
                                       capture_output=True, text=True, timeout=180)
-                assert proc.returncode != 0, (mode, proc.stdout)
+                if mode == "missing_usage":
+                    assert proc.returncode == 0, (mode, proc.stdout, proc.stderr)
+                    result = next((folder / mode).glob("*/summary.json"))
+                    rows = json.loads(result.read_text())
+                    measure = next(row for row in rows if row["phase"] == "measure")
+                    assert measure["decode_tokens_per_second_sample_count"] == 0, measure
+                    assert measure["end_to_end_tokens_per_second_p50"] is None, measure
+                else:
+                    assert proc.returncode != 0, (mode, proc.stdout)
                 manifest = next((folder / mode).glob("*/manifest.json"))
-                assert json.loads(manifest.read_text())["status"] == "failed"
+                expected_status = "complete" if mode == "missing_usage" else "failed"
+                assert json.loads(manifest.read_text())["status"] == expected_status
                 if mode == "failure":
                     failed_summary = next(row for row in json.loads((manifest.parent / "summary.json").read_text()) if row["phase"] == "measure")
                     assert failed_summary["errored_request_count"] >= 1, failed_summary
                 else:
-                    assert json.loads((manifest.parent / "summary.json").read_text()) == []
+                    missing_summary = json.loads((manifest.parent / "summary.json").read_text())
+                    assert missing_summary, missing_summary
                     partial = json.loads((manifest.parent / "first-request.json").read_text())
-                    assert partial["status"] == "failed"
+                    assert partial["status"] == "complete"
                     assert partial["ttft_ms"] > 0
-                print(f"PASS: {mode} não é apresentado como benchmark concluído.")
+                    assert partial["usage_observed"] is False
+                print(f"PASS: {mode} tratado explicitamente sem inventar métricas.")
             with socket.socket() as unused:
                 unused.bind(("127.0.0.1", 0))
                 port = unused.getsockname()[1]

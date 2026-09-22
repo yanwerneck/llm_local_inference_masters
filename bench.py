@@ -27,6 +27,100 @@ WORKLOADS = {"short": 256, "medium": 2048, "long": 8192}
 OUTPUT_TOKENS = 128
 
 
+def _synthetic_prompt(tokenizer, target_tokens: int) -> str:
+    """Cria texto localmente; nenhuma chamada de servidor participa do relógio."""
+    seed = "Explique de forma objetiva este conceito para um estudante de estatística. "
+    text = seed
+    while len(tokenizer.encode(text, add_special_tokens=False)) < target_tokens:
+        text += seed
+    ids = tokenizer.encode(text, add_special_tokens=False)[:target_tokens]
+    return tokenizer.decode(ids, skip_special_tokens=False)
+
+
+def stream_request(cfg, prompt, timeout, secret=""):
+    """Mede uma requisição SSE com ``time.perf_counter`` por requisição.
+
+    ``first_token_time``/``last_token_time`` são os instantes do primeiro/último
+    evento SSE com conteúdo. A API OpenAI não promete um evento por token; por
+    isso a resolução é a do evento de conteúdo, enquanto ``completion_tokens``
+    vem exclusivamente de ``usage`` quando o servidor o fornece.
+    """
+    import httpx
+    body = {"model": cfg["model"], "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0, "top_p": 1, "max_tokens": OUTPUT_TOKENS,
+            "stream": True, "stream_options": {"include_usage": True}}
+    started = time.perf_counter()
+    first = last = None
+    chunks = 0
+    content = ""
+    usage = None
+    headers = {"Authorization": f"Bearer {secret}"} if secret else {}
+    with httpx.Client(timeout=timeout, headers=headers, follow_redirects=False) as client:
+        with client.stream("POST", cfg["base_url"] + "/v1/chat/completions", json=body) as response:
+            response.raise_for_status()
+            if "text/event-stream" not in response.headers.get("content-type", ""):
+                raise ValueError("A API não respondeu com SSE.")
+            for line in response.iter_lines():
+                if not line.startswith("data:"):
+                    continue
+                value = line[5:].strip()
+                if value == "[DONE]":
+                    break
+                event = json.loads(value)
+                if "error" in event:
+                    raise ValueError(f"Erro no stream: {event['error']}")
+                if event.get("usage"):
+                    usage = event["usage"]
+                text = "".join(c.get("delta", {}).get("content") or "" for c in event.get("choices", []))
+                if text:
+                    now = time.perf_counter()
+                    first = first or now
+                    last = now
+                    chunks += 1
+                    content += text
+    ended = time.perf_counter()
+    e2e = ended - started
+    metrics = stream_metrics(started, first, last, ended, usage)
+    return {**metrics,
+            "stream_content_event_count": chunks, "output": content, "usage_observed": usage is not None,
+            "request_args": json.dumps({"body": body}, ensure_ascii=False)}
+
+
+def stream_metrics(request_start_time, first_token_time, last_token_time, request_end_time, usage):
+    """Calcula métricas exclusivamente de timestamps monotônicos do cliente."""
+    usage = usage if isinstance(usage, dict) else {}
+    completion = usage.get("completion_tokens") if type(usage.get("completion_tokens")) is int else None
+    prompt_tokens = usage.get("prompt_tokens") if type(usage.get("prompt_tokens")) is int else None
+    total = usage.get("total_tokens") if type(usage.get("total_tokens")) is int else None
+    ttft = first_token_time - request_start_time if first_token_time is not None else None
+    e2e = request_end_time - request_start_time
+    generation = (last_token_time - first_token_time) if first_token_time is not None and last_token_time is not None and completion is not None and completion > 1 else None
+    inter = generation / (completion - 1) if generation is not None else None
+    decode = completion / generation if completion is not None and generation and generation > 0 else None
+    effective = completion / e2e if completion is not None and e2e > 0 else None
+    return {"request_start_time": request_start_time, "first_token_time": first_token_time,
+            "request_end_time": request_end_time, "time_to_first_token_seconds": ttft,
+            "generation_time_seconds": generation, "end_to_end_latency_seconds": e2e,
+            "completion_tokens": completion, "prompt_tokens": prompt_tokens, "total_tokens": total,
+            "decode_tokens_per_second": decode, "end_to_end_tokens_per_second": effective,
+            "inter_token_latency_seconds": inter, "time_to_first_token_ms": ttft * 1000 if ttft is not None else None,
+            "request_latency": e2e, "inter_token_latency_ms": inter * 1000 if inter is not None else None,
+            "output_tokens": completion, "decode_tokens_s": decode, "effective_tokens_s": effective}
+
+
+def run_stream_batch(cfg, tokenizer, scenario, count, timeout, secret=""):
+    prompt = _synthetic_prompt(tokenizer, WORKLOADS[scenario])
+    successful, errored = [], []
+    for _ in range(count):
+        try:
+            row = stream_request(cfg, prompt, timeout, secret)
+            row["status"] = "successful"
+            successful.append(row)
+        except Exception as exc:
+            errored.append({"status": "errored", "error": str(exc)})
+    return {"benchmarks": [{"requests": {"successful": successful, "errored": errored, "incomplete": []}}]}
+
+
 def local_model_check(value):
     """Checa presença, não lê pesos nem aquece o page cache deliberadamente."""
     path = Path(value).expanduser().resolve()
@@ -383,6 +477,18 @@ def summarize(report):
     for suffix, q in (("p50", .50), ("p95", .95), ("p99", .99)):
         result[f"time_to_first_token_milliseconds_{suffix}"] = percentile(ttft, q)
         result[f"tokens_per_second_{suffix}"] = percentile(tokens_s, q)
+    for label, key in {
+        "time_to_first_token_seconds": "time_to_first_token_seconds",
+        "generation_time_seconds": "generation_time_seconds",
+        "end_to_end_latency_seconds": "end_to_end_latency_seconds",
+        "decode_tokens_per_second": "decode_tokens_per_second",
+        "end_to_end_tokens_per_second": "end_to_end_tokens_per_second",
+    }.items():
+        values = [r.get(key) for r in good]
+        result[label + "_sample_count"] = sum(v is not None for v in values)
+        result[label + "_p50"] = percentile(values, .50)
+        result[label + "_p95"] = percentile(values, .95)
+        result[label + "_p99"] = percentile(values, .99)
     result["metric_definitions"] = {
         "Time To First Token": "milissegundos entre o envio da requisição e o primeiro token/conteúdo observado; há um valor por requisição.",
         "Tokens/s": "tokens de saída por segundo durante o decode, calculado por requisição a partir do intervalo entre tokens; não inclui TTFT.",
@@ -402,8 +508,11 @@ def summarize(report):
 def write_requests_csv(path, report):
     """Amostras individuais para análise no R/Python, incluindo status de erro."""
     from reporting import derived
-    fields = ["status", "request_id", "request_start_time", "request_latency", "time_to_first_token_ms",
-              "inter_token_latency_ms", "prompt_tokens", "output_tokens", "decode_tokens_s", "effective_tokens_s",
+    fields = ["status", "error", "request_id", "request_start_time", "first_token_time", "request_end_time",
+              "time_to_first_token_seconds", "generation_time_seconds", "end_to_end_latency_seconds",
+              "completion_tokens", "prompt_tokens", "total_tokens", "decode_tokens_per_second",
+              "end_to_end_tokens_per_second", "inter_token_latency_seconds", "request_latency",
+              "time_to_first_token_ms", "inter_token_latency_ms", "output_tokens", "decode_tokens_s", "effective_tokens_s",
               "context_start_tokens", "context_end_tokens", "context_band"]
     with Path(path).open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=fields)
@@ -439,6 +548,8 @@ def run(args):
     availability["kv_bytes_per_token"] = args.kv_bytes_per_token
     availability["launch_hf_offline"] = bool(args.launch)
     digest = tokenizer_digest(cfg["tokenizer"])
+    from transformers import AutoTokenizer
+    measurement_tokenizer = AutoTokenizer.from_pretrained(cfg["tokenizer"], local_files_only=True, trust_remote_code=False)
     count, repetitions = (3, 1) if args.smoke else (args.requests, args.repetitions)
     secret = os.environ.get("BENCH_API_KEY", "")
     prompt = Path(args.first_prompt_file).read_text(encoding="utf-8") if args.first_prompt_file else DEFAULT_PROMPT
@@ -491,8 +602,6 @@ def run(args):
             lifecycle["first_request"] = timed_request(cfg, secret, args.timeout, prompt,
                                                        output / "first-request.json", origin)
             lifecycle_report(output, redact(lifecycle, secret))
-            from guidellm.benchmark import BenchmarkScenario, benchmark_generative_text
-            from guidellm_compat import completion_drain
             for rep in range(repetitions):
                 # Rotação balanceia parcialmente a posição dos cenários entre repetições.
                 names = args.scenarios[rep % len(args.scenarios):] + args.scenarios[:rep % len(args.scenarios)]
@@ -508,9 +617,8 @@ def run(args):
                         config = scenario_config(cfg, name, n, seed, secret, args.timeout)
                         write_json(output / f"{prefix}-config.json", redact(config, secret))
                         print(f"{prefix}: {n} requisições, uma por vez", flush=True)
-                        with completion_drain():
-                            report, _ = asyncio.run(benchmark_generative_text(BenchmarkScenario.model_validate(config)))
-                        raw = redact(report.model_dump(mode="json"), secret)
+                        report = run_stream_batch(cfg, measurement_tokenizer, name, n, args.timeout, secret)
+                        raw = redact(report, secret)
                         write_json(output / f"{prefix}.json", raw)
                         write_requests_csv(output / f"{prefix}-requests.csv", raw)
                         summary = summarize(raw)
