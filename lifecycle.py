@@ -97,20 +97,30 @@ def wait_models(cfg, secret, timeout, launch=None):
                     raise ValueError("API recusou autenticação; confira BENCH_API_KEY.")
                 response.raise_for_status()
                 models = [m["id"] for m in response.json().get("data", [])]
-                if cfg["model"] in models:
+                expected = cfg["model"]
+                accepted = {expected}
+                if cfg.get("runtime") == "ollama" and ":" not in expected:
+                    accepted.add(expected + ":latest")
+                if accepted.intersection(models):
                     observed = time.perf_counter()
                     return {"models": models, "get_probes": probes,
                             "wait_wall_s": observed - started,
                             "process_to_api_observed_s": observed - launch.started if launch else None,
                             "criterion": "GET /v1/models retornou o ID; não é prova de pesos residentes"}
-                last = f"ID ausente; disponíveis: {models}"
+                last = f"API respondeu, mas modelo esperado={expected!r}; disponíveis={models!r}"
+                if models:
+                    raise RuntimeError(last + ". Confira --alias/--served-model-name e config.model.")
             except (httpx.HTTPError, json.JSONDecodeError, KeyError, TypeError) as exc:
                 last = str(exc)
             elapsed = time.perf_counter() - started
             if not launch or elapsed >= timeout:
                 raise RuntimeError(f"API/modelo não disponível após {elapsed:.1f}s: {last}")
             if time.perf_counter() >= next_update:
-                print(f"Aguardando API do processo iniciado: {elapsed:.0f}s...", flush=True)
+                print(f"[inicialização] runtime={cfg.get('runtime', 'não informado')} "
+                      f"PID={launch.process.pid if launch else 'externo'} decorrido={elapsed:.1f}s "
+                      f"limite={timeout}s; verificando GET {cfg['base_url']}/v1/models "
+                      f"para modelo={cfg['model']!r}; última observação: {last}. "
+                      f"Log do servidor: {launch.output / 'server.log' if launch else 'externo'}", flush=True)
                 next_update = time.perf_counter() + 15
             time.sleep(min(.5, max(0, timeout - elapsed)))
 

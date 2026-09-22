@@ -12,5 +12,6 @@
   "999",
   "--parallel",
   "1",
-  "--jinja"
+  "--jinja",
+  "--alias", "qwen7b-q8-gguf"
 ]

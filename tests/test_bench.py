@@ -58,6 +58,132 @@ class UnitTests(unittest.TestCase):
         self.assertEqual(out["effective_output_tokens_per_second_p50"], 10)
         self.assertEqual(out["request_first_token_latency_milliseconds_p99"], 10)
 
+    def test_closed_loop_batch_accumulates_real_assistant_history(self):
+        class FakeTokenizer:
+            def encode(self, text, add_special_tokens=False):
+                return text.split()
+            def decode(self, ids, skip_special_tokens=False):
+                return " ".join(ids)
+            def apply_chat_template(self, messages, tokenize=True, add_generation_prompt=True):
+                tokens = []
+                for message in messages:
+                    tokens.extend([message["role"], *message["content"].split()])
+                if add_generation_prompt:
+                    tokens.append("assistant")
+                return tokens
+
+        calls = []
+        original = bench.stream_messages_request
+        def fake_stream(cfg, messages, timeout, secret="", max_tokens=bench.OUTPUT_TOKENS, metadata=None):
+            calls.append([dict(message) for message in messages])
+            return {
+                "request_start_time": 0.0, "first_token_time": 0.1, "request_end_time": 0.2,
+                "time_to_first_token_seconds": 0.1, "generation_time_seconds": None,
+                "end_to_end_latency_seconds": 0.2, "completion_tokens": 1,
+                "prompt_tokens": len(messages) * 10, "total_tokens": len(messages) * 10 + 1,
+                "decode_tokens_per_second": None, "end_to_end_tokens_per_second": 5,
+                "inter_token_latency_seconds": None, "time_to_first_token_ms": 100,
+                "request_latency": 0.2, "inter_token_latency_ms": None,
+                "output_tokens": 1, "decode_tokens_s": None, "effective_tokens_s": 5,
+                "stream_content_event_count": 1, "output": f"resposta {len(calls)}",
+                "usage_observed": True, "request_sha256": f"hash-{len(calls)}",
+                "request_args": json.dumps({"body": {"messages": messages, "max_tokens": max_tokens}}),
+                **(metadata or {}), "history_tokens": len(messages) * 10,
+            }
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture_path = Path(tmp) / "conversation.json"
+            fixture_path.write_text(json.dumps({
+                "name": "unit",
+                "system": "sistema fixo",
+                "turns": [{"user": "pergunta um"}, {"user": "pergunta dois"}],
+            }))
+            fixture = bench.load_conversation_fixture(fixture_path)
+            bench.stream_messages_request = fake_stream
+            try:
+                bench.WORKLOADS["unit-conv"] = 80
+                report = bench.run_conversational_batch({"model": "m"}, FakeTokenizer(), "unit-conv", 1, 2, 1,
+                                                        fixture=fixture, loop_mode="closed-loop")
+            finally:
+                bench.stream_messages_request = original
+                bench.WORKLOADS.pop("unit-conv", None)
+
+        self.assertEqual(len(calls), 2)
+        self.assertEqual([message["role"] for message in calls[0]], ["system", "user"])
+        self.assertEqual([message["role"] for message in calls[1]], ["system", "user", "assistant", "user"])
+        self.assertEqual(calls[1][2]["content"], "resposta 1")
+        rows = report["benchmarks"][0]["requests"]["successful"]
+        self.assertEqual([row["mode"] for row in rows], ["closed-loop", "closed-loop"])
+        self.assertEqual([row["turn_index"] for row in rows], [1, 2])
+        self.assertEqual(rows[0]["fixture_sha256"], fixture["sha256"])
+        self.assertEqual(rows[1]["messages_count"], 4)
+        summary = bench.summarize(report)
+        self.assertEqual(summary["successful_request_count"], 2)
+        self.assertEqual(summary["turn_indices"], [1, 2])
+        self.assertEqual(bench.turn_manifest(report)[1]["fixture_sha256"], fixture["sha256"])
+        self.assertEqual(bench.turn_manifest(report)[1]["history_tokens"], 40)
+        self.assertIsInstance(summary["requests_sha256"], str)
+
+    def test_replay_uses_fixed_assistant_from_fixture(self):
+        fixture = {"sha256": "fixture-hash", "data": {"system": "s", "turns": [
+            {"user": "u1", "assistant": "a1 fixa"},
+            {"user": "u2", "assistant": "a2 fixa"},
+        ]}}
+        messages = bench.fixture_messages_for_turn(fixture, 2, ["resposta real ignorada"], "replay")
+        self.assertEqual([message["role"] for message in messages], ["system", "user", "assistant", "user"])
+        self.assertEqual(messages[2]["content"], "a1 fixa")
+
+    def test_fixture_schema_and_replay_preflight(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "conversation.json"
+            path.write_text(json.dumps({"turns": [{"user": "u1"}]}))
+            with self.assertRaisesRegex(ValueError, "system"):
+                bench.load_conversation_fixture(path)
+
+            path.write_text(json.dumps({"system": "s", "turns": [{"user": "u1"}]}))
+            fixture = bench.load_conversation_fixture(path)
+            with self.assertRaisesRegex(ValueError, "replay exige assistant"):
+                bench.validate_conversation_fixture_for_mode(fixture, "replay", 1)
+            bench.validate_conversation_fixture_for_mode(fixture, "closed-loop", 1)
+
+    def test_conversation_artifact_records_history_messages(self):
+        messages = [{"role": "system", "content": "s"}, {"role": "user", "content": "u"}]
+        row = {
+            "mode": "replay", "request_id": "short-c1-t1",
+            "conversation_index": 1, "turn_index": 1,
+            "request_args": json.dumps({"body": {"messages": messages, "max_tokens": 128}}),
+            "output": "a", "request_sha256": "hash", "history_tokens": 12,
+            "history_tokens_estimate": 10,
+        }
+        report = {"benchmarks": [{"requests": {"successful": [row], "errored": [], "incomplete": []}}]}
+        artifact = bench.conversation_artifact(report, {"path": "fixture.json", "sha256": "fixture-hash",
+                                                        "data": {"name": "unit", "version": 1}})
+        self.assertEqual(artifact["fixture"]["sha256"], "fixture-hash")
+        self.assertEqual(artifact["turns"][0]["messages"], messages)
+        self.assertEqual(artifact["turns"][0]["assistant_output"], "a")
+
+    def test_parser_allows_zero_warmup_only(self):
+        original_argv, original_run = sys.argv, bench.run
+        captured = {}
+
+        def fake_run(args):
+            captured["warmup"] = args.warmup
+            captured["requests"] = args.requests
+
+        try:
+            bench.run = fake_run
+            sys.argv = ["bench.py", "run", "--config", "cfg.json", "--local-model-path", "model.gguf",
+                        "--requests", "1", "--repetitions", "1", "--warmup", "0"]
+            bench.main()
+            self.assertEqual(captured, {"warmup": 0, "requests": 1})
+
+            sys.argv = ["bench.py", "run", "--config", "cfg.json", "--local-model-path", "model.gguf",
+                        "--requests", "0", "--warmup", "0"]
+            with self.assertRaises(SystemExit):
+                bench.main()
+        finally:
+            bench.run = original_run
+            sys.argv = original_argv
+
     def test_local_weights_guard(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp)

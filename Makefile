@@ -1,7 +1,11 @@
 # O Make precisa de um executável único; não use "/usr/bin/env bash" aqui.
+ifeq ($(filter oneshell,$(.FEATURES)),)
+$(error GNU Make com .ONESHELL necessário; no macOS use gmake atualizado ou execute no pod)
+endif
 SHELL := /bin/bash
 .ONESHELL:
 .SHELLFLAGS := -eu -o pipefail -c
+.NOTPARALLEL:
 
 # Caminhos podem ser sobrescritos na chamada:
 # make quantize-q8 LLAMA_CPP_DIR=/mnt/llama.cpp HF_MODEL_DIR=/mnt/qwen
@@ -31,19 +35,20 @@ MODEL_14B_TOKENIZER ?= /workspace/models/Qwen2.5-14B-tokenizer
 VLLM_EXTRA_ARGS ?=
 LLAMA_EXTRA_ARGS ?=
 OLLAMA_EXTRA_ARGS ?=
+export VLLM_EXTRA_ARGS LLAMA_EXTRA_ARGS OLLAMA_EXTRA_ARGS
 ifeq ($(MODEL_SIZE),7B)
 GGUF_FILE := $(MODEL_7B_GGUF)
 TOKENIZER_DIR ?= $(MODEL_7B_TOKENIZER)
 HF_GGUF_REPO ?= arthuravianna/Qwen2.5-7B-Instruct-Q8_0.gguf
 HF_GGUF_FILENAME ?= Qwen2.5-7B-Instruct-Q8_0.gguf
 HF_TOKENIZER_MODEL ?= Qwen/Qwen2.5-7B-Instruct
-VLLM_MODEL_DIR ?= $(dir $(MODEL_7B_GGUF))
+VLLM_MODEL_DIR ?= $(MODEL_7B_GGUF)
 VLLM_CONFIG ?= configs/vllm-7b-gguf.json
 VLLM_LAUNCH ?= configs/launch-vllm-7b-gguf.example.json
-LLAMA_MODEL_DIR ?= $(dir $(MODEL_7B_GGUF))
+LLAMA_MODEL_DIR ?= $(MODEL_7B_GGUF)
 LLAMA_CONFIG ?= configs/llamacpp-7b-gguf.json
 LLAMA_LAUNCH ?= configs/launch-llamacpp-7b-gguf.json
-OLLAMA_MODEL_DIR ?= $(dir $(MODEL_7B_GGUF))
+OLLAMA_MODEL_DIR ?= $(MODEL_7B_GGUF)
 OLLAMA_CONFIG ?= configs/ollama-7b-gguf.json
 OLLAMA_LAUNCH ?= configs/launch-ollama-7b-gguf.json
 OLLAMA_MODEL_NAME ?= qwen7b-q8-gguf
@@ -69,18 +74,35 @@ endif
 # A imagem do pod normalmente expõe vLLM no PATH. O launch JSON usa o nome
 # `vllm`, evitando depender do caminho do venv usado para construir a imagem.
 VLLM_BIN ?= $(shell command -v vllm 2>/dev/null || printf 'vllm')
+VLLM_PYTHON ?= /app/.vllm_venv/bin/python
 # A imagem do pod já fornece llama-server no PATH.  O build local continua
 # disponível em `make build-llama`, mas não é pré-requisito do benchmark.
 LLAMA_SERVER_BIN ?= $(shell p=$$(command -v llama-server 2>/dev/null || true); if test -x "$$p"; then printf '%s' "$$p"; else found=; for p in /usr/local/lib/ollama/llama-server /workspace/llama.cpp/build/bin/llama-server /app/llama.cpp/build/bin/llama-server; do if test -x "$$p"; then printf '%s' "$$p"; found=1; break; fi; done; test "$${found:-}" = 1 || printf 'llama-server'; fi)
+LLAMA_BACKEND_PATH ?= $(firstword $(wildcard /usr/local/lib/ollama/cuda_v12/libggml-cuda.so /usr/local/lib/ollama/cuda_v13/libggml-cuda.so))
+REQUIRE_GPU ?= 1
 OLLAMA_BIN ?= $(shell command -v ollama 2>/dev/null || printf 'ollama')
 BENCH_SCENARIOS ?= short medium long
 BENCH_REQUESTS ?= 50
 BENCH_REPETITIONS ?= 3
 BENCH_WARMUP ?= 3
+BENCH_MODE ?= independent
+CONVERSATION_TURNS ?= 1
+CONVERSATION_FIXTURE ?= workloads/conversations/qwen_chat_v1.json
 BENCH_STARTUP_TIMEOUT ?= 1800
+# Reutiliza dependências e pesos já preparados, sem pip/downloads.
+PREPARE_OFFLINE ?= 0
+SWEEP_MAX_CONTEXT ?= 16384
+SWEEP_START ?= 1024
+SWEEP_STEP ?= 1024
+SWEEP_REQUESTS ?= $(BENCH_REQUESTS)
+SWEEP_REPETITIONS ?= $(BENCH_REPETITIONS)
+SWEEP_WARMUP ?= $(BENCH_WARMUP)
+SWEEP_MODE ?= $(BENCH_MODE)
+SWEEP_CONVERSATION_TURNS ?= $(CONVERSATION_TURNS)
+SWEEP_CONVERSATION_FIXTURE ?= $(CONVERSATION_FIXTURE)
 POD_SSH ?=
 POD_PORT ?= 22
-REMOTE_BENCH_DIR ?= $(CURDIR)
+REMOTE_BENCH_DIR ?= /workspace/llm_local_inference_masters
 REMOTE_RESULTS_DIR ?= $(REMOTE_BENCH_DIR)/results
 LOCAL_RESULTS_DIR ?= results-from-pod
 
@@ -89,7 +111,7 @@ QUANTIZE_SCRIPT := scripts/quantize_hf_to_gguf_q8_0.sh
 
 .PHONY: help check-tools clone-llama build-llama install-llama-python \
         download-source inspect-source quantize-q8 verify-gguf upload-hf \
-        install-benchmark download-model download-tokenizer check-runtimes check-vllm-gguf prepare-benchmark prepare-vllm prepare-llama prepare-ollama smoke-vllm bench-vllm bench-llama bench-ollama bench-all bench kv-sweep pull-results check-profilers docs clean-info
+        install-benchmark download-model download-tokenizer check-runtimes check-vllm-gguf prepare-benchmark prepare-vllm prepare-llama prepare-ollama smoke-vllm smoke-llama smoke-ollama bench-vllm bench-llama bench-ollama bench-all bench kv-sweep kv-sweep-vllm kv-sweep-llama kv-sweep-ollama quick-sweep-vllm quick-sweep-llama quick-sweep-ollama pull-results check-profilers docs clean-info
 
 help:
 	@printf '%s\n' \
@@ -114,6 +136,8 @@ help:
 		'  make prepare-benchmark    instala cliente, cria pastas e valida modelo/configs/runtimes' \
 		'  make prepare-ollama      cria o alias Ollama a partir do GGUF local, sem download' \
 		'  make smoke-vllm           executa smoke do benchmark com GGUF local' \
+		'  make smoke-llama          executa smoke equivalente com llama.cpp' \
+		'  make smoke-ollama         executa smoke equivalente com Ollama' \
 		'  make bench-vllm            bateria formal: short/medium/long, 50x3, com telemetria' \
 		'  make bench-llama           mesma bateria usando llama-server' \
 		'  make bench-ollama          mesma bateria usando Ollama (modelo já criado localmente)' \
@@ -125,7 +149,11 @@ help:
 		'' \
 		'Variáveis úteis:' \
 		'  MODEL_SIZE=7B|14B, MODEL_7B_GGUF, MODEL_14B_GGUF' \
-		'  VLLM_EXTRA_ARGS, LLAMA_EXTRA_ARGS, OLLAMA_EXTRA_ARGS' \
+		'  PREPARE_OFFLINE=1 reutiliza cliente/modelos locais; BENCH_STARTUP_TIMEOUT limita startup' \
+		'  VLLM_EXTRA_ARGS, LLAMA_EXTRA_ARGS, OLLAMA_EXTRA_ARGS (sintaxe shell, convertida com shlex)' \
+		'  VLLM_PYTHON, LLAMA_BACKEND_PATH, REQUIRE_GPU=1|0' \
+		'  BENCH_MODE=independent|closed-loop|replay, CONVERSATION_TURNS, CONVERSATION_FIXTURE' \
+		'  SWEEP_START, SWEEP_STEP, SWEEP_MAX_CONTEXT, SWEEP_REQUESTS, SWEEP_REPETITIONS, SWEEP_WARMUP, SWEEP_MODE, SWEEP_CONVERSATION_TURNS, SWEEP_CONVERSATION_FIXTURE' \
 		'  LLAMA_CPP_DIR, HF_MODEL_DIR, GGUF_OUTPUT_DIR, QUANTIZE_THREADS' \
 		'  VLLM_MODEL_DIR, VLLM_CONFIG, VLLM_LAUNCH' \
 		'  LLAMA_MODEL_DIR, LLAMA_CONFIG, LLAMA_LAUNCH' \
@@ -172,7 +200,7 @@ verify-gguf:
 	ls -lh "$(GGUF_FILE)"
 	printf 'assinatura: '
 	head -c 4 "$(GGUF_FILE)" | od -An -tc
-	$(SYSTEM_PYTHON) -c 'import sys; from pathlib import Path; p=Path(sys.argv[1]); data=p.read_bytes(); sys.exit("assinatura GGUF inválida") if data[:4] != b"GGUF" else print("assinatura GGUF válida")' "$(GGUF_FILE)"
+	$(SYSTEM_PYTHON) -c 'import sys; from pathlib import Path; p=Path(sys.argv[1]); data=p.open("rb").read(4); sys.exit("assinatura GGUF inválida") if data != b"GGUF" else print("assinatura GGUF válida")' "$(GGUF_FILE)"
 	sha256sum "$(GGUF_FILE)"
 
 install-benchmark:
@@ -182,7 +210,7 @@ install-benchmark:
 	"$(PYTHON)" -m pip install --disable-pip-version-check -r requirements.txt
 	"$(PYTHON)" -m pip check
 
-download-model:
+download-model: install-benchmark
 	@echo '[PREPARE] baixando GGUF $(MODEL_SIZE): $(HF_GGUF_REPO)'
 	mkdir -p "$(dir $(GGUF_FILE))"
 	HF_HUB_OFFLINE=0 TRANSFORMERS_OFFLINE=0 HF_HUB_ENABLE_HF_TRANSFER="$(HF_HUB_ENABLE_HF_TRANSFER)" \
@@ -190,7 +218,7 @@ download-model:
 		--local-dir "$(dir $(GGUF_FILE))"
 	@test -f "$(GGUF_FILE)" || { echo "GGUF baixado em local inesperado; esperado: $(GGUF_FILE)"; exit 1; }
 
-download-tokenizer:
+download-tokenizer: install-benchmark
 	@echo '[PREPARE] baixando tokenizer local: $(HF_TOKENIZER_MODEL)'
 	mkdir -p "$(TOKENIZER_DIR)"
 	# Usamos snapshot_download com allow_patterns em vez da combinação de
@@ -203,7 +231,15 @@ download-tokenizer:
 	@test -f "$(TOKENIZER_DIR)/tokenizer_config.json" || { echo "tokenizer_config.json não foi baixado" >&2; exit 1; }
 	@test -f "$(TOKENIZER_DIR)/tokenizer.json" || { echo "tokenizer.json não foi baixado" >&2; exit 1; }
 
+ifeq ($(PREPARE_OFFLINE),1)
+prepare-benchmark: verify-gguf
+else ifeq ($(PREPARE_OFFLINE),0)
 prepare-benchmark: install-benchmark download-model download-tokenizer verify-gguf
+else
+$(error PREPARE_OFFLINE deve ser 0 ou 1)
+endif
+
+prepare-benchmark:
 	@echo '[PREPARE] criando diretório de resultados'
 	mkdir -p results
 	@echo '[PREPARE] validando imports do cliente'
@@ -231,10 +267,14 @@ check-vllm-gguf:
 	@set -eu; \
 	bin="$$(command -v "$(VLLM_BIN)" 2>/dev/null || printf '%s' "$(VLLM_BIN)")"; \
 	test -x "$$bin" || { echo "vLLM ausente ou não executável: $$bin" >&2; exit 1; }; \
-	real="$$(readlink -f "$$bin" 2>/dev/null || printf '%s' "$$bin")"; \
-	py="$$(dirname "$$real")/python"; \
-	if test ! -x "$$py"; then py="$$(head -1 "$$bin" | sed 's/^#!//; s/ .*$$//')"; fi; \
-	test -x "$$py" || { echo "Não consegui localizar o Python do vLLM para validar o plugin: $$py" >&2; exit 1; }; \
+	py="$(VLLM_PYTHON)"; \
+	if test -z "$$py"; then \
+		shebang="$$(head -1 "$$bin")"; \
+		case "$$shebang" in '#!'*python*) py="$${shebang#\#!}"; py="$${py%% *}" ;; \
+		*) echo "O executável vLLM é um wrapper ou não declara Python diretamente; informe VLLM_PYTHON=/caminho/do/python-do-vllm." >&2; exit 1 ;; \
+		esac; \
+	fi; \
+	test -x "$$py" || { echo "Python do vLLM ausente ou não executável: $$py" >&2; exit 1; }; \
 	"$$py" -c 'import vllm; import vllm_gguf_plugin; print("[PREPARE vLLM] vLLM e vllm-gguf-plugin carregados no mesmo ambiente")' || { \
 		echo "vllm-gguf-plugin ausente no ambiente do executável $(VLLM_BIN)." >&2; \
 		echo "Instale nesse ambiente (sem misturar com o venv do benchmark): $$py -m pip install vllm-gguf-plugin" >&2; \
@@ -248,16 +288,16 @@ prepare-vllm: prepare-benchmark check-vllm-gguf
 
 prepare-llama: prepare-benchmark
 	@test -x "$(LLAMA_SERVER_BIN)" || { echo "llama-server ausente: $(LLAMA_SERVER_BIN). Compile o llama.cpp ou use LLAMA_SERVER_BIN=..."; exit 1; }
+	backend='$(LLAMA_BACKEND_PATH)'; if test -n "$$backend"; then export GGML_BACKEND_PATH="$$backend"; export LD_LIBRARY_PATH="$$(dirname "$$backend"):$${LD_LIBRARY_PATH:-}"; fi
 	"$(LLAMA_SERVER_BIN)" --help >/dev/null
+	devices="$$("$(LLAMA_SERVER_BIN)" --list-devices 2>&1)"; printf '%s\n' "$$devices"
+	if test "$(REQUIRE_GPU)" = 1 && ! printf '%s\n' "$$devices" | grep -qi cuda; then echo 'llama-server não detectou dispositivo CUDA; informe LLAMA_BACKEND_PATH ou use REQUIRE_GPU=0 conscientemente.' >&2; exit 1; fi
 	@echo '[PREPARE llama.cpp] cliente, modelo, tokenizer e executável validados'
 
 prepare-ollama: prepare-benchmark
 	@echo '[PREPARE Ollama] criando $(OLLAMA_MODEL_NAME) a partir do GGUF local; nenhum download será feito'
-	command -v "$(OLLAMA_BIN)" >/dev/null || { echo "ollama ausente: $(OLLAMA_BIN)"; exit 1; }
-	"$(OLLAMA_BIN)" list >/dev/null || { echo 'Ollama não está acessível. Inicie `ollama serve` antes de prepare-ollama.' >&2; exit 1; }
-	printf 'FROM %s\nPARAMETER num_ctx 16384\n' "$(GGUF_FILE)" > /tmp/Modelfile.chatbot-runtime
-	"$(OLLAMA_BIN)" create "$(OLLAMA_MODEL_NAME)" -f /tmp/Modelfile.chatbot-runtime
-	"$(OLLAMA_BIN)" show "$(OLLAMA_MODEL_NAME)" >/dev/null
+	"$(PYTHON)" scripts/prepare_ollama.py --binary "$(OLLAMA_BIN)" --model "$(OLLAMA_MODEL_NAME)" \
+		--gguf "$(GGUF_FILE)" --context 16384 --base-url "$$("$(PYTHON)" -c 'import json,sys; print(json.load(open(sys.argv[1]))["base_url"])' "$(OLLAMA_CONFIG)")"
 	@echo '[PREPARE Ollama] alias $(OLLAMA_MODEL_NAME) disponível'
 
 upload-hf: verify-gguf
@@ -275,8 +315,23 @@ smoke-vllm: prepare-vllm
 		--local-model-path "$(VLLM_MODEL_DIR)" \
 		--launch "$(VLLM_LAUNCH)" \
 		--launch-executable "$(VLLM_BIN)" \
-		--launch-extra-args $(VLLM_EXTRA_ARGS) \
-		--smoke --scenarios short --startup-timeout 1800
+		--launch-extra-args-json "$$($(SYSTEM_PYTHON) -c 'import json,os,shlex; print(json.dumps(shlex.split(os.environ.get("VLLM_EXTRA_ARGS", ""))))')" \
+		--smoke --scenarios short --startup-timeout "$(BENCH_STARTUP_TIMEOUT)"
+
+smoke-llama: prepare-llama
+	backend='$(LLAMA_BACKEND_PATH)'; if test -n "$$backend"; then export GGML_BACKEND_PATH="$$backend"; export LD_LIBRARY_PATH="$$(dirname "$$backend"):$${LD_LIBRARY_PATH:-}"; fi
+	PATH="$(dir $(LLAMA_SERVER_BIN)):$${PATH}" HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_HUB_ENABLE_HF_TRANSFER=0 \
+		$(PYTHON) bench.py run --config "$(LLAMA_CONFIG)" --local-model-path "$(LLAMA_MODEL_DIR)" \
+		--launch "$(LLAMA_LAUNCH)" --launch-executable "$(LLAMA_SERVER_BIN)" \
+		--launch-extra-args-json "$$($(SYSTEM_PYTHON) -c 'import json,os,shlex; print(json.dumps(shlex.split(os.environ.get("LLAMA_EXTRA_ARGS", ""))))')" \
+		--smoke --scenarios short --startup-timeout "$(BENCH_STARTUP_TIMEOUT)"
+
+smoke-ollama: prepare-ollama
+	HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_HUB_ENABLE_HF_TRANSFER=0 \
+		$(PYTHON) bench.py run --config "$(OLLAMA_CONFIG)" --local-model-path "$(OLLAMA_MODEL_DIR)" \
+		--launch "$(OLLAMA_LAUNCH)" --launch-executable "$(OLLAMA_BIN)" \
+		--launch-extra-args-json "$$($(SYSTEM_PYTHON) -c 'import json,os,shlex; print(json.dumps(shlex.split(os.environ.get("OLLAMA_EXTRA_ARGS", ""))))')" \
+		--smoke --scenarios short --startup-timeout "$(BENCH_STARTUP_TIMEOUT)"
 
 bench-vllm: prepare-vllm
 	@echo '[BENCH vLLM] início: short/medium/long + telemetria + KV sweep embutido'
@@ -286,10 +341,13 @@ bench-vllm: prepare-vllm
 		--local-model-path "$(VLLM_MODEL_DIR)" \
 		--launch "$(VLLM_LAUNCH)" \
 		--launch-executable "$(VLLM_BIN)" \
+		--launch-extra-args-json "$$($(SYSTEM_PYTHON) -c 'import json,os,shlex; print(json.dumps(shlex.split(os.environ.get("VLLM_EXTRA_ARGS", ""))))')" \
 		--scenarios $(BENCH_SCENARIOS) \
 		--requests "$(BENCH_REQUESTS)" \
 		--repetitions "$(BENCH_REPETITIONS)" \
 		--warmup "$(BENCH_WARMUP)" \
+		--mode "$(BENCH_MODE)" --conversation-turns "$(CONVERSATION_TURNS)" \
+		--conversation-fixture "$(CONVERSATION_FIXTURE)" \
 		--collect-kv-metrics \
 		--startup-timeout "$(BENCH_STARTUP_TIMEOUT)"
 	@echo '[BENCH vLLM] bateria base concluída; iniciando sweep KV em passos de 1024'
@@ -298,31 +356,41 @@ bench-vllm: prepare-vllm
 		--config "$(VLLM_CONFIG)" --launch "$(VLLM_LAUNCH)" \
 		--local-model-path "$(VLLM_MODEL_DIR)" --python "$(PYTHON)" \
 		--launch-executable "$(VLLM_BIN)" \
-		--launch-extra-args $(VLLM_EXTRA_ARGS) \
-		--requests "$(BENCH_REQUESTS)" --repetitions "$(BENCH_REPETITIONS)" \
-		--warmup "$(BENCH_WARMUP)" --startup-timeout "$(BENCH_STARTUP_TIMEOUT)" \
+		--launch-extra-args-json "$$($(SYSTEM_PYTHON) -c 'import json,os,shlex; print(json.dumps(shlex.split(os.environ.get("VLLM_EXTRA_ARGS", ""))))')" \
+		--start "$(SWEEP_START)" --step "$(SWEEP_STEP)" --max-context "$(SWEEP_MAX_CONTEXT)" \
+		--requests "$(SWEEP_REQUESTS)" --repetitions "$(SWEEP_REPETITIONS)" \
+		--warmup "$(SWEEP_WARMUP)" --mode "$(SWEEP_MODE)" --conversation-turns "$(SWEEP_CONVERSATION_TURNS)" \
+		--conversation-fixture "$(SWEEP_CONVERSATION_FIXTURE)" \
+		--startup-timeout "$(BENCH_STARTUP_TIMEOUT)" \
 		--results results/kv-sweep-vllm
 
 bench-llama: prepare-llama
 	@echo '[BENCH llama.cpp] início: short/medium/long + telemetria + KV sweep embutido'
+	backend='$(LLAMA_BACKEND_PATH)'; if test -n "$$backend"; then export GGML_BACKEND_PATH="$$backend"; export LD_LIBRARY_PATH="$$(dirname "$$backend"):$${LD_LIBRARY_PATH:-}"; fi
 	PATH="$(dir $(LLAMA_SERVER_BIN)):$${PATH}" HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_HUB_ENABLE_HF_TRANSFER=0 \
 		$(PYTHON) bench.py run --config "$(LLAMA_CONFIG)" \
 		--local-model-path "$(LLAMA_MODEL_DIR)" --launch "$(LLAMA_LAUNCH)" \
 		--launch-executable "$(LLAMA_SERVER_BIN)" \
-		--launch-extra-args $(LLAMA_EXTRA_ARGS) \
+		--launch-extra-args-json "$$($(SYSTEM_PYTHON) -c 'import json,os,shlex; print(json.dumps(shlex.split(os.environ.get("LLAMA_EXTRA_ARGS", ""))))')" \
 		--scenarios $(BENCH_SCENARIOS) --requests "$(BENCH_REQUESTS)" \
 		--repetitions "$(BENCH_REPETITIONS)" --warmup "$(BENCH_WARMUP)" \
+		--mode "$(BENCH_MODE)" --conversation-turns "$(CONVERSATION_TURNS)" \
+		--conversation-fixture "$(CONVERSATION_FIXTURE)" \
 		--collect-kv-metrics --startup-timeout "$(BENCH_STARTUP_TIMEOUT)"
 	@echo '[BENCH llama.cpp] bateria base concluída; iniciando sweep KV em passos de 1024'
+	backend='$(LLAMA_BACKEND_PATH)'; if test -n "$$backend"; then export GGML_BACKEND_PATH="$$backend"; export LD_LIBRARY_PATH="$$(dirname "$$backend"):$${LD_LIBRARY_PATH:-}"; fi
 	PATH="$(dir $(LLAMA_SERVER_BIN)):$${PATH}" HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_HUB_ENABLE_HF_TRANSFER=0 \
 		$(PYTHON) scripts/run_kv_sweep.py --runtime-label llama.cpp \
 		--config "$(LLAMA_CONFIG)" --launch "$(LLAMA_LAUNCH)" \
 		--local-model-path "$(LLAMA_MODEL_DIR)" --python "$(PYTHON)" \
 		--launch-executable "$(LLAMA_SERVER_BIN)" \
-		--launch-extra-args $(LLAMA_EXTRA_ARGS) \
+		--launch-extra-args-json "$$($(SYSTEM_PYTHON) -c 'import json,os,shlex; print(json.dumps(shlex.split(os.environ.get("LLAMA_EXTRA_ARGS", ""))))')" \
 		--context-flag=--ctx-size \
-		--requests "$(BENCH_REQUESTS)" --repetitions "$(BENCH_REPETITIONS)" \
-		--warmup "$(BENCH_WARMUP)" --startup-timeout "$(BENCH_STARTUP_TIMEOUT)" \
+		--start "$(SWEEP_START)" --step "$(SWEEP_STEP)" --max-context "$(SWEEP_MAX_CONTEXT)" \
+		--requests "$(SWEEP_REQUESTS)" --repetitions "$(SWEEP_REPETITIONS)" \
+		--warmup "$(SWEEP_WARMUP)" --mode "$(SWEEP_MODE)" --conversation-turns "$(SWEEP_CONVERSATION_TURNS)" \
+		--conversation-fixture "$(SWEEP_CONVERSATION_FIXTURE)" \
+		--startup-timeout "$(BENCH_STARTUP_TIMEOUT)" \
 		--results results/kv-sweep-llama
 
 bench-ollama: prepare-ollama
@@ -332,9 +400,11 @@ bench-ollama: prepare-ollama
 		$(PYTHON) bench.py run --config "$(OLLAMA_CONFIG)" \
 		--local-model-path "$(OLLAMA_MODEL_DIR)" --launch "$(OLLAMA_LAUNCH)" \
 		--launch-executable "$(OLLAMA_BIN)" \
-		--launch-extra-args $(OLLAMA_EXTRA_ARGS) \
+		--launch-extra-args-json "$$($(SYSTEM_PYTHON) -c 'import json,os,shlex; print(json.dumps(shlex.split(os.environ.get("OLLAMA_EXTRA_ARGS", ""))))')" \
 		--scenarios $(BENCH_SCENARIOS) --requests "$(BENCH_REQUESTS)" \
 		--repetitions "$(BENCH_REPETITIONS)" --warmup "$(BENCH_WARMUP)" \
+		--mode "$(BENCH_MODE)" --conversation-turns "$(CONVERSATION_TURNS)" \
+		--conversation-fixture "$(CONVERSATION_FIXTURE)" \
 		--collect-kv-metrics --startup-timeout "$(BENCH_STARTUP_TIMEOUT)"
 	@echo '[BENCH Ollama] bateria base concluída; iniciando sweep KV em passos de 1024'
 	HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_HUB_ENABLE_HF_TRANSFER=0 \
@@ -342,10 +412,13 @@ bench-ollama: prepare-ollama
 		--config "$(OLLAMA_CONFIG)" --launch "$(OLLAMA_LAUNCH)" \
 		--local-model-path "$(OLLAMA_MODEL_DIR)" --python "$(PYTHON)" \
 		--launch-executable "$(OLLAMA_BIN)" \
-		--launch-extra-args $(OLLAMA_EXTRA_ARGS) \
+		--launch-extra-args-json "$$($(SYSTEM_PYTHON) -c 'import json,os,shlex; print(json.dumps(shlex.split(os.environ.get("OLLAMA_EXTRA_ARGS", ""))))')" \
 		--context-flag none \
-		--requests "$(BENCH_REQUESTS)" --repetitions "$(BENCH_REPETITIONS)" \
-		--warmup "$(BENCH_WARMUP)" --startup-timeout "$(BENCH_STARTUP_TIMEOUT)" \
+		--start "$(SWEEP_START)" --step "$(SWEEP_STEP)" --max-context "$(SWEEP_MAX_CONTEXT)" \
+		--requests "$(SWEEP_REQUESTS)" --repetitions "$(SWEEP_REPETITIONS)" \
+		--warmup "$(SWEEP_WARMUP)" --mode "$(SWEEP_MODE)" --conversation-turns "$(SWEEP_CONVERSATION_TURNS)" \
+		--conversation-fixture "$(SWEEP_CONVERSATION_FIXTURE)" \
+		--startup-timeout "$(BENCH_STARTUP_TIMEOUT)" \
 		--results results/kv-sweep-ollama
 
 bench-all:
@@ -361,13 +434,65 @@ bench-all:
 
 bench: bench-all
 
-kv-sweep: prepare-vllm
+kv-sweep: kv-sweep-vllm
+
+kv-sweep-vllm: prepare-vllm
 	HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_HUB_ENABLE_HF_TRANSFER=0 \
-		$(PYTHON) scripts/run_kv_sweep.py \
+		$(PYTHON) scripts/run_kv_sweep.py --runtime-label vllm \
 		--config "$(VLLM_CONFIG)" --launch "$(VLLM_LAUNCH)" \
 		--local-model-path "$(VLLM_MODEL_DIR)" --python "$(PYTHON)" \
-		--requests "$(BENCH_REQUESTS)" --repetitions "$(BENCH_REPETITIONS)" \
-		--warmup "$(BENCH_WARMUP)" --startup-timeout "$(BENCH_STARTUP_TIMEOUT)"
+		--launch-executable "$(VLLM_BIN)" \
+		--launch-extra-args-json "$$($(SYSTEM_PYTHON) -c 'import json,os,shlex; print(json.dumps(shlex.split(os.environ.get("VLLM_EXTRA_ARGS", ""))))')" \
+		--start "$(SWEEP_START)" --step "$(SWEEP_STEP)" --max-context "$(SWEEP_MAX_CONTEXT)" \
+		--requests "$(SWEEP_REQUESTS)" --repetitions "$(SWEEP_REPETITIONS)" \
+		--warmup "$(SWEEP_WARMUP)" --mode "$(SWEEP_MODE)" --conversation-turns "$(SWEEP_CONVERSATION_TURNS)" \
+		--conversation-fixture "$(SWEEP_CONVERSATION_FIXTURE)" \
+		--startup-timeout "$(BENCH_STARTUP_TIMEOUT)" --results results/kv-sweep-vllm
+
+kv-sweep-llama: prepare-llama
+	backend='$(LLAMA_BACKEND_PATH)'; if test -n "$$backend"; then export GGML_BACKEND_PATH="$$backend"; export LD_LIBRARY_PATH="$$(dirname "$$backend"):$${LD_LIBRARY_PATH:-}"; fi
+	PATH="$(dir $(LLAMA_SERVER_BIN)):$${PATH}" HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_HUB_ENABLE_HF_TRANSFER=0 \
+		$(PYTHON) scripts/run_kv_sweep.py --runtime-label llama.cpp --config "$(LLAMA_CONFIG)" --launch "$(LLAMA_LAUNCH)" \
+		--local-model-path "$(LLAMA_MODEL_DIR)" --python "$(PYTHON)" --launch-executable "$(LLAMA_SERVER_BIN)" \
+		--launch-extra-args-json "$$($(SYSTEM_PYTHON) -c 'import json,os,shlex; print(json.dumps(shlex.split(os.environ.get("LLAMA_EXTRA_ARGS", ""))))')" --context-flag=--ctx-size \
+		--start "$(SWEEP_START)" --step "$(SWEEP_STEP)" --max-context "$(SWEEP_MAX_CONTEXT)" \
+		--requests "$(SWEEP_REQUESTS)" --repetitions "$(SWEEP_REPETITIONS)" \
+		--warmup "$(SWEEP_WARMUP)" --mode "$(SWEEP_MODE)" --conversation-turns "$(SWEEP_CONVERSATION_TURNS)" \
+		--conversation-fixture "$(SWEEP_CONVERSATION_FIXTURE)" \
+		--startup-timeout "$(BENCH_STARTUP_TIMEOUT)" --results results/kv-sweep-llama
+
+kv-sweep-ollama: prepare-ollama
+	HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_HUB_ENABLE_HF_TRANSFER=0 \
+		$(PYTHON) scripts/run_kv_sweep.py --runtime-label ollama --config "$(OLLAMA_CONFIG)" --launch "$(OLLAMA_LAUNCH)" \
+		--local-model-path "$(OLLAMA_MODEL_DIR)" --python "$(PYTHON)" --launch-executable "$(OLLAMA_BIN)" \
+		--launch-extra-args-json "$$($(SYSTEM_PYTHON) -c 'import json,os,shlex; print(json.dumps(shlex.split(os.environ.get("OLLAMA_EXTRA_ARGS", ""))))')" --context-flag none \
+		--start "$(SWEEP_START)" --step "$(SWEEP_STEP)" --max-context "$(SWEEP_MAX_CONTEXT)" \
+		--requests "$(SWEEP_REQUESTS)" --repetitions "$(SWEEP_REPETITIONS)" \
+		--warmup "$(SWEEP_WARMUP)" --mode "$(SWEEP_MODE)" --conversation-turns "$(SWEEP_CONVERSATION_TURNS)" \
+		--conversation-fixture "$(SWEEP_CONVERSATION_FIXTURE)" \
+		--startup-timeout "$(BENCH_STARTUP_TIMEOUT)" --results results/kv-sweep-ollama
+
+quick-sweep-vllm: SWEEP_REQUESTS=1
+quick-sweep-vllm: SWEEP_REPETITIONS=1
+quick-sweep-vllm: SWEEP_WARMUP=0
+quick-sweep-vllm: SWEEP_START=1024
+quick-sweep-vllm: SWEEP_STEP=2048
+quick-sweep-vllm: SWEEP_MAX_CONTEXT=8192
+quick-sweep-vllm: kv-sweep-vllm
+quick-sweep-llama: SWEEP_REQUESTS=1
+quick-sweep-llama: SWEEP_REPETITIONS=1
+quick-sweep-llama: SWEEP_WARMUP=0
+quick-sweep-llama: SWEEP_START=1024
+quick-sweep-llama: SWEEP_STEP=2048
+quick-sweep-llama: SWEEP_MAX_CONTEXT=8192
+quick-sweep-llama: kv-sweep-llama
+quick-sweep-ollama: SWEEP_REQUESTS=1
+quick-sweep-ollama: SWEEP_REPETITIONS=1
+quick-sweep-ollama: SWEEP_WARMUP=0
+quick-sweep-ollama: SWEEP_START=1024
+quick-sweep-ollama: SWEEP_STEP=2048
+quick-sweep-ollama: SWEEP_MAX_CONTEXT=8192
+quick-sweep-ollama: kv-sweep-ollama
 
 pull-results:
 	@test -n "$(POD_SSH)" || { echo 'Informe POD_SSH, por exemplo: POD_SSH=root@pod-host'; exit 1; }

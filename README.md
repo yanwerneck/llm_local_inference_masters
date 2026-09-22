@@ -66,7 +66,7 @@ O modelo 7B oficial desta rodada é [`arthuravianna/Qwen2.5-7B-Instruct-Q8_0.ggu
 
 O download do tokenizer é feito pelo `huggingface_hub.snapshot_download` com filtros explícitos, e não pela combinação ambígua de nomes posicionais e `--include` da CLI `hf`. A preparação falha se `config.json`, `tokenizer_config.json` ou `tokenizer.json` não estiverem presentes; isso evita iniciar o llama.cpp com um diretório de tokenizer incompleto.
 
-As configurações vLLM deste repositório usam `--gpu-memory-utilization 1.0`, isto é, disponibilizam 100% do orçamento de VRAM ao executor. Esse parâmetro não força `GPU-Util=100%`: a utilização computacional continua dependendo da carga, e OOMs continuam sendo preservados como falhas.
+As configurações vLLM deste repositório usam por padrão `--gpu-memory-utilization 0.95`, reservando uma margem de 5% da VRAM. Esse parâmetro limita o orçamento de memória do executor; não limita a utilização computacional da GPU a 95%. O valor `1.0` falhou no Pod observado porque havia 23,30 GiB livres de 23,56 GiB, menos que o orçamento integral solicitado.
 
 Para a rodada 14B:
 
@@ -111,11 +111,18 @@ make prepare-ollama MODEL_SIZE=7B
 
 Assim, a ausência de vLLM não impede preparar o modelo para llama.cpp ou Ollama.
 
-`prepare-llama` assume que a imagem do pod já fornece `llama-server` no `PATH` e valida esse executável. O template chama simplesmente `llama-server`, portanto não depende de um caminho específico de `/workspace`. Se a imagem não tiver o binário, use `make build-llama` explicitamente (com CMake e toolkit CUDA) ou instale o runtime no ambiente do pod.
+`prepare-llama` assume que a imagem do pod já fornece `llama-server` no `PATH` e valida esse executável. O template chama simplesmente `llama-server`, portanto não depende de um caminho específico de `/workspace`. Se a imagem não tiver o binário, use `make build-llama` explicitamente (com CMake e toolkit CUDA) ou instale o runtime no ambiente do pod. Por padrão, `REQUIRE_GPU=1`: a preparação falha se `llama-server --list-devices` não listar CUDA. Em imagens nas quais os backends são carregados como plugins, informe o caminho completo do arquivo `.so`, não apenas seu diretório:
+
+```bash
+make prepare-llama MODEL_SIZE=7B \
+  LLAMA_BACKEND_PATH=/caminho/cuda_v13/libggml-cuda.so
+```
+
+O Make exporta esse arquivo em `GGML_BACKEND_PATH` e acrescenta seu diretório a `LD_LIBRARY_PATH`. `REQUIRE_GPU=0` existe somente para uma execução CPU conscientemente escolhida; não deve mascarar uma GPU ausente.
 
 O mesmo princípio vale para os três runtimes: os templates chamam `vllm`, `llama-server` e `ollama` pelo `PATH`, sem assumir `/workspace/vllm-runtime/.venv` ou `/usr/local/bin/ollama`. Se a imagem usar outro local, coloque o diretório no `PATH` ou sobrescreva `VLLM_BIN`, `LLAMA_SERVER_BIN` ou `OLLAMA_BIN`.
 
-Antes de iniciar o vLLM com GGUF, `prepare-vllm` executa `make check-vllm-gguf`. Essa verificação importa `vllm` e `vllm_gguf_plugin` usando o Python pertencente ao executável `vllm`. Se o plugin não estiver nesse ambiente, a preparação para com a instrução explícita:
+Antes de iniciar o vLLM com GGUF, `prepare-vllm` executa `make check-vllm-gguf`. Essa verificação importa `vllm` e `vllm_gguf_plugin` usando o Python pertencente ao executável `vllm`. Wrappers nem sempre revelam seu interpretador pelo shebang; nesse caso, ou sempre que a detecção não for confiável, passe-o explicitamente com `VLLM_PYTHON=/caminho/do/python-do-vllm`. Se o plugin não estiver nesse ambiente, a preparação para com a instrução explícita:
 
 ```bash
 /caminho/do/venv-do-vllm/bin/python -m pip install vllm-gguf-plugin
@@ -154,7 +161,7 @@ make verify-gguf MODEL_SIZE=7B
 
 ### `make prepare-ollama`
 
-Verifica que o daemon Ollama está acessível e cria o alias correspondente ao tamanho escolhido (`qwen7b-q8-gguf` ou `qwen14b-q8-gguf`) a partir do GGUF local usando um `Modelfile` temporário. Não executa `ollama pull`.
+Cria o alias correspondente ao tamanho escolhido (`qwen7b-q8-gguf` ou `qwen14b-q8-gguf`) a partir do GGUF local usando um `Modelfile` temporário. Não executa `ollama pull`. Se já houver uma API Ollama na URL configurada, ela é preservada. Caso contrário, o script inicia seu próprio `ollama serve`, importa e verifica o alias e encerra somente esse daemon temporário. Já o benchmark lança um servidor sob seu controle e, por segurança, exige que a porta configurada esteja livre.
 
 ### Benchmarks individuais e agregado
 
@@ -171,9 +178,34 @@ make bench MODEL_SIZE=7B
 
 ```bash
 make smoke-vllm MODEL_SIZE=7B
+make smoke-llama MODEL_SIZE=7B
+make smoke-ollama MODEL_SIZE=7B
 ```
 
-O smoke usa poucas requisições e somente `short`; serve para diagnosticar instalação, porta, tokenizer e carregamento. Não é resultado final.
+Os três smokes usam poucas requisições e somente `short`; servem para diagnosticar instalação, porta, tokenizer e carregamento. Não são resultados finais.
+
+Com o ambiente e os pesos já preparados no SSD, acrescente `PREPARE_OFFLINE=1` para evitar instalações/downloads repetidos e `BENCH_STARTUP_TIMEOUT=300` para limitar a espera de startup. Os Makefiles exigem GNU Make com `.ONESHELL` (3.82+); o Make 3.81 padrão do macOS é recusado. Consulte o [diagnóstico no RunPod](docs/diagnostico-makefiles.md) para causas, comandos e cobertura dos testes.
+
+### Sweep rápido de integração
+
+```bash
+make quick-sweep-vllm MODEL_SIZE=7B
+make quick-sweep-llama MODEL_SIZE=7B
+make quick-sweep-ollama MODEL_SIZE=7B
+```
+
+Cada alvo percorre apenas 1024 e 2048 tokens de contexto, com 1 requisição, 1 repetição e 1 aquecimento por ponto. É uma verificação de integração do launcher, API e coleta; a amostra não sustenta comparação estatística nem substitui o sweep formal.
+
+### Estado da validação no Pod
+
+Ainda não houve uma execução ao vivo completa e bem-sucedida desta integração. Dois bugs de integração foram confirmados e devem permanecer explícitos:
+
+- o llama.cpp não detectou o plugin CUDA até receber `LLAMA_BACKEND_PATH` apontando exatamente para `cuda_v13/libggml-cuda.so`, junto do respectivo diretório em `LD_LIBRARY_PATH`;
+- o servidor chegou a responder, mas sem o alias esperado em `/v1/models`; readiness corretamente continuou aguardando em vez de aceitar uma API viva com o modelo errado.
+
+Além disso, o ambiente vLLM testado, versão `0.0.5`, não tinha o pacote `vllm-gguf-plugin` instalado e permaneceu bloqueado antes da validação ao vivo.
+
+Durante uma inicialização demorada, o progresso informa o endpoint `GET /v1/models`, o ID de modelo esperado e a última observação/erro. Uma resposta HTTP sem o alias correto não conta como disponibilidade.
 
 ## O que o benchmark mede
 
@@ -209,7 +241,7 @@ Argumentos extras são anexados ao `argv` e registrados no `lifecycle.json`:
 
 ```bash
 make bench-vllm MODEL_SIZE=7B \
-  VLLM_EXTRA_ARGS='--gpu-memory-utilization 1.0 --enforce-eager'
+  VLLM_EXTRA_ARGS='--gpu-memory-utilization 0.95 --enforce-eager'
 
 make bench-llama MODEL_SIZE=7B \
   LLAMA_EXTRA_ARGS='--flash-attn auto --threads 8'
@@ -228,7 +260,11 @@ HF_GGUF_REPO / HF_GGUF_FILENAME
 HF_TOKENIZER_MODEL
 VLLM_EXTRA_ARGS / LLAMA_EXTRA_ARGS / OLLAMA_EXTRA_ARGS
 BENCH_REQUESTS / BENCH_REPETITIONS / BENCH_WARMUP
+BENCH_MODE=independent|closed-loop|replay
+CONVERSATION_TURNS / CONVERSATION_FIXTURE
 ```
+
+`independent` preserva a carga histórica de uma requisição isolada por cenário. `closed-loop` usa o fixture em `CONVERSATION_FIXTURE`, envia o histórico completo a cada turno e acrescenta ao próximo turno a resposta real gerada pelo runtime. `replay` também envia o histórico completo, mas acrescenta as respostas `assistant` fixas do fixture. O fixture é JSON com `system` textual e `turns`; cada turno tem `user`, e os turnos usados em `replay` também precisam de `assistant`.
 
 ## Telemetria e resultados
 
@@ -236,6 +272,7 @@ Cada execução cria `results/<timestamp>/` com:
 
 - `summary.json`, `summary.csv`, `summary.html`: resultados por fase, cenário e repetição;
 - JSONs brutos e CSVs por requisição;
+- `*-turns.json` e `*-conversation.json`: artefatos por turno quando `BENCH_MODE` é `closed-loop` ou `replay`;
 - `gpu.csv`: VRAM, utilização, temperatura e potência aproximadamente a cada segundo;
 - `telemetry-timeseries.csv`: série temporal da GPU com `elapsed_s`, percentual de VRAM ocupada e fases, pronta para gráficos;
 - `system.csv`: CPU, RAM, espaço e I/O host-wide;

@@ -1,11 +1,17 @@
 # Profiling dedicado. Não use este arquivo na bateria oficial de latência.
+ifeq ($(filter oneshell,$(.FEATURES)),)
+$(error GNU Make com .ONESHELL necessário; no macOS use gmake atualizado ou execute no pod)
+endif
 SHELL := /bin/bash
 .ONESHELL:
 .SHELLFLAGS := -eu -o pipefail -c
 
 ROOT := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
-PYTHON ?= /workspace/chatbot-runtime-bench/.venv/bin/python
+PYTHON ?= $(ROOT).venv/bin/python
 MODEL_SIZE ?= 7B
+VLLM_BIN ?= $(shell command -v vllm 2>/dev/null || printf 'vllm')
+LLAMA_SERVER_BIN ?= $(shell p=$$(command -v llama-server 2>/dev/null || true); if test -x "$$p"; then printf '%s' "$$p"; else found=; for p in /usr/local/lib/ollama/llama-server /workspace/llama.cpp/build/bin/llama-server /app/llama.cpp/build/bin/llama-server; do if test -x "$$p"; then printf '%s' "$$p"; found=1; break; fi; done; test "$${found:-}" = 1 || printf 'llama-server'; fi)
+LLAMA_BACKEND_PATH ?= $(firstword $(wildcard /usr/local/lib/ollama/cuda_v12/libggml-cuda.so /usr/local/lib/ollama/cuda_v13/libggml-cuda.so))
 PROFILE_RESULTS_DIR ?= $(ROOT)/results/profiling
 STARTUP_TIMEOUT ?= 1800
 ifeq ($(MODEL_SIZE),7B)
@@ -35,8 +41,9 @@ profile-vllm-nsys: check
 	@echo '[PROFILE] vLLM + Nsight Systems; smoke separado da bateria oficial'
 	@mkdir -p "$(PROFILE_RESULTS_DIR)"
 	stamp=$$(date -u +%Y%m%dT%H%M%SZ); out="$(PROFILE_RESULTS_DIR)/$${stamp}-vllm-nsys"
-	PROFILE_OUTPUT="$${out}/trace" "$(ROOT)scripts/nsys-wrapper.sh" \
-		vllm serve "$(MODEL_PATH)" --load-format gguf --quantization gguf --tokenizer "$(TOKENIZER_PATH)" \
+	mkdir -p "$$out"
+	PROFILE_OUTPUT="$${out}/trace" bash "$(ROOT)scripts/nsys-wrapper.sh" \
+		"$(VLLM_BIN)" serve "$(MODEL_PATH)" --load-format gguf --quantization gguf --tokenizer "$(TOKENIZER_PATH)" \
 		--host 127.0.0.1 --port 8000 --max-model-len 4096 --max-num-seqs 1
 
 profile-vllm-ncu: check
@@ -44,24 +51,29 @@ profile-vllm-ncu: check
 	@echo '[PROFILE] vLLM + Nsight Compute; envie uma única requisição curta em outro terminal e interrompa com Ctrl-C.'
 	@mkdir -p "$(PROFILE_RESULTS_DIR)"
 	stamp=$$(date -u +%Y%m%dT%H%M%SZ); out="$(PROFILE_RESULTS_DIR)/$${stamp}-vllm-ncu"
-	PROFILE_OUTPUT="$${out}/roofline" "$(ROOT)scripts/ncu-wrapper.sh" \
-		vllm serve "$(MODEL_PATH)" --load-format gguf --quantization gguf --tokenizer "$(TOKENIZER_PATH)" \
+	mkdir -p "$$out"
+	PROFILE_OUTPUT="$${out}/roofline" bash "$(ROOT)scripts/ncu-wrapper.sh" \
+		"$(VLLM_BIN)" serve "$(MODEL_PATH)" --load-format gguf --quantization gguf --tokenizer "$(TOKENIZER_PATH)" \
 		--host 127.0.0.1 --port 8000 --max-model-len 4096 --max-num-seqs 1
 
 profile-llama-nsys: check
+	backend='$(LLAMA_BACKEND_PATH)'; if test -n "$$backend"; then export GGML_BACKEND_PATH="$$backend"; export LD_LIBRARY_PATH="$$(dirname "$$backend"):$${LD_LIBRARY_PATH:-}"; fi
 	@command -v nsys >/dev/null || { echo 'nsys ausente'; exit 1; }
 	@echo '[PROFILE] llama.cpp + Nsight Systems; use o binário llama-server da imagem.'
 	@mkdir -p "$(PROFILE_RESULTS_DIR)"
 	stamp=$$(date -u +%Y%m%dT%H%M%SZ); out="$(PROFILE_RESULTS_DIR)/$${stamp}-llama-nsys"
-	PROFILE_OUTPUT="$${out}/trace" "$(ROOT)scripts/nsys-wrapper.sh" \
-		llama-server -m "$(MODEL_PATH)" \
+	mkdir -p "$$out"
+	PROFILE_OUTPUT="$${out}/trace" bash "$(ROOT)scripts/nsys-wrapper.sh" \
+		"$(LLAMA_SERVER_BIN)" -m "$(MODEL_PATH)" \
 		--host 127.0.0.1 --port 8080 --ctx-size 4096 --n-gpu-layers 999 --jinja
 
 profile-llama-ncu: check
+	backend='$(LLAMA_BACKEND_PATH)'; if test -n "$$backend"; then export GGML_BACKEND_PATH="$$backend"; export LD_LIBRARY_PATH="$$(dirname "$$backend"):$${LD_LIBRARY_PATH:-}"; fi
 	@command -v ncu >/dev/null || { echo 'ncu ausente'; exit 1; }
 	@echo '[PROFILE] llama.cpp + Nsight Compute; envie uma única requisição curta em outro terminal e interrompa com Ctrl-C.'
 	@mkdir -p "$(PROFILE_RESULTS_DIR)"
 	stamp=$$(date -u +%Y%m%dT%H%M%SZ); out="$(PROFILE_RESULTS_DIR)/$${stamp}-llama-ncu"
-	PROFILE_OUTPUT="$${out}/roofline" "$(ROOT)scripts/ncu-wrapper.sh" \
-		llama-server -m "$(MODEL_PATH)" \
+	mkdir -p "$$out"
+	PROFILE_OUTPUT="$${out}/roofline" bash "$(ROOT)scripts/ncu-wrapper.sh" \
+		"$(LLAMA_SERVER_BIN)" -m "$(MODEL_PATH)" \
 		--host 127.0.0.1 --port 8080 --ctx-size 4096 --n-gpu-layers 999 --jinja

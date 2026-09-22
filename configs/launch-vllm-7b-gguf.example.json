@@ -19,5 +19,5 @@
   "--max-num-seqs",
   "1",
   "--gpu-memory-utilization",
-  "1.0"
+  "0.95"
 ]

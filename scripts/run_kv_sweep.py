@@ -16,6 +16,13 @@ def positive(value: str) -> int:
     return number
 
 
+def nonnegative(value: str) -> int:
+    number = int(value)
+    if number < 0:
+        raise argparse.ArgumentTypeError("use zero ou um inteiro positivo")
+    return number
+
+
 def launch_with_context(source: Path, target: Path, context: int, context_flag: str, extra_args: list[str]) -> None:
     args = json.loads(source.read_text())
     if not isinstance(args, list):
@@ -41,7 +48,10 @@ def main() -> int:
     parser.add_argument("--max-context", type=positive, default=16384)
     parser.add_argument("--requests", type=positive, default=50)
     parser.add_argument("--repetitions", type=positive, default=3)
-    parser.add_argument("--warmup", type=positive, default=3)
+    parser.add_argument("--warmup", type=nonnegative, default=3)
+    parser.add_argument("--mode", choices=["independent", "closed-loop", "replay"], default="independent")
+    parser.add_argument("--conversation-turns", type=positive, default=1)
+    parser.add_argument("--conversation-fixture", default="workloads/conversations/qwen_chat_v1.json")
     parser.add_argument("--startup-timeout", type=positive, default=1800)
     parser.add_argument("--results", default="results/kv-sweep")
     parser.add_argument("--runtime-label", default="runtime")
@@ -50,18 +60,31 @@ def main() -> int:
     parser.add_argument("--launch-extra-args", nargs="*", default=[],
                         help="Argumentos adicionais acrescentados ao launch em todos os pontos.")
     parser.add_argument("--launch-executable", help="Substitui argv[0] do launch em todos os pontos.")
+    parser.add_argument("--launch-extra-args-json", default="[]")
     args = parser.parse_args()
+    extra = json.loads(args.launch_extra_args_json)
+    if not isinstance(extra, list) or any(not isinstance(x, str) for x in extra):
+        parser.error("--launch-extra-args-json deve ser array de strings")
+    args.launch_extra_args.extend(extra)
     config = json.loads(Path(args.config).read_text())
     root = Path(args.results)
     root.mkdir(parents=True, exist_ok=True)
     manifest = {"runtime": args.runtime_label, "step": args.step, "start": args.start,
-                "max_context": args.max_context, "points": []}
+                "max_context": args.max_context, "mode": args.mode,
+                "conversation_turns": args.conversation_turns,
+                "conversation_fixture": args.conversation_fixture, "points": []}
     with tempfile.TemporaryDirectory(prefix="kv-sweep-") as temp:
         temp = Path(temp)
         for context in range(args.start, args.max_context + 1, args.step):
             # O contexto declarado inclui prompt, saída e margem do template.
             config_copy = dict(config)
             config_copy["context_window"] = context + 128 + 256
+            if config.get("runtime") == "ollama":
+                subprocess.run([args.python, str(Path(__file__).with_name("prepare_ollama.py")),
+                                "--binary", args.launch_executable or "ollama",
+                                "--model", config["model"], "--gguf", args.local_model_path,
+                                "--context", str(config_copy["context_window"]),
+                                "--base-url", config["base_url"]], check=True)
             config_path = temp / f"config-{context}.json"
             launch_path = temp / f"launch-{context}.json"
             config_path.write_text(json.dumps(config_copy, indent=2) + "\n")
@@ -71,18 +94,21 @@ def main() -> int:
                        "--local-model-path", args.local_model_path, "--launch", str(launch_path),
                        "--input-tokens", str(context), "--requests", str(args.requests),
                        "--repetitions", str(args.repetitions), "--warmup", str(args.warmup),
+                       "--mode", args.mode, "--conversation-turns", str(args.conversation_turns),
+                       "--conversation-fixture", args.conversation_fixture,
                        "--collect-kv-metrics", "--startup-timeout", str(args.startup_timeout),
                        "--results", str(root)]
             if args.launch_executable:
                 command.extend(["--launch-executable", args.launch_executable])
             print(f"\n[KV-SWEEP] runtime={args.runtime_label} input_tokens={context} "
                   f"server_max_model_len={context + 128 + 256} "
-                  f"requests={args.requests} repetitions={args.repetitions}", flush=True)
+                  f"requests={args.requests} repetitions={args.repetitions} "
+                  f"mode={args.mode} turns={args.conversation_turns}", flush=True)
             completed = subprocess.run(command)
             manifest["points"].append({"input_tokens": context, "returncode": completed.returncode})
             (root / "sweep-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
             if completed.returncode != 0:
-                print(f"[KV-SWEEP] falha em input_tokens={context}; encerrando para preservar o primeiro limite de memória.")
+                print(f"[KV-SWEEP] falha em input_tokens={context}; consulte server.log. Não classificada automaticamente como OOM.")
                 return completed.returncode
     print("Varredura concluída; consulte cada diretório e sweep-manifest.json.")
     return 0

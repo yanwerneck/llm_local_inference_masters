@@ -5,6 +5,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from unittest.mock import MagicMock, patch
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -12,6 +13,22 @@ from lifecycle import Launch, timed_request, wait_models
 
 
 class LifecycleTests(unittest.TestCase):
+    def test_wrong_alias_fails_immediately(self):
+        response = MagicMock()
+        response.json.return_value = {"data": [{"id": "model.gguf"}]}
+        with patch("lifecycle.httpx.Client") as client:
+            client.return_value.__enter__.return_value.get.return_value = response
+            with self.assertRaisesRegex(RuntimeError, "alias"):
+                wait_models({"base_url": "http://localhost:8080", "model": "qwen7b"}, "", 1800)
+
+    def test_ollama_latest_tag_is_explicitly_supported(self):
+        response = MagicMock()
+        response.json.return_value = {"data": [{"id": "qwen7b:latest"}]}
+        with patch("lifecycle.httpx.Client") as client:
+            client.return_value.__enter__.return_value.get.return_value = response
+            result = wait_models({"base_url": "http://localhost:11434", "model": "qwen7b", "runtime": "ollama"}, "", 1)
+            self.assertEqual(result["models"], ["qwen7b:latest"])
+
     def test_refuses_occupied_port_without_killing_anything(self):
         with socket.socket() as listener, tempfile.TemporaryDirectory() as tmp:
             listener.bind(("127.0.0.1", 0))

@@ -25,6 +25,7 @@ VERSION = "0.4.0"
 GUIDELLM_VERSION = "0.7.4"
 WORKLOADS = {"short": 256, "medium": 2048, "long": 8192}
 OUTPUT_TOKENS = 128
+DEFAULT_CONVERSATION_FIXTURE = ROOT / "workloads" / "conversations" / "qwen_chat_v1.json"
 
 
 def _synthetic_prompt(tokenizer, target_tokens: int) -> str:
@@ -37,7 +38,19 @@ def _synthetic_prompt(tokenizer, target_tokens: int) -> str:
     return tokenizer.decode(ids, skip_special_tokens=False)
 
 
-def stream_request(cfg, prompt, timeout, secret=""):
+def estimate_messages_tokens(tokenizer, messages) -> int:
+    try:
+        return len(tokenizer.apply_chat_template(messages, tokenize=True, add_generation_prompt=True))
+    except Exception:
+        return sum(len(tokenizer.encode(m.get("content", ""), add_special_tokens=False)) for m in messages)
+
+
+def request_sha256(body) -> str:
+    payload = {k: body.get(k) for k in ("messages", "max_tokens")}
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+
+
+def stream_messages_request(cfg, messages, timeout, secret="", max_tokens=OUTPUT_TOKENS, metadata=None):
     """Mede uma requisição SSE com ``time.perf_counter`` por requisição.
 
     ``first_token_time``/``last_token_time`` são os instantes do primeiro/último
@@ -46,8 +59,8 @@ def stream_request(cfg, prompt, timeout, secret=""):
     vem exclusivamente de ``usage`` quando o servidor o fornece.
     """
     import httpx
-    body = {"model": cfg["model"], "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0, "top_p": 1, "max_tokens": OUTPUT_TOKENS,
+    body = {"model": cfg["model"], "messages": messages,
+            "temperature": 0, "top_p": 1, "max_tokens": max_tokens,
             "stream": True, "stream_options": {"include_usage": True}}
     started = time.perf_counter()
     first = last = None
@@ -81,9 +94,17 @@ def stream_request(cfg, prompt, timeout, secret=""):
     ended = time.perf_counter()
     e2e = ended - started
     metrics = stream_metrics(started, first, last, ended, usage)
+    metadata = dict(metadata or {})
+    if "history_tokens_estimate" in metadata:
+        metadata["history_tokens"] = metrics["prompt_tokens"] if metrics["prompt_tokens"] is not None else metadata["history_tokens_estimate"]
     return {**metrics,
             "stream_content_event_count": chunks, "output": content, "usage_observed": usage is not None,
-            "request_args": json.dumps({"body": body}, ensure_ascii=False)}
+            "request_sha256": request_sha256(body),
+            "request_args": json.dumps({"body": body}, ensure_ascii=False), **metadata}
+
+
+def stream_request(cfg, prompt, timeout, secret=""):
+    return stream_messages_request(cfg, [{"role": "user", "content": prompt}], timeout, secret)
 
 
 def stream_metrics(request_start_time, first_token_time, last_token_time, request_end_time, usage):
@@ -111,13 +132,86 @@ def stream_metrics(request_start_time, first_token_time, last_token_time, reques
 def run_stream_batch(cfg, tokenizer, scenario, count, timeout, secret=""):
     prompt = _synthetic_prompt(tokenizer, WORKLOADS[scenario])
     successful, errored = [], []
-    for _ in range(count):
+    for index in range(count):
         try:
             row = stream_request(cfg, prompt, timeout, secret)
+            row.update({"mode": "independent", "request_id": f"{scenario}-independent-{index+1}"})
             row["status"] = "successful"
             successful.append(row)
         except Exception as exc:
-            errored.append({"status": "errored", "error": str(exc)})
+            errored.append({"status": "errored", "mode": "independent",
+                            "request_id": f"{scenario}-independent-{index+1}", "error": str(exc)})
+    return {"benchmarks": [{"requests": {"successful": successful, "errored": errored, "incomplete": []}}]}
+
+
+def load_conversation_fixture(path):
+    path = Path(path)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data.get("system"), str) or not data["system"].strip():
+        raise ValueError("Fixture conversacional precisa de campo system textual nao vazio.")
+    if not isinstance(data.get("turns"), list) or not data["turns"]:
+        raise ValueError("Fixture conversacional precisa de lista nao vazia em turns.")
+    for index, turn in enumerate(data["turns"], 1):
+        if not isinstance(turn, dict) or not isinstance(turn.get("user"), str) or not turn["user"].strip():
+            raise ValueError(f"Turno {index} do fixture precisa de user textual.")
+        if "assistant" in turn and (not isinstance(turn["assistant"], str) or not turn["assistant"].strip()):
+            raise ValueError(f"Turno {index} do fixture tem assistant vazio/invalido.")
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    return {"path": str(path), "sha256": digest, "data": data}
+
+
+def validate_conversation_fixture_for_mode(fixture, loop_mode, turns):
+    if loop_mode == "replay":
+        missing = [index for index, turn in enumerate(fixture["data"]["turns"][:turns], 1)
+                   if "assistant" not in turn]
+        if missing:
+            raise ValueError(f"--mode replay exige assistant fixo em cada turno usado do fixture; ausente em: {missing}.")
+
+
+def fixture_messages_for_turn(fixture, turn_index, prior_assistant_outputs, loop_mode):
+    data = fixture["data"]
+    messages = []
+    if data.get("system"):
+        messages.append({"role": "system", "content": data["system"]})
+    for index, turn in enumerate(data["turns"][:turn_index], 1):
+        messages.append({"role": "user", "content": turn["user"]})
+        if index < turn_index:
+            if loop_mode == "closed-loop":
+                messages.append({"role": "assistant", "content": prior_assistant_outputs[index - 1]})
+            else:
+                if "assistant" not in turn:
+                    raise ValueError("--mode replay exige assistant fixo nos turnos anteriores do fixture.")
+                messages.append({"role": "assistant", "content": turn["assistant"]})
+    return messages
+
+
+def run_conversational_batch(cfg, tokenizer, scenario, conversations, turns, timeout, secret="", fixture=None, loop_mode="closed-loop"):
+    if fixture is None:
+        fixture = load_conversation_fixture(DEFAULT_CONVERSATION_FIXTURE)
+    if turns > len(fixture["data"]["turns"]):
+        raise ValueError(f"--conversation-turns={turns} excede turnos disponiveis no fixture ({len(fixture['data']['turns'])}).")
+    validate_conversation_fixture_for_mode(fixture, loop_mode, turns)
+    target = WORKLOADS[scenario]
+    successful, errored = [], []
+    for conversation_index in range(1, conversations + 1):
+        assistant_outputs = []
+        for turn_index in range(1, turns + 1):
+            messages = fixture_messages_for_turn(fixture, turn_index, assistant_outputs, loop_mode)
+            estimate = estimate_messages_tokens(tokenizer, messages)
+            metadata = {"mode": loop_mode, "conversation_index": conversation_index,
+                        "fixture_sha256": fixture["sha256"],
+                        "fixture_name": fixture["data"].get("name"),
+                        "turn_index": turn_index, "history_tokens_estimate": estimate,
+                        "target_history_tokens": target, "messages_count": len(messages),
+                        "request_id": f"{scenario}-c{conversation_index}-t{turn_index}"}
+            try:
+                row = stream_messages_request(cfg, messages, timeout, secret, metadata=metadata)
+                row["status"] = "successful"
+                successful.append(row)
+                assistant_outputs.append(row.get("output") or "")
+            except Exception as exc:
+                errored.append({"status": "errored", **metadata, "history_tokens": estimate, "error": str(exc)})
+                break
     return {"benchmarks": [{"requests": {"successful": successful, "errored": errored, "incomplete": []}}]}
 
 
@@ -350,7 +444,7 @@ class Monitor:
                     if sample_number == 1 or sample_number % 10 == 0:
                         compact = "; ".join(f"GPU{row[0]} VRAM={float(row[2]) / 1024:.2f}/{float(row[3]) / 1024:.2f} GiB "
                                              f"ocupada={100 * float(row[2]) / float(row[3]):.1f}% "
-                                             f"uso_gpu={row[4]}% banda_memoria={row[5]}%" for row in gpu_rows)
+                                             f"atividade_gpu={row[4]}% atividade_leitura_escrita_memoria={row[5]}%" for row in gpu_rows)
                         elapsed = time.monotonic() - self.started_monotonic
                         utc_log = datetime.now(timezone.utc).isoformat()
                         self.log(f"[telemetria] utc={utc_log} decorrido={elapsed:.3f}s fase={phase} {compact or 'GPU sem amostra'}")
@@ -493,22 +587,73 @@ def summarize(report):
         "Time To First Token": "milissegundos entre o envio da requisição e o primeiro token/conteúdo observado; há um valor por requisição.",
         "Tokens/s": "tokens de saída por segundo durante o decode, calculado por requisição a partir do intervalo entre tokens; não inclui TTFT.",
     }
-    # O hash exclui aliases do modelo e chaves: apenas carga de entrada e limite de saída.
-    bodies = []
-    for row in good:
-        args = json.loads(row["request_args"])
-        body = args.get("body", {})
-        bodies.append({k: body.get(k) for k in ("messages", "max_tokens")})
-    result["requests_sha256"] = hashlib.sha256(json.dumps(bodies, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+    result["requests_sha256"] = requests_digest(report)
+    turns = sorted({r.get("turn_index") for r in good if r.get("turn_index") is not None})
+    result["turn_indices"] = turns
+    result["history_tokens_by_turn"] = [{"turn_index": turn,
+                                         "history_tokens_p50": percentile([r.get("history_tokens") for r in good if r.get("turn_index") == turn], .50),
+                                         "history_tokens_p95": percentile([r.get("history_tokens") for r in good if r.get("turn_index") == turn], .95)}
+                                        for turn in turns]
     result["percentiles_are_exploratory"] = len(good) < 100
     result["percentile_definition"] = "Empirical linear interpolation over successful requests in this phase/scenario/repetition block."
     return result
 
 
+def requests_digest(report):
+    # O hash exclui aliases do modelo e chaves: apenas carga de entrada e limite de saída.
+    bodies = []
+    for row in report["benchmarks"][0]["requests"]["successful"]:
+        args = json.loads(row["request_args"])
+        body = args.get("body", {})
+        bodies.append({k: body.get(k) for k in ("messages", "max_tokens")})
+    return hashlib.sha256(json.dumps(bodies, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+
+
+def turn_manifest(report):
+    rows = report["benchmarks"][0]["requests"]["successful"]
+    turns = []
+    for row in rows:
+        turns.append({"request_id": row.get("request_id"), "conversation_index": row.get("conversation_index"),
+                      "turn_index": row.get("turn_index"), "mode": row.get("mode"),
+                      "fixture_sha256": row.get("fixture_sha256"), "history_tokens": row.get("history_tokens"),
+                      "history_tokens_estimate": row.get("history_tokens_estimate"),
+                      "prompt_tokens": row.get("prompt_tokens"), "total_tokens": row.get("total_tokens"),
+                      "request_sha256": row.get("request_sha256")})
+    return turns
+
+
+def conversation_artifact(report, fixture=None):
+    requests = report["benchmarks"][0]["requests"]
+    rows = []
+    for status in ("successful", "errored", "incomplete"):
+        for row in requests[status]:
+            body = {}
+            if row.get("request_args"):
+                body = json.loads(row["request_args"]).get("body", {})
+            rows.append({"status": status, "request_id": row.get("request_id"),
+                         "conversation_index": row.get("conversation_index"),
+                         "turn_index": row.get("turn_index"), "mode": row.get("mode"),
+                         "messages": body.get("messages"),
+                         "assistant_output": row.get("output") if status == "successful" else None,
+                         "error": row.get("error") if status != "successful" else None,
+                         "request_sha256": row.get("request_sha256"),
+                         "history_tokens": row.get("history_tokens"),
+                         "history_tokens_estimate": row.get("history_tokens_estimate")})
+    artifact = {"mode": rows[0].get("mode") if rows else None, "turns": rows}
+    if fixture:
+        artifact["fixture"] = {"path": fixture["path"], "sha256": fixture["sha256"],
+                               "name": fixture["data"].get("name"),
+                               "version": fixture["data"].get("version")}
+    return artifact
+
+
 def write_requests_csv(path, report):
     """Amostras individuais para análise no R/Python, incluindo status de erro."""
     from reporting import derived
-    fields = ["status", "error", "request_id", "request_start_time", "first_token_time", "request_end_time",
+    fields = ["status", "error", "mode", "request_id", "conversation_index", "turn_index",
+              "fixture_name", "fixture_sha256",
+              "history_tokens", "history_tokens_estimate", "target_history_tokens", "messages_count",
+              "request_sha256", "request_start_time", "first_token_time", "request_end_time",
               "time_to_first_token_seconds", "generation_time_seconds", "end_to_end_latency_seconds",
               "completion_tokens", "prompt_tokens", "total_tokens", "decode_tokens_per_second",
               "end_to_end_tokens_per_second", "inter_token_latency_seconds", "request_latency",
@@ -555,6 +700,12 @@ def run(args):
     prompt = Path(args.first_prompt_file).read_text(encoding="utf-8") if args.first_prompt_file else DEFAULT_PROMPT
     if not prompt.strip():
         raise ValueError("O prompt inicial não pode estar vazio.")
+    conversation_mode = args.mode in {"closed-loop", "replay"}
+    if not conversation_mode and args.conversation_turns != 1:
+        raise ValueError("--conversation-turns só pode ser maior que 1 com --mode closed-loop ou --mode replay.")
+    conversation_fixture = load_conversation_fixture(args.conversation_fixture) if conversation_mode else None
+    if conversation_fixture:
+        validate_conversation_fixture_for_mode(conversation_fixture, args.mode, args.conversation_turns)
     base = Path(args.results)
     base.mkdir(parents=True, exist_ok=True)
     with (base / ".benchmark.lock").open("a") as lock:
@@ -569,6 +720,12 @@ def run(args):
                     "config": cfg, "tokenizer": digest, "smoke": args.smoke, "requests": count,
                     "repetitions": repetitions, "warmup_requests_per_case": args.warmup,
                     "scenarios": args.scenarios, "seed": args.seed, "profile": "synchronous",
+                    "mode": args.mode, "conversation_turns": args.conversation_turns,
+                    "conversation_fixture": {"path": conversation_fixture["path"], "sha256": conversation_fixture["sha256"],
+                                             "name": conversation_fixture["data"].get("name"),
+                                             "version": conversation_fixture["data"].get("version")} if conversation_fixture else None,
+                    "conversation_first_request": "first-request.json is a separate single-turn lifecycle probe; closed-loop/replay measured histories start empty per conversation and per block",
+                    "blocks": [],
                     "model_availability": availability,
                     "guidellm_compat": "0.7.4 bounded drain of real late completion updates (5s); no request retry",
                     "telemetry": {"gpu_source": "local nvidia-smi", "system_source": "psutil host CPU/RAM/disk counters",
@@ -615,20 +772,46 @@ def run(args):
                         prefix = f"r{rep+1}-{name}-{phase}"
                         monitor.set_phase(prefix)
                         config = scenario_config(cfg, name, n, seed, secret, args.timeout)
+                        config["mode"] = args.mode
+                        if conversation_mode:
+                            config["conversation_turns"] = args.conversation_turns
+                            config["conversation_fixture_sha256"] = conversation_fixture["sha256"]
+                            config["spec_note"] = "GuideLLM synthetic data spec is retained for independent baseline context only; measured conversational requests are generated from the fixed fixture with accumulated chat history."
                         write_json(output / f"{prefix}-config.json", redact(config, secret))
-                        print(f"{prefix}: {n} requisições, uma por vez", flush=True)
-                        report = run_stream_batch(cfg, measurement_tokenizer, name, n, args.timeout, secret)
+                        expected = n * args.conversation_turns if conversation_mode else n
+                        unit = "conversas" if conversation_mode else "requisições"
+                        print(f"{prefix}: {n} {unit}, uma chamada por vez", flush=True)
+                        if conversation_mode:
+                            report = run_conversational_batch(cfg, measurement_tokenizer, name, n, args.conversation_turns,
+                                                              args.timeout, secret, conversation_fixture, args.mode)
+                        else:
+                            report = run_stream_batch(cfg, measurement_tokenizer, name, n, args.timeout, secret)
                         raw = redact(report, secret)
                         write_json(output / f"{prefix}.json", raw)
+                        turns = turn_manifest(raw) if conversation_mode else []
+                        conversation_file = None
+                        if conversation_mode:
+                            write_json(output / f"{prefix}-turns.json", turns)
+                            conversation_file = f"{prefix}-conversation.json"
+                            write_json(output / conversation_file, conversation_artifact(raw, conversation_fixture))
                         write_requests_csv(output / f"{prefix}-requests.csv", raw)
                         summary = summarize(raw)
-                        summary["expected"] = n
-                        summary["missing_request_count"] = max(0, n - sum(summary[k] for k in ("successful_request_count", "errored_request_count", "incomplete_request_count")))
+                        summary["expected"] = expected
+                        summary["missing_request_count"] = max(0, expected - sum(summary[k] for k in ("successful_request_count", "errored_request_count", "incomplete_request_count")))
+                        manifest["blocks"].append({"prefix": prefix, "mode": args.mode, "phase": phase,
+                                                   "scenario": name, "repetition": rep+1,
+                                                   "conversations": n if conversation_mode else None,
+                                                   "conversation_turns": args.conversation_turns if conversation_mode else None,
+                                                   "expected_requests": expected,
+                                                   "requests_sha256": summary["requests_sha256"],
+                                                   "conversation_artifact": conversation_file,
+                                                   "turns": turns if conversation_mode else None})
+                        write_json(output / "manifest.json", redact(manifest, secret))
                         rows.append({"runtime": cfg["runtime"], "model": cfg["model"],
                                      "cache_policy": cfg["cache_policy"], "tokenizer_sha256": digest["sha256"],
-                                     "phase": phase, "scenario": name, "repetition": rep+1, **summary})
+                                     "mode": args.mode, "phase": phase, "scenario": name, "repetition": rep+1, **summary})
                         write_summary(output, rows)
-                        if summary["successful_request_count"] != n or summary["errored_request_count"] or summary["incomplete_request_count"]:
+                        if summary["successful_request_count"] != expected or summary["errored_request_count"] or summary["incomplete_request_count"]:
                             raise RuntimeError(f"{prefix}: requisições falharam ou execução incompleta. Veja o JSON; não compare como sucesso.")
             monitor.set_phase("warm_reference")
             lifecycle["warm_reference"] = timed_request(cfg, secret, args.timeout, prompt,
@@ -671,6 +854,13 @@ def positive(value):
     return number
 
 
+def nonnegative(value):
+    number = int(value)
+    if number < 0:
+        raise argparse.ArgumentTypeError("Use zero ou um inteiro positivo.")
+    return number
+
+
 def rebuild_report(args):
     """Atualiza apenas derivados, preservando relatórios brutos e manifesto original."""
     output = Path(args.output)
@@ -708,7 +898,13 @@ def main():
     cmd.add_argument("--scenarios", nargs="+", choices=list(WORKLOADS), default=["short", "medium", "long"])
     cmd.add_argument("--requests", type=positive, default=50, help="Requisições de medição por cenário e repetição; 50×3 dá 150 sucessos para percentis.")
     cmd.add_argument("--repetitions", type=positive, default=3)
-    cmd.add_argument("--warmup", type=positive, default=3)
+    cmd.add_argument("--warmup", type=nonnegative, default=3)
+    cmd.add_argument("--mode", choices=["independent", "closed-loop", "replay"], default="independent",
+                     help="independent preserva uma requisição sem histórico; closed-loop acumula respostas reais; replay usa assistant fixo do fixture.")
+    cmd.add_argument("--conversation-turns", type=positive, default=1,
+                     help="Turnos por conversa em --mode closed-loop ou replay; cada turno envia o histórico completo.")
+    cmd.add_argument("--conversation-fixture", default=str(DEFAULT_CONVERSATION_FIXTURE),
+                     help="Fixture JSON versionado com system e lista fixa de user turns; replay tambem exige assistant nos turnos anteriores.")
     cmd.add_argument("--seed", type=positive, default=42)
     cmd.add_argument("--timeout", type=positive, default=300)
     cmd.add_argument("--results", default="results")
@@ -717,11 +913,17 @@ def main():
     cmd.add_argument("--launch-extra-args", nargs="*", default=[],
                      help="Argumentos experimentais acrescentados ao argv do launch, sem editar o JSON; registrados no lifecycle.")
     cmd.add_argument("--launch-executable", help="Substitui argv[0] do launch pelo executável resolvido no ambiente do runtime.")
+    cmd.add_argument("--launch-extra-args-json", default="[]", help="Array JSON de argumentos do runtime, preservando flags e espaços.")
     cmd.add_argument("--startup-timeout", type=positive, default=1800, help="Limite da espera pela API com --launch, em segundos.")
     cmd.add_argument("--first-prompt-file", help="Texto UTF-8 para a primeira requisição e referência final; default: pergunta sobre RAM/VRAM.")
     cmd.add_argument("--initial-state", default="weights local; OS/compilation caches not controlled", help="Descreva SSD e caches existentes; apenas registra, não limpa.")
     cmd.set_defaults(func=run)
     args = parser.parse_args()
+    if hasattr(args, "launch_extra_args_json"):
+        extra = json.loads(args.launch_extra_args_json)
+        if not isinstance(extra, list) or any(not isinstance(x, str) for x in extra):
+            parser.error("--launch-extra-args-json deve ser array de strings")
+        args.launch_extra_args.extend(extra)
     if getattr(args, "input_tokens", None):
         if len(set(args.input_tokens)) != len(args.input_tokens):
             parser.error("Não repita comprimentos em --input-tokens.")
