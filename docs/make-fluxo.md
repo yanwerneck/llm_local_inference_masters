@@ -41,7 +41,7 @@ Verifica presença, tamanho, assinatura binária `GGUF` e imprime SHA-256. Não 
 
 ### Validações finais
 
-O alvo instala `requirements.txt` no `PYTHON` escolhido, importa as bibliotecas do cliente, valida JSONs e verifica `vllm`, `llama-server` e `ollama`. Se um runtime não estiver instalado, a preparação falha com o caminho esperado; isso é diferente de esconder o problema durante a medição.
+O alvo instala `requirements.txt` no `PYTHON` escolhido, importa as bibliotecas do cliente e valida JSONs. A presença do runtime é verificada separadamente por `prepare-vllm`, `prepare-llama` ou `prepare-ollama`; assim, preparar o modelo não é bloqueado por um runtime que ainda não foi instalado.
 
 ## 3. Preparação do Ollama
 

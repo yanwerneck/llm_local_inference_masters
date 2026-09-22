@@ -71,9 +71,17 @@ Executa a preparação completa, nesta ordem:
 6. instala `requirements.txt` no Python indicado por `PYTHON`;
 7. valida imports do cliente (`guidellm`, `httpx`, `psutil`, `transformers`);
 8. valida os JSONs do modelo selecionado;
-9. verifica os executáveis de vLLM, llama-server e Ollama.
+9. deixa a validação dos executáveis para o alvo específico de cada runtime.
 
-Não inicia servidores e não mede desempenho.
+Não inicia servidores e não mede desempenho. Para validar apenas um runtime:
+
+```bash
+make prepare-vllm MODEL_SIZE=7B
+make prepare-llama MODEL_SIZE=7B
+make prepare-ollama MODEL_SIZE=7B
+```
+
+Assim, a ausência de vLLM não impede preparar o modelo para llama.cpp ou Ollama.
 
 ```bash
 make prepare-benchmark MODEL_SIZE=7B

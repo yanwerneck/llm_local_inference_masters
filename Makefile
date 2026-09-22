@@ -62,9 +62,9 @@ OLLAMA_LAUNCH ?= configs/launch-ollama-14b-gguf.json
 else
 $(error MODEL_SIZE deve ser 7B ou 14B)
 endif
-VLLM_BIN ?= /workspace/vllm-runtime/.venv/bin/vllm
-LLAMA_SERVER_BIN ?= /workspace/llama.cpp/build/bin/llama-server
-OLLAMA_BIN ?= ollama
+VLLM_BIN ?= $(shell command -v vllm 2>/dev/null || printf '/workspace/vllm-runtime/.venv/bin/vllm')
+LLAMA_SERVER_BIN ?= $(shell command -v llama-server 2>/dev/null || printf '/workspace/llama.cpp/build/bin/llama-server')
+OLLAMA_BIN ?= $(shell command -v ollama 2>/dev/null || printf 'ollama')
 BENCH_SCENARIOS ?= short medium long
 BENCH_REQUESTS ?= 50
 BENCH_REPETITIONS ?= 3
@@ -76,7 +76,7 @@ QUANTIZE_SCRIPT := scripts/quantize_hf_to_gguf_q8_0.sh
 
 .PHONY: help check-tools clone-llama build-llama install-llama-python \
         download-source inspect-source quantize-q8 verify-gguf upload-hf \
-        install-benchmark download-model download-tokenizer prepare-benchmark prepare-ollama smoke-vllm bench-vllm bench-llama bench-ollama bench-all bench kv-sweep docs clean-info
+        install-benchmark download-model download-tokenizer check-runtimes prepare-benchmark prepare-vllm prepare-llama prepare-ollama smoke-vllm bench-vllm bench-llama bench-ollama bench-all bench kv-sweep docs clean-info
 
 help:
 	@printf '%s\n' \
@@ -91,6 +91,10 @@ help:
 		'  make verify-gguf          confirma assinatura, tamanho e SHA-256' \
 		'  make upload-hf            publica somente o GGUF no Hugging Face' \
 		'  make install-benchmark    cria o venv do cliente e instala requirements.txt' \
+		'  make check-runtimes       diagnostica vLLM, llama-server e Ollama instalados' \
+		'  make prepare-vllm         prepara cliente/modelo e valida somente vLLM' \
+		'  make prepare-llama        prepara cliente/modelo e valida somente llama-server' \
+		'  make prepare-ollama       prepara cliente/modelo e importa o GGUF no Ollama' \
 		'  make download-model       baixa o GGUF selecionado para o SSD' \
 		'  make download-tokenizer   baixa somente os arquivos do tokenizer' \
 		'  make prepare-benchmark    instala cliente, cria pastas e valida modelo/configs/runtimes' \
@@ -190,16 +194,26 @@ prepare-benchmark: install-benchmark download-model download-tokenizer verify-gg
 	$(PYTHON) -m json.tool "$(LLAMA_LAUNCH)" >/dev/null
 	$(PYTHON) -m json.tool "$(OLLAMA_CONFIG)" >/dev/null
 	$(PYTHON) -m json.tool "$(OLLAMA_LAUNCH)" >/dev/null
-	@echo '[PREPARE] verificando executáveis dos runtimes'
-	test -x "$(VLLM_BIN)" || { echo "vLLM ausente: $(VLLM_BIN)"; exit 1; }
-	test -x "$(LLAMA_SERVER_BIN)" || { echo "llama-server ausente: $(LLAMA_SERVER_BIN)"; exit 1; }
-	command -v "$(OLLAMA_BIN)" >/dev/null || { echo "ollama ausente: $(OLLAMA_BIN)"; exit 1; }
-	"$(VLLM_BIN)" --help >/dev/null
-	"$(LLAMA_SERVER_BIN)" --help >/dev/null
-	"$(OLLAMA_BIN)" --version
-	@echo '[PREPARE] pronto: execute make bench-all (Ollama exige alias criado; veja make prepare-ollama)'
+	@echo '[PREPARE] cliente, modelo e configs prontos; execute make check-runtimes para diagnosticar runtimes'
 
-prepare-ollama: verify-gguf
+check-runtimes:
+	missing=0
+	if test -x "$(VLLM_BIN)"; then echo "[RUNTIME] vLLM: $(VLLM_BIN)"; "$(VLLM_BIN)" --help >/dev/null; else echo "[RUNTIME] vLLM ausente: $(VLLM_BIN)"; missing=1; fi
+	if test -x "$(LLAMA_SERVER_BIN)"; then echo "[RUNTIME] llama-server: $(LLAMA_SERVER_BIN)"; "$(LLAMA_SERVER_BIN)" --help >/dev/null; else echo "[RUNTIME] llama-server ausente: $(LLAMA_SERVER_BIN)"; missing=1; fi
+	if command -v "$(OLLAMA_BIN)" >/dev/null 2>&1; then echo "[RUNTIME] Ollama: $(OLLAMA_BIN)"; "$(OLLAMA_BIN)" --version; else echo "[RUNTIME] Ollama ausente: $(OLLAMA_BIN)"; missing=1; fi
+	if test "$$missing" -ne 0; then echo '[RUNTIME] instale o runtime ausente no ambiente próprio ou sobrescreva VLLM_BIN/LLAMA_SERVER_BIN/OLLAMA_BIN'; exit 1; fi
+
+prepare-vllm: prepare-benchmark
+	@test -x "$(VLLM_BIN)" || { echo "vLLM ausente: $(VLLM_BIN). Instale-o no venv do runtime ou use VLLM_BIN=..."; exit 1; }
+	"$(VLLM_BIN)" --help >/dev/null
+	@echo '[PREPARE vLLM] cliente, modelo, tokenizer e executável validados'
+
+prepare-llama: prepare-benchmark
+	@test -x "$(LLAMA_SERVER_BIN)" || { echo "llama-server ausente: $(LLAMA_SERVER_BIN). Compile o llama.cpp ou use LLAMA_SERVER_BIN=..."; exit 1; }
+	"$(LLAMA_SERVER_BIN)" --help >/dev/null
+	@echo '[PREPARE llama.cpp] cliente, modelo, tokenizer e executável validados'
+
+prepare-ollama: prepare-benchmark
 	@echo '[PREPARE] criando qwen7b-q8-gguf a partir do GGUF local; nenhum download será feito'
 	command -v "$(OLLAMA_BIN)" >/dev/null || { echo "ollama ausente: $(OLLAMA_BIN)"; exit 1; }
 	printf 'FROM %s\nPARAMETER num_ctx 16384\n' "$(GGUF_FILE)" > /tmp/Modelfile.qwen7b
@@ -224,7 +238,7 @@ smoke-vllm: verify-gguf
 		--launch-extra-args $(VLLM_EXTRA_ARGS) \
 		--smoke --scenarios short --startup-timeout 1800
 
-bench-vllm: verify-gguf
+bench-vllm: prepare-vllm
 	@echo '[BENCH vLLM] início: short/medium/long + telemetria + KV sweep embutido'
 	HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_HUB_ENABLE_HF_TRANSFER=0 \
 		$(PYTHON) bench.py run \
@@ -247,7 +261,7 @@ bench-vllm: verify-gguf
 		--warmup "$(BENCH_WARMUP)" --startup-timeout "$(BENCH_STARTUP_TIMEOUT)" \
 		--results results/kv-sweep-vllm
 
-bench-llama: verify-gguf
+bench-llama: prepare-llama
 	@echo '[BENCH llama.cpp] início: short/medium/long + telemetria + KV sweep embutido'
 	HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_HUB_ENABLE_HF_TRANSFER=0 \
 		$(PYTHON) bench.py run --config "$(LLAMA_CONFIG)" \
@@ -267,7 +281,7 @@ bench-llama: verify-gguf
 		--warmup "$(BENCH_WARMUP)" --startup-timeout "$(BENCH_STARTUP_TIMEOUT)" \
 		--results results/kv-sweep-llama
 
-bench-ollama: verify-gguf
+bench-ollama: prepare-ollama
 	@echo '[BENCH Ollama] início: short/medium/long + telemetria + KV sweep embutido'
 	@echo '[BENCH Ollama] pré-condição: o alias qwen7b-q8-gguf já deve existir em ollama list; nenhum pull será feito'
 	HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_HUB_ENABLE_HF_TRANSFER=0 \
