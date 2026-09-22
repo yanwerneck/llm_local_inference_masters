@@ -59,6 +59,32 @@ make bench-all MODEL_SIZE=7B
 
 Para preparar ou medir somente um runtime, use `prepare-vllm`, `prepare-llama`, `prepare-ollama`, `bench-vllm`, `bench-llama` ou `bench-ollama`. Os alvos por runtime já dependem da preparação comum; não é necessário chamar `prepare-benchmark` antes. `prepare-all` prepara os três, `smoke-all` testa os três rapidamente e `bench-all` executa as baterias completas. O alvo `bench` é um alias de `bench-all`.
 
+## Como o benchmark funciona
+
+Depois da preparação, o comando principal é `bench-all`:
+
+```text
+prepare-<runtime> → inicia o servidor do runtime → verifica readiness
+→ mede primeira resposta → aquece → mede requisições → coleta GPU/CPU/RAM
+→ encerra somente o processo criado → grava tabelas, JSONs, CSVs, logs e gráficos
+```
+
+`bench-vllm`, `bench-llama` e `bench-ollama` executam esse ciclo para um runtime. Cada um roda a bateria base (`short`, `medium`, `long`) e depois o sweep de contexto/KV configurado. `bench-all` executa os três em sequência, continua mesmo se um falhar e retorna código diferente de zero no final quando houver falha. `bench` é apenas um alias de `bench-all`.
+
+Para diagnosticar rapidamente instalação e carregamento, use `smoke-vllm`, `smoke-llama`, `smoke-ollama` ou `smoke-all`. O smoke usa poucas requisições no cenário `short`; ele valida servidor, alias, tokenizer, API, coleta e limpeza, mas não é uma medição formal comparável.
+
+```bash
+# Todos os runtimes
+make prepare-all MODEL_SIZE=7B
+make smoke-all MODEL_SIZE=7B PREPARE_OFFLINE=1
+make bench-all MODEL_SIZE=7B PREPARE_OFFLINE=1
+
+# Um runtime específico
+make bench-vllm MODEL_SIZE=7B PREPARE_OFFLINE=1
+```
+
+Cada execução registra readiness, primeira resposta, warmup, medições, fases, argumentos efetivos, status de cada requisição e telemetria aproximadamente a cada segundo. Os artefatos ficam em `results/<runtime>/<timestamp>/<nome-humano>/`; a descrição completa da árvore está em [Telemetria e resultados](#telemetria-e-resultados).
+
 ## Modelo usado
 
 O modelo 7B oficial desta rodada é [`arthuravianna/Qwen2.5-7B-Instruct-Q8_0.gguf`](https://huggingface.co/arthuravianna/Qwen2.5-7B-Instruct-Q8_0.gguf). O `make prepare-all MODEL_SIZE=7B` baixa esse GGUF e o tokenizer base para o SSD e prepara os três runtimes. O tokenizer não é o peso: ele é necessário para construir prompts e contar tokens comparavelmente.
@@ -185,7 +211,7 @@ make bench-ollama MODEL_SIZE=7B
 make bench-all MODEL_SIZE=7B
 ```
 
-`bench` é um alias de `bench-all`. Cada alvo individual executa a bateria base e, imediatamente depois, o sweep de KV. O agregador tenta os três runtimes, continua se um falhar e retorna erro ao final se houver falha.
+Cada alvo individual executa a bateria base e, imediatamente depois, o sweep de KV. O agregador tenta os três runtimes, continua se um falhar e retorna erro ao final se houver falha. A explicação do ciclo, fases, métricas e artefatos está em [Como o benchmark funciona](#como-o-benchmark-funciona); esta seção mantém apenas os comandos específicos.
 
 ### Smoke test
 
@@ -196,7 +222,7 @@ make smoke-ollama MODEL_SIZE=7B
 make smoke-all MODEL_SIZE=7B
 ```
 
-Os três smokes usam poucas requisições e somente `short`; servem para diagnosticar instalação, porta, tokenizer e carregamento. Não são resultados finais.
+Os três smokes usam poucas requisições e somente `short`; servem para diagnosticar instalação, porta, tokenizer, readiness, telemetria e carregamento. Não são resultados finais nem substituem `bench-all`.
 
 Com o ambiente e os pesos já preparados no SSD, acrescente `PREPARE_OFFLINE=1` para evitar instalações/downloads repetidos e `BENCH_STARTUP_TIMEOUT=300` para limitar a espera de startup. Os Makefiles exigem GNU Make com `.ONESHELL` (3.82+); o Make 3.81 padrão do macOS é recusado. Consulte o [diagnóstico no RunPod](docs/diagnostico-makefiles.md) para causas, comandos e cobertura dos testes.
 
