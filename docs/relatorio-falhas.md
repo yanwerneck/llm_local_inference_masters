@@ -117,3 +117,54 @@ startup_failure_cuda_oom_during_weight_materialization
 ```
 
 Não reduzir a memória silenciosamente, não trocar para outro formato e não preencher métricas de geração com zero. Para a próxima tentativa, usar o modelo 7B de 8 bits como **novo artefato**, com configuração e resultados separados; não comparar seus números diretamente com os do 14B.
+
+## F-003 — OOM após o carregamento do GGUF, durante profiling do vLLM
+
+- **Data observada:** 2026-09-21
+- **Runtime:** vLLM 0.29.0 com `vllm-gguf-plugin`
+- **GPU:** NVIDIA GeForce RTX 3090, 24 GB (23,56 GiB reportados pelo CUDA)
+- **Artefato:** `arthuravianna/Qwen2.5-14B-Instruct-Q8_0.gguf`
+- **Configuração observada:** `max_model_len=4096`, `max_num_seqs=1`, `gpu_memory_utilization=0.90`
+- **Fase da falha:** profiling de memória, compilação/autotuning e preparação do KV cache
+- **Resultado:** falha de inicialização; nenhuma requisição foi atendida
+
+### Evidência
+
+Nesta execução o plugin terminou o carregamento dos pesos e registrou:
+
+```text
+Model loading took 23.09 GiB memory and 71.283941 seconds
+```
+
+Em seguida, o engine entrou em:
+
+```text
+_initialize_kv_caches
+determine_available_memory
+profile_run
+_dummy_run
+```
+
+Durante o autotuning do TorchInductor, uma alocação adicional de 108 MiB falhou quando havia apenas 73 MiB livres:
+
+```text
+torch._inductor.exc.InductorError: ... CUDA out of memory
+GPU ... 23.48 GiB memory in use
+73.00 MiB is free
+```
+
+### Interpretação
+
+Esta ocorrência é diferente de F-002. O log mostra que os pesos e as estruturas do carregamento já ocupavam 23,09 GiB; depois ainda eram necessários espaço para profiling, grafos compilados, autotuning, workspaces e o pool de KV cache. O processo falhou antes de publicar uma capacidade observável de KV cache, portanto não é correto chamar os 23,09 GiB de “KV cache”.
+
+O resultado confirma que `--gpu-memory-utilization 0.90` não limita o pico de carregamento do modelo: ele é aplicado ao orçamento operacional depois que o modelo já foi colocado na GPU. Também confirma que `max_num_seqs=1` reduz a demanda de execução, mas não remove o custo fixo dos pesos nem dos buffers de inicialização.
+
+### Decisão metodológica
+
+Classificar como:
+
+```text
+startup_failure_cuda_oom_during_memory_profiling_and_kv_initialization
+```
+
+Registrar F-002 e F-003 separadamente. F-002 prova um pico durante a materialização/padding dos pesos; F-003 prova que, mesmo quando essa etapa termina, não sobra memória suficiente para o profiling e a inicialização normal do engine. Em ambas, TTFT, tokens/s e capacidade de KV cache são **não observados**.
