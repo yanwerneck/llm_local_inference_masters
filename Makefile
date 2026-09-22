@@ -110,6 +110,7 @@ SWEEP_CONVERSATION_TURNS ?= $(CONVERSATION_TURNS)
 SWEEP_CONVERSATION_FIXTURE ?= $(CONVERSATION_FIXTURE)
 POD_SSH ?=
 POD_PORT ?= 22
+POD_SSH_KEY ?= $(HOME)/.ssh/id_ed25519
 REMOTE_BENCH_DIR ?= /workspace/llm_local_inference_masters
 REMOTE_RESULTS_DIR ?= $(REMOTE_BENCH_DIR)/results
 LOCAL_RESULTS_DIR ?= results-from-pod
@@ -168,7 +169,7 @@ help:
 		'  VLLM_MODEL_DIR, VLLM_CONFIG, VLLM_LAUNCH' \
 		'  LLAMA_MODEL_DIR, LLAMA_CONFIG, LLAMA_LAUNCH' \
 		'  OLLAMA_MODEL_DIR, OLLAMA_CONFIG, OLLAMA_LAUNCH' \
-		'  POD_SSH, POD_PORT, REMOTE_RESULTS_DIR, LOCAL_RESULTS_DIR'
+		'  POD_SSH, POD_PORT, POD_SSH_KEY, REMOTE_RESULTS_DIR, LOCAL_RESULTS_DIR'
 
 
 check-tools:
@@ -531,10 +532,42 @@ quick-sweep-ollama: kv-sweep-ollama
 
 pull-results:
 	@test -n "$(POD_SSH)" || { echo 'Informe POD_SSH, por exemplo: POD_SSH=root@pod-host'; exit 1; }
-	@command -v scp >/dev/null || { echo 'scp ausente no computador local'; exit 1; }
+	@test -f "$(POD_SSH_KEY)" || { echo "Chave SSH ausente: $(POD_SSH_KEY). Use POD_SSH_KEY=/caminho/chave"; exit 1; }
 	mkdir -p "$(LOCAL_RESULTS_DIR)"
 	echo "[DOWNLOAD] $(POD_SSH):$(REMOTE_RESULTS_DIR) -> $(LOCAL_RESULTS_DIR)"
-	scp -r -P "$(POD_PORT)" "$(POD_SSH):$(REMOTE_RESULTS_DIR)/." "$(LOCAL_RESULTS_DIR)/"
+	if [[ "$(POD_SSH)" == *ssh.runpod.io* ]]; then
+		command -v runpodctl >/dev/null || { echo 'runpodctl ausente; instale com: brew install runpod/runpodctl/runpodctl'; exit 1; }
+		tmp_dir=$$(mktemp -d)
+		log_file="$$tmp_dir/send.log"
+		archive_name="llm-local-results-$${BASHPID}.tar.gz"
+		archive_path="/tmp/$$archive_name"
+		remote_parent=$$(dirname "$(REMOTE_RESULTS_DIR)")
+		remote_base=$$(basename "$(REMOTE_RESULTS_DIR)")
+		sender_pid=''
+		cleanup() { test -z "$$sender_pid" || kill "$$sender_pid" 2>/dev/null || true; rm -rf "$$tmp_dir"; }
+		trap cleanup EXIT INT TERM
+		ssh -i "$(POD_SSH_KEY)" -p "$(POD_PORT)" "$(POD_SSH)" \
+			"tar -czf '$$archive_path' -C '$$remote_parent' '$$remote_base' && runpodctl send '$$archive_path'" \
+			>"$$log_file" 2>&1 &
+		sender_pid=$$!
+		code=''
+		for attempt in $$(seq 1 120); do
+			code=$$(sed -nE 's/.*[Cc]ode is: ([[:alnum:]-]+).*/\1/p' "$$log_file" | head -n 1)
+			if test -n "$$code"; then break; fi
+			if ! kill -0 "$$sender_pid" 2>/dev/null; then
+				tail -n 30 "$$log_file"; echo '[DOWNLOAD] o envio remoto terminou sem código'; exit 1
+			fi
+			sleep 1
+		done
+		test -n "$$code" || { cat "$$log_file"; echo '[DOWNLOAD] timeout esperando código runpodctl'; exit 1; }
+		echo "[DOWNLOAD] recebendo via runpodctl (código $$code)"
+		( cd "$$tmp_dir" && runpodctl receive "$$code" )
+		tar -xzf "$$tmp_dir/$$archive_name" -C "$(LOCAL_RESULTS_DIR)" --strip-components=1
+		wait "$$sender_pid"
+	else
+		command -v scp >/dev/null || { echo 'scp ausente no computador local'; exit 1; }
+		scp -i "$(POD_SSH_KEY)" -r -P "$(POD_PORT)" "$(POD_SSH):$(REMOTE_RESULTS_DIR)/." "$(LOCAL_RESULTS_DIR)/"
+	fi
 	echo "[DOWNLOAD] concluído; arquivos em $(LOCAL_RESULTS_DIR)"
 
 check-profilers:

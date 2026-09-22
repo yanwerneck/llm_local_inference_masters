@@ -344,7 +344,9 @@ make pull-results POD_SSH=root@HOST_DO_POD POD_PORT=2222 \
   LOCAL_RESULTS_DIR=results-pod
 ```
 
-O alvo usa `scp` e copia todas as execuções para `LOCAL_RESULTS_DIR`; ele não apaga arquivos locais. Porém, o endereço `ssh.runpod.io` do terminal básico do RunPod é um proxy com PTY e não oferece SCP/SFTP. Nesse caso, use o relay oficial `runpodctl`:
+O alvo detecta `ssh.runpod.io` automaticamente e usa o relay oficial `runpodctl`; para hosts SSH TCP diretos, usa `scp`. Em ambos os casos, copia todas as execuções para `LOCAL_RESULTS_DIR` e não apaga arquivos locais. A chave padrão é `~/.ssh/id_ed25519`; altere com `POD_SSH_KEY=/caminho/chave`.
+
+Com o alvo `make pull-results`, a transferência pelo RunPod é automática: o Make cria um tar temporário no pod, inicia `runpodctl send`, captura o código de uso único e executa `runpodctl receive` na máquina local. Instale o cliente localmente com `brew install runpod/runpodctl/runpodctl`.
 
 No pod:
 
