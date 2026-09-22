@@ -1,4 +1,5 @@
-SHELL := /usr/bin/env bash
+# O Make precisa de um executável único; não use "/usr/bin/env bash" aqui.
+SHELL := /bin/bash
 .ONESHELL:
 .SHELLFLAGS := -eu -o pipefail -c
 
