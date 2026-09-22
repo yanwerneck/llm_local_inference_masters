@@ -284,7 +284,7 @@ class UnitTests(unittest.TestCase):
             self.assertEqual(rows[0]["gpu_util_pct_mean"], 60)
             self.assertEqual(rows[0]["power_w_mean"], 100)
             render(p, [])
-            self.assertIn("&lt;GPU&gt;", (p / "summary.html").read_text())
+            self.assertIn("&lt;GPU&gt;", (p / "html" / "summary.html").read_text())
 
     def test_context_estimate(self):
         from reporting import context_summary
