@@ -9,6 +9,7 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import bench
 from lifecycle import Launch
+from results_layout import prepare
 
 
 class UnitTests(unittest.TestCase):
@@ -210,6 +211,7 @@ class UnitTests(unittest.TestCase):
 
     def test_launch_sets_huggingface_offline_environment(self):
         with tempfile.TemporaryDirectory() as tmp, socket.socket() as free:
+            prepare(Path(tmp))
             free.bind(("127.0.0.1", 0))
             port = free.getsockname()[1]
             env_file = Path(tmp) / "child-env.json"
@@ -272,6 +274,7 @@ class UnitTests(unittest.TestCase):
         from reporting import gpu_summary, render
         with tempfile.TemporaryDirectory() as tmp:
             p = Path(tmp)
+            prepare(p)
             (p / "gpu.csv").write_text("utc,phase,index,name,used_mib,total_mib,gpu_util_pct,temperature_c,power_w\n"
                 "now,measure,0,<GPU>,10,24,50,60,N/A\nnow,measure,0,<GPU>,20,24,70,65,100\n"
                 "now,warmup,0,<GPU>,5,24,20,50,80\nnow,measure,1,other,8,24,25,40,70\n")
