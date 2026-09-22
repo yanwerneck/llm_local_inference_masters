@@ -5,7 +5,10 @@
 <li><a href="#bench-explicado">Bench explicado</a><ul>
 <li><a href="#a-ideia-em-uma-frase">A ideia em uma frase</a></li>
 <li><a href="#o-mapa-completo">O mapa completo</a></li>
-<li><a href="#nao-confunda-os-tres-conceitos">Não confunda os três conceitos</a></li>
+<li><a href="#nao-confunda-os-tres-conceitos">Não confunda os três conceitos</a><ul>
+<li><a href="#como-funciona-o-modo-independent">Como funciona o modo independent</a></li>
+</ul>
+</li>
 <li><a href="#o-que-acontece-em-uma-execucao">O que acontece em uma execução</a><ul>
 <li><a href="#1-preparacao-fora-do-relogio">1. Preparação — fora do relógio</a></li>
 <li><a href="#2-partida-e-readiness">2. Partida e readiness</a></li>
@@ -79,6 +82,15 @@ bench-&lt;runtime&gt;
 </tbody>
 </table></div>
 <p><code>replay</code> não é o sweep. Replay é uma política de mensagens; sweep é uma série de execuções com tamanhos de contexto diferentes. É possível usar <code>SWEEP_MODE=replay</code>, mas ainda serão dois eixos experimentais diferentes.</p>
+<h3 id="como-funciona-o-modo-independent">Como funciona o modo <code>independent</code></h3>
+<p><code>independent</code> é o modo padrão da bateria base. Cada requisição contém somente uma mensagem do usuário, sem <code>system</code>/<code>assistant</code> acumulados de requisições anteriores:</p>
+<pre><code class="language-text">requisição 1: [user: prompt short]
+requisição 2: [user: prompt short]
+requisição 3: [user: prompt short]
+</code></pre>
+<p>O cliente não coloca a resposta da requisição 1 na requisição 2 e não envia um histórico conversacional. Para cada cenário, o prompt sintético é construído uma vez a partir da frase-base e reutilizado nas requisições daquele bloco; isso mantém a carga textual controlada. <code>short</code>, <code>medium</code> e <code>long</code> usam tamanhos de entrada diferentes.</p>
+<p>Isso é independência <strong>da conversa</strong>, não garantia de estado frio. O servidor continua vivo durante warmup e measure e pode manter pesos na GPU, caches de prefixo, alocadores e estruturas internas. Assim, <code>independent</code> responde “quanto custa servir mensagens isoladas em um processo aquecido?”, não “quanto custa iniciar um runtime frio a cada requisição?”. Para cold starts, o processo precisa ser reiniciado entre execuções, como no sweep ou em chamadas separadas com <code>--launch</code>.</p>
+<p>No <code>independent</code>, a resposta nunca altera a próxima entrada. No <code>replay</code>, o fixture fornece o histórico e respostas <code>assistant</code> fixas; no <code>closed-loop</code>, as respostas reais entram no turno seguinte. Essa é a diferença operacional entre os três modos.</p>
 <h2 id="o-que-acontece-em-uma-execucao">O que acontece em uma execução</h2>
 <h3 id="1-preparacao-fora-do-relogio">1. Preparação — fora do relógio</h3>
 <p><code>prepare-vllm</code>, <code>prepare-llama</code> e <code>prepare-ollama</code> dependem da etapa comum <code>prepare-benchmark</code>. Ela confere modelo, tokenizer, configs, imports, assinatura e arquivos locais. A preparação não inicia uma medição e não entra na latência.</p>

@@ -34,6 +34,22 @@ bench-<runtime>
 
 `replay` não é o sweep. Replay é uma política de mensagens; sweep é uma série de execuções com tamanhos de contexto diferentes. É possível usar `SWEEP_MODE=replay`, mas ainda serão dois eixos experimentais diferentes.
 
+### Como funciona o modo `independent`
+
+`independent` é o modo padrão da bateria base. Cada requisição contém somente uma mensagem do usuário, sem `system`/`assistant` acumulados de requisições anteriores:
+
+```text
+requisição 1: [user: prompt short]
+requisição 2: [user: prompt short]
+requisição 3: [user: prompt short]
+```
+
+O cliente não coloca a resposta da requisição 1 na requisição 2 e não envia um histórico conversacional. Para cada cenário, o prompt sintético é construído uma vez a partir da frase-base e reutilizado nas requisições daquele bloco; isso mantém a carga textual controlada. `short`, `medium` e `long` usam tamanhos de entrada diferentes.
+
+Isso é independência **da conversa**, não garantia de estado frio. O servidor continua vivo durante warmup e measure e pode manter pesos na GPU, caches de prefixo, alocadores e estruturas internas. Assim, `independent` responde “quanto custa servir mensagens isoladas em um processo aquecido?”, não “quanto custa iniciar um runtime frio a cada requisição?”. Para cold starts, o processo precisa ser reiniciado entre execuções, como no sweep ou em chamadas separadas com `--launch`.
+
+No `independent`, a resposta nunca altera a próxima entrada. No `replay`, o fixture fornece o histórico e respostas `assistant` fixas; no `closed-loop`, as respostas reais entram no turno seguinte. Essa é a diferença operacional entre os três modos.
+
 ## O que acontece em uma execução
 
 ### 1. Preparação — fora do relógio
