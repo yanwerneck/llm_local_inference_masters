@@ -63,7 +63,10 @@ else
 $(error MODEL_SIZE deve ser 7B ou 14B)
 endif
 VLLM_BIN ?= $(shell command -v vllm 2>/dev/null || printf '/workspace/vllm-runtime/.venv/bin/vllm')
-LLAMA_SERVER_BIN ?= $(shell command -v llama-server 2>/dev/null || printf '/workspace/llama.cpp/build/bin/llama-server')
+# O template do benchmark usa o binário produzido pelo build abaixo.  Não
+# autodetecte um llama-server qualquer do PATH: isso pode validar um binário
+# diferente daquele que será chamado pelo launch JSON.
+LLAMA_SERVER_BIN ?= $(LLAMA_CPP_BUILD_DIR)/bin/llama-server
 OLLAMA_BIN ?= $(shell command -v ollama 2>/dev/null || printf 'ollama')
 BENCH_SCENARIOS ?= short medium long
 BENCH_REQUESTS ?= 50
