@@ -172,7 +172,7 @@ class Monitor:
         self.phase = phase
         utc = datetime.now(timezone.utc).isoformat()
         elapsed = (time.monotonic() - self.started_monotonic) if self.started_monotonic else 0.0
-        print(f"[telemetria] utc={utc} decorrido={elapsed:.3f}s fase={phase} evento={event or 'phase_change'}", flush=True)
+        self.log(f"[telemetria] utc={utc} decorrido={elapsed:.3f}s fase={phase} evento={event or 'phase_change'}")
         if hasattr(self, "events_handle"):
             writer = csv.writer(self.events_handle)
             writer.writerow([utc, time.monotonic(), elapsed, phase, event or "phase_change"])
@@ -180,6 +180,7 @@ class Monitor:
 
     def start(self):
         self.started_monotonic = time.monotonic()
+        self.telemetry_handle = (self.output / "telemetry.log").open("a", encoding="utf-8")
         self.events_handle = (self.output / "events.csv").open("w", newline="", encoding="utf-8")
         csv.writer(self.events_handle).writerow(["utc", "monotonic_s", "elapsed_s", "phase", "event"])
         self.set_phase(self.phase, "monitor_started")
@@ -188,6 +189,12 @@ class Monitor:
         if self.collect_kv:
             self.kv_thread = threading.Thread(target=self.kv_loop, daemon=True)
             self.kv_thread.start()
+
+    def log(self, message):
+        print(message, flush=True)
+        if hasattr(self, "telemetry_handle"):
+            self.telemetry_handle.write(message + "\n")
+            self.telemetry_handle.flush()
 
     def kv_loop(self):
         import httpx
@@ -252,7 +259,7 @@ class Monitor:
                                              f"uso_gpu={row[4]}% banda_memoria={row[5]}%" for row in gpu_rows)
                         elapsed = time.monotonic() - self.started_monotonic
                         utc_log = datetime.now(timezone.utc).isoformat()
-                        print(f"[telemetria] utc={utc_log} decorrido={elapsed:.3f}s fase={phase} {compact or 'GPU sem amostra'}", flush=True)
+                        self.log(f"[telemetria] utc={utc_log} decorrido={elapsed:.3f}s fase={phase} {compact or 'GPU sem amostra'}")
                 handle.flush()
                 if psutil:
                     vm = psutil.virtual_memory()
@@ -274,6 +281,8 @@ class Monitor:
         self.set_phase("stopped", "monitor_stopped")
         if hasattr(self, "events_handle"):
             self.events_handle.close()
+        if hasattr(self, "telemetry_handle"):
+            self.telemetry_handle.close()
         self.write_telemetry_summary()
 
     def write_telemetry_summary(self):
