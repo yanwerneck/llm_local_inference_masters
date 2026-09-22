@@ -6,6 +6,8 @@ Este documento explica o que acontece quando cada alvo é executado. O objetivo 
 
 `MODEL_SIZE` aceita `7B` ou `14B`. O Make deriva o GGUF, tokenizer, config JSON e launch JSON correspondentes. O padrão é `7B`, usando o artefato `arthuravianna/Qwen2.5-7B-Instruct-Q8_0.gguf`.
 
+Os launch/configs do vLLM usam `--gpu-memory-utilization 1.0`: isso libera todo o orçamento de VRAM para o executor, mas não significa que a GPU ficará computacionalmente em 100%. OOM continua sendo uma falha observável.
+
 ```bash
 make prepare-benchmark MODEL_SIZE=7B
 make prepare-benchmark MODEL_SIZE=14B
@@ -33,7 +35,7 @@ Cria o diretório pai e executa `hf download` com `HF_HUB_OFFLINE=0`. O reposit�
 
 ### `download-tokenizer`
 
-Cria `TOKENIZER_DIR` e baixa apenas `config.json`, `tokenizer*`, `special_tokens_map.json` e `chat_template.jinja`. Não baixa pesos do checkpoint base.
+Cria `TOKENIZER_DIR` e usa `huggingface_hub.snapshot_download` com `allow_patterns` para baixar `config.json`, `tokenizer*`, `special_tokens_map.json` e `chat_template.jinja`. Isso evita uma incompatibilidade da CLI `hf` em que a combinação de nomes posicionais e `--include` baixava somente `config.json`. O alvo exige `config.json`, `tokenizer_config.json` e `tokenizer.json`; não baixa pesos do checkpoint base.
 
 ### `verify-gguf`
 
@@ -72,7 +74,7 @@ Os launchers JSON fornecem a configuração base. Variáveis `VLLM_EXTRA_ARGS`, 
 
 ```bash
 make bench-vllm MODEL_SIZE=7B \
-  VLLM_EXTRA_ARGS='--gpu-memory-utilization 0.80 --enforce-eager'
+  VLLM_EXTRA_ARGS='--gpu-memory-utilization 1.0 --enforce-eager'
 ```
 
 Esses argumentos aparecem no `lifecycle.json`. Se o runtime rejeitar a combinação, a execução falha e o `server.log` é a evidência.

@@ -13,5 +13,5 @@
   "--max-model-len",
   "4096",
   "--gpu-memory-utilization",
-  "0.90"
+  "1.0"
 ]

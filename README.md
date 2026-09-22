@@ -40,6 +40,10 @@ O alvo `bench` é um alias de `bench-all`.
 
 O modelo 7B oficial desta rodada é [`arthuravianna/Qwen2.5-7B-Instruct-Q8_0.gguf`](https://huggingface.co/arthuravianna/Qwen2.5-7B-Instruct-Q8_0.gguf). O `make prepare-benchmark MODEL_SIZE=7B` baixa esse GGUF e o tokenizer base para o SSD. O tokenizer não é o peso: ele é necessário para construir prompts e contar tokens comparavelmente.
 
+O download do tokenizer é feito pelo `huggingface_hub.snapshot_download` com filtros explícitos, e não pela combinação ambígua de nomes posicionais e `--include` da CLI `hf`. A preparação falha se `config.json`, `tokenizer_config.json` ou `tokenizer.json` não estiverem presentes; isso evita iniciar o llama.cpp com um diretório de tokenizer incompleto.
+
+As configurações vLLM deste repositório usam `--gpu-memory-utilization 1.0`, isto é, disponibilizam 100% do orçamento de VRAM ao executor. Esse parâmetro não força `GPU-Util=100%`: a utilização computacional continua dependendo da carga, e OOMs continuam sendo preservados como falhas.
+
 Para a rodada 14B:
 
 ```bash
@@ -173,7 +177,7 @@ Argumentos extras são anexados ao `argv` e registrados no `lifecycle.json`:
 
 ```bash
 make bench-vllm MODEL_SIZE=7B \
-  VLLM_EXTRA_ARGS='--gpu-memory-utilization 0.85 --enforce-eager'
+  VLLM_EXTRA_ARGS='--gpu-memory-utilization 1.0 --enforce-eager'
 
 make bench-llama MODEL_SIZE=7B \
   LLAMA_EXTRA_ARGS='--flash-attn auto --threads 8'

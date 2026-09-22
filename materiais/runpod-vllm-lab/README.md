@@ -251,7 +251,7 @@ Intuição: **prefill** lê o prompt; **decode** gera a continuação. Entrada m
 | Parâmetro | Intuição | Experimento futuro |
 | --- | --- | --- |
 | `--max-model-len` | Limite de entrada + saída por sequência; não é o comprimento real de toda pergunta | 2048 → 4096, se precisar de contexto e houver memória |
-| `--gpu-memory-utilization` | Orçamento de VRAM do motor; não é porcentagem de uso computacional da GPU | Consulte o padrão no help; mais tarde compare 0.85 e 0.90 |
+| `--gpu-memory-utilization` | Orçamento de VRAM do motor; não é porcentagem de uso computacional da GPU | Nesta rodada usamos `1.0` para disponibilizar toda a VRAM ao executor; registre OOMs |
 | `--max-num-seqs` | Quantas sequências podem ser processadas simultaneamente | 1 → 2 → 4, enviando de fato requisições concorrentes |
 | `--max-num-batched-tokens` | Orçamento de tokens processados numa iteração; afeta o equilíbrio entre prefill e decode | Deixe no padrão até investigar latência com concorrência |
 | `--enable-prefix-caching` / `--no-enable-prefix-caching` | Permite reutilizar trabalho de um prefixo já processado | Compare ligado/desligado com um prefixo longo idêntico |

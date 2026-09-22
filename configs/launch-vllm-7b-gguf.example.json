@@ -17,5 +17,7 @@
   "--max-model-len",
   "16384",
   "--max-num-seqs",
-  "1"
+  "1",
+  "--gpu-memory-utilization",
+  "1.0"
 ]

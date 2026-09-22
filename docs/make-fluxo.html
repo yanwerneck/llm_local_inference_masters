@@ -26,7 +26,7 @@
 <h1 id="fluxo-completo-do-makefile">Fluxo completo do Makefile</h1>
 <p>Este documento explica o que acontece quando cada alvo é executado. O objetivo é separar preparação, lançamento, medição e diagnóstico.</p>
 <h2 id="1-selecao-do-experimento">1. Seleção do experimento</h2>
-<p><code>MODEL_SIZE</code> aceita <code>7B</code> ou <code>14B</code>. O Make deriva o GGUF, tokenizer, config JSON e launch JSON correspondentes. O padrão é <code>7B</code>, usando o artefato <code>arthuravianna/Qwen2.5-7B-Instruct-Q8_0.gguf</code>.</p>
+<p><code>MODEL_SIZE</code> aceita <code>7B</code> ou <code>14B</code>. O Make deriva o GGUF, tokenizer, config JSON e launch JSON correspondentes. O padrão é <code>7B</code>, usando o artefato <code>arthuravianna/Qwen2.5-7B-Instruct-Q8_0.gguf</code>.</p><p>Os launch/configs do vLLM usam <code>--gpu-memory-utilization 1.0</code>: isso libera todo o orçamento de VRAM para o executor, mas não significa que a GPU ficará computacionalmente em 100%. OOM continua sendo uma falha observável.</p>
 <pre><code class="language-bash">make prepare-benchmark MODEL_SIZE=7B
 make prepare-benchmark MODEL_SIZE=14B
 </code></pre>
@@ -42,7 +42,7 @@ make prepare-benchmark MODEL_SIZE=14B
 <h3 id="download-model"><code>download-model</code></h3>
 <p>Cria o diretório pai e executa <code>hf download</code> com <code>HF_HUB_OFFLINE=0</code>. O repositório e o nome do arquivo vêm de <code>HF_GGUF_REPO</code> e <code>HF_GGUF_FILENAME</code>. O alvo verifica que o arquivo chegou exatamente ao caminho esperado.</p>
 <h3 id="download-tokenizer"><code>download-tokenizer</code></h3>
-<p>Cria <code>TOKENIZER_DIR</code> e baixa apenas <code>config.json</code>, <code>tokenizer*</code>, <code>special_tokens_map.json</code> e <code>chat_template.jinja</code>. Não baixa pesos do checkpoint base.</p>
+<p>Cria <code>TOKENIZER_DIR</code> e usa <code>huggingface_hub.snapshot_download</code> com <code>allow_patterns</code> para baixar <code>config.json</code>, <code>tokenizer*</code>, <code>special_tokens_map.json</code> e <code>chat_template.jinja</code>. Isso evita uma incompatibilidade da CLI <code>hf</code> em que a combinação de nomes posicionais e <code>--include</code> baixava somente <code>config.json</code>. O alvo exige <code>config.json</code>, <code>tokenizer_config.json</code> e <code>tokenizer.json</code>; não baixa pesos do checkpoint base.</p>
 <h3 id="verify-gguf"><code>verify-gguf</code></h3>
 <p>Verifica presença, tamanho, assinatura binária <code>GGUF</code> e imprime SHA-256. Não interpreta os tensores e não inicia GPU.</p>
 <h3 id="validacoes-finais">Validações finais</h3>
@@ -68,7 +68,7 @@ make prepare-benchmark MODEL_SIZE=14B
 <h2 id="5-argumentos-experimentais">5. Argumentos experimentais</h2>
 <p>Os launchers JSON fornecem a configuração base. Variáveis <code>VLLM_EXTRA_ARGS</code>, <code>LLAMA_EXTRA_ARGS</code> e <code>OLLAMA_EXTRA_ARGS</code> são acrescentadas ao argv sem serem sanitizadas ou corrigidas.</p>
 <pre><code class="language-bash">make bench-vllm MODEL_SIZE=7B \
-  VLLM_EXTRA_ARGS='--gpu-memory-utilization 0.80 --enforce-eager'
+  VLLM_EXTRA_ARGS='--gpu-memory-utilization 1.0 --enforce-eager'
 </code></pre>
 <p>Esses argumentos aparecem no <code>lifecycle.json</code>. Se o runtime rejeitar a combinação, a execução falha e o <code>server.log</code> é a evidência.</p>
 <h2 id="6-sweep-de-kv">6. Sweep de KV</h2>

@@ -188,15 +188,15 @@ download-model:
 download-tokenizer:
 	@echo '[PREPARE] baixando tokenizer local: $(HF_TOKENIZER_MODEL)'
 	mkdir -p "$(TOKENIZER_DIR)"
+	# Usamos snapshot_download com allow_patterns em vez da combinação de
+	# argumentos posicionais/--include da CLI `hf`, que em algumas versões
+	# interpreta os padrões como nomes de arquivo e baixa somente config.json.
 	HF_HUB_OFFLINE=0 TRANSFORMERS_OFFLINE=0 HF_HUB_ENABLE_HF_TRANSFER="$(HF_HUB_ENABLE_HF_TRANSFER)" \
-		$(HF) download "$(HF_TOKENIZER_MODEL)" config.json --revision "$(HF_REVISION)" \
-		--local-dir "$(TOKENIZER_DIR)"
-	HF_HUB_OFFLINE=0 TRANSFORMERS_OFFLINE=0 HF_HUB_ENABLE_HF_TRANSFER="$(HF_HUB_ENABLE_HF_TRANSFER)" \
-		$(HF) download "$(HF_TOKENIZER_MODEL)" --revision "$(HF_REVISION)" \
-		--include 'tokenizer*' 'special_tokens_map.json' 'chat_template.jinja' \
-		--local-dir "$(TOKENIZER_DIR)"
+		"$(PYTHON)" -c 'from huggingface_hub import snapshot_download; import sys; snapshot_download(repo_id=sys.argv[1], revision=sys.argv[2], local_dir=sys.argv[3], allow_patterns=["config.json", "tokenizer*", "special_tokens_map.json", "chat_template.jinja"], local_files_only=False)' \
+		"$(HF_TOKENIZER_MODEL)" "$(HF_REVISION)" "$(TOKENIZER_DIR)"
 	@test -f "$(TOKENIZER_DIR)/config.json" || { echo "config.json do tokenizer não foi baixado" >&2; exit 1; }
 	@test -f "$(TOKENIZER_DIR)/tokenizer_config.json" || { echo "tokenizer_config.json não foi baixado" >&2; exit 1; }
+	@test -f "$(TOKENIZER_DIR)/tokenizer.json" || { echo "tokenizer.json não foi baixado" >&2; exit 1; }
 
 prepare-benchmark: install-benchmark download-model download-tokenizer verify-gguf
 	@echo '[PREPARE] criando diretório de resultados'
@@ -277,7 +277,6 @@ bench-vllm: prepare-vllm
 		$(PYTHON) scripts/run_kv_sweep.py --runtime-label vllm \
 		--config "$(VLLM_CONFIG)" --launch "$(VLLM_LAUNCH)" \
 		--local-model-path "$(VLLM_MODEL_DIR)" --python "$(PYTHON)" \
-		--launch-executable "$(VLLM_BIN)" \
 		--launch-executable "$(VLLM_BIN)" \
 		--launch-extra-args $(VLLM_EXTRA_ARGS) \
 		--requests "$(BENCH_REQUESTS)" --repetitions "$(BENCH_REPETITIONS)" \
