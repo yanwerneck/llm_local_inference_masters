@@ -193,7 +193,7 @@ class Monitor:
         pattern = re.compile(r'^(vllm:(?:kv_cache_usage_perc|gpu_cache_usage_perc))(\{[^}]*\})?\s+([0-9.eE+\-]+)(?:\s|$)')
         with (self.output / "kv-cache.csv").open("w", newline="") as handle, httpx.Client(timeout=1, headers=headers, follow_redirects=False) as client:
             writer = csv.writer(handle)
-            writer.writerow(["utc", "phase", "series", "fraction"])
+            writer.writerow(["utc", "elapsed_s", "phase", "series", "fraction"])
             while not self.stop_event.is_set():
                 phase = self.phase
                 try:
@@ -206,7 +206,8 @@ class Monitor:
                             continue
                         value = float(m[3])
                         if math.isfinite(value) and 0 <= value <= 1:
-                            writer.writerow([datetime.now(timezone.utc).isoformat(), phase, redact(m[1] + (m[2] or ""), self.secret), value])
+                            writer.writerow([datetime.now(timezone.utc).isoformat(), time.monotonic() - self.started_monotonic,
+                                             phase, redact(m[1] + (m[2] or ""), self.secret), value])
                     handle.flush()
                 except (httpx.HTTPError, ValueError):
                     pass  # Serveur inicializando/endpoint ausente: nunca inventar zeros.
