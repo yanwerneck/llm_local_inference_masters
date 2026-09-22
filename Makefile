@@ -63,10 +63,9 @@ else
 $(error MODEL_SIZE deve ser 7B ou 14B)
 endif
 VLLM_BIN ?= $(shell command -v vllm 2>/dev/null || printf '/workspace/vllm-runtime/.venv/bin/vllm')
-# O template do benchmark usa o binário produzido pelo build abaixo.  Não
-# autodetecte um llama-server qualquer do PATH: isso pode validar um binário
-# diferente daquele que será chamado pelo launch JSON.
-LLAMA_SERVER_BIN ?= $(LLAMA_CPP_BUILD_DIR)/bin/llama-server
+# A imagem do pod já fornece llama-server no PATH.  O build local continua
+# disponível em `make build-llama`, mas não é pré-requisito do benchmark.
+LLAMA_SERVER_BIN ?= $(shell command -v llama-server 2>/dev/null || printf 'llama-server')
 OLLAMA_BIN ?= $(shell command -v ollama 2>/dev/null || printf 'ollama')
 BENCH_SCENARIOS ?= short medium long
 BENCH_REQUESTS ?= 50
@@ -211,7 +210,7 @@ prepare-vllm: prepare-benchmark
 	"$(VLLM_BIN)" --help >/dev/null
 	@echo '[PREPARE vLLM] cliente, modelo, tokenizer e executável validados'
 
-prepare-llama: prepare-benchmark build-llama
+prepare-llama: prepare-benchmark
 	@test -x "$(LLAMA_SERVER_BIN)" || { echo "llama-server ausente: $(LLAMA_SERVER_BIN). Compile o llama.cpp ou use LLAMA_SERVER_BIN=..."; exit 1; }
 	"$(LLAMA_SERVER_BIN)" --help >/dev/null
 	@echo '[PREPARE llama.cpp] cliente, modelo, tokenizer e executável validados'

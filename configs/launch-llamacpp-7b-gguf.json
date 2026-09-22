@@ -1,5 +1,5 @@
 [
-  "/workspace/llama.cpp/build/bin/llama-server",
+  "llama-server",
   "-m",
   "/workspace/models/Qwen2.5-7B-Instruct-Q8_0/Qwen2.5-7B-Instruct-Q8_0.gguf",
   "--host",

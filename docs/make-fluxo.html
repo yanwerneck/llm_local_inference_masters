@@ -46,7 +46,7 @@ make prepare-benchmark MODEL_SIZE=14B
 <h3 id="verify-gguf"><code>verify-gguf</code></h3>
 <p>Verifica presença, tamanho, assinatura binária <code>GGUF</code> e imprime SHA-256. Não interpreta os tensores e não inicia GPU.</p>
 <h3 id="validacoes-finais">Validações finais</h3>
-<p>O alvo instala <code>requirements.txt</code> no <code>PYTHON</code> escolhido, importa as bibliotecas do cliente e valida JSONs. A presença do runtime é verificada separadamente por <code>prepare-vllm</code>, <code>prepare-llama</code> ou <code>prepare-ollama</code>; assim, preparar o modelo não é bloqueado por um runtime que ainda não foi instalado.</p>
+<p>O alvo instala <code>requirements.txt</code> no <code>PYTHON</code> escolhido, importa as bibliotecas do cliente e valida JSONs. A presença do runtime é verificada separadamente por <code>prepare-vllm</code>, <code>prepare-llama</code> ou <code>prepare-ollama</code>; assim, preparar o modelo não é bloqueado por um runtime que ainda não foi instalado. No caso do llama.cpp, <code>prepare-llama</code> procura o <code>llama-server</code> já instalado no <code>PATH</code>, como ocorre na imagem do pod, e o launch JSON usa o comando <code>llama-server</code>. A compilação local fica disponível somente quando necessária, via <code>make build-llama</code>.</p>
 <h2 id="3-preparacao-do-ollama">3. Preparação do Ollama</h2>
 <p><code>prepare-ollama</code> usa o arquivo GGUF local em um <code>Modelfile</code> temporário e executa <code>ollama create</code>. O alias é <code>qwen7b-q8-gguf</code> ou <code>qwen14b-q8-gguf</code>. Não há <code>ollama pull</code>: o modelo deve vir do SSD informado.</p>
 <h2 id="4-bateria-formal">4. Bateria formal</h2>
